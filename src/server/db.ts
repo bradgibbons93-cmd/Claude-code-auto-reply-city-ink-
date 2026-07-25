@@ -1,0 +1,341 @@
+import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/mysql2";
+import mysql from "mysql2/promise";
+import {
+  users,
+  messengerConversations,
+  messengerMessages,
+  autoReplyRules,
+  scheduledPosts,
+  facebookConfig,
+  timelyConfig,
+  studioKnowledge,
+  type InsertUser,
+} from "../drizzle/schema.js";
+
+let _db: ReturnType<typeof drizzle> | null = null;
+
+export async function getDb() {
+  if (_db) return _db;
+  if (!process.env.DATABASE_URL) {
+    throw new Error("DATABASE_URL is not set. Copy .env.example to .env first.");
+  }
+  const pool = mysql.createPool(process.env.DATABASE_URL);
+  _db = drizzle(pool);
+  return _db;
+}
+
+/* ------------------------------------------------------------------ */
+/* Conversations                                                       */
+/* ------------------------------------------------------------------ */
+
+export async function getOrCreateConversation(
+  conversationId: string,
+  senderName?: string
+) {
+  const db = await getDb();
+
+  const existing = await db
+    .select()
+    .from(messengerConversations)
+    .where(eq(messengerConversations.conversationId, conversationId))
+    .limit(1);
+
+  if (existing.length > 0) return existing[0];
+
+  await db
+    .insert(messengerConversations)
+    .values({ conversationId, senderName })
+    .onDuplicateKeyUpdate({ set: { lastMessageAt: new Date() } });
+
+  const result = await db
+    .select()
+    .from(messengerConversations)
+    .where(eq(messengerConversations.conversationId, conversationId))
+    .limit(1);
+
+  return result[0];
+}
+
+export async function getRecentConversations(limit = 30) {
+  const db = await getDb();
+  return db
+    .select()
+    .from(messengerConversations)
+    .orderBy(desc(messengerConversations.lastMessageAt))
+    .limit(limit);
+}
+
+export async function getConversationMessages(conversationId: string, limit = 50) {
+  const db = await getDb();
+  return db
+    .select()
+    .from(messengerMessages)
+    .where(eq(messengerMessages.conversationId, conversationId))
+    .orderBy(asc(messengerMessages.createdAt))
+    .limit(limit);
+}
+
+/** Last N turns, oldest first — this is what gives the agent memory. */
+export async function getRecentTurns(conversationId: string, limit = 10) {
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(messengerMessages)
+    .where(eq(messengerMessages.conversationId, conversationId))
+    .orderBy(desc(messengerMessages.createdAt))
+    .limit(limit);
+  return rows.reverse();
+}
+
+/**
+ * Returns false when this messageId has already been stored, which means
+ * Facebook is retrying a delivery we already handled. Callers must bail out.
+ */
+export async function recordMessage(
+  conversationId: string,
+  messageId: string,
+  senderType: "customer" | "bot" | "manual",
+  content: string,
+  autoReplyContent?: string
+): Promise<boolean> {
+  const db = await getDb();
+  try {
+    await db.insert(messengerMessages).values({
+      conversationId,
+      messageId,
+      senderType,
+      content,
+      autoReplyGenerated: !!autoReplyContent,
+      autoReplyContent,
+    });
+  } catch (error: unknown) {
+    const code = (error as { code?: string })?.code;
+    if (code === "ER_DUP_ENTRY") return false;
+    throw error;
+  }
+
+  await db
+    .update(messengerConversations)
+    .set({
+      lastMessageAt: new Date(),
+      ...(senderType === "customer" ? { lastCustomerMessageAt: new Date() } : {}),
+    })
+    .where(eq(messengerConversations.conversationId, conversationId));
+
+  return true;
+}
+
+/** Human handoff: mute the agent on this thread for a while. */
+export async function pauseBot(conversationId: string, hours: number) {
+  const db = await getDb();
+  const until = new Date(Date.now() + hours * 60 * 60 * 1000);
+  await db
+    .update(messengerConversations)
+    .set({ botPausedUntil: until })
+    .where(eq(messengerConversations.conversationId, conversationId));
+  return until;
+}
+
+export async function resumeBot(conversationId: string) {
+  const db = await getDb();
+  await db
+    .update(messengerConversations)
+    .set({ botPausedUntil: null })
+    .where(eq(messengerConversations.conversationId, conversationId));
+}
+
+/* ------------------------------------------------------------------ */
+/* Auto-reply rules                                                    */
+/* ------------------------------------------------------------------ */
+
+export async function getActiveAutoReplyRules() {
+  const db = await getDb();
+  return db
+    .select()
+    .from(autoReplyRules)
+    .where(eq(autoReplyRules.isActive, true))
+    .orderBy(desc(autoReplyRules.priority));
+}
+
+export async function createAutoReplyRule(
+  triggerKeywords: string[],
+  responseText: string,
+  sendBookingLink = false
+) {
+  const db = await getDb();
+  await db
+    .insert(autoReplyRules)
+    .values({ triggerKeywords, responseText, sendBookingLink });
+}
+
+export async function deleteAutoReplyRule(id: number) {
+  const db = await getDb();
+  await db.delete(autoReplyRules).where(eq(autoReplyRules.id, id));
+}
+
+/* ------------------------------------------------------------------ */
+/* Studio knowledge                                                    */
+/* ------------------------------------------------------------------ */
+
+export async function getStudioKnowledge() {
+  const db = await getDb();
+  return db
+    .select()
+    .from(studioKnowledge)
+    .where(eq(studioKnowledge.isActive, true));
+}
+
+export async function createKnowledge(question: string, answer: string) {
+  const db = await getDb();
+  await db.insert(studioKnowledge).values({ question, answer });
+}
+
+export async function deleteKnowledge(id: number) {
+  const db = await getDb();
+  await db.delete(studioKnowledge).where(eq(studioKnowledge.id, id));
+}
+
+/* ------------------------------------------------------------------ */
+/* Scheduled posts                                                     */
+/* ------------------------------------------------------------------ */
+
+export async function createScheduledPost(
+  content: string,
+  scheduledAt: Date,
+  imageUrl?: string,
+  aiGenerated = false
+) {
+  const db = await getDb();
+  await db.insert(scheduledPosts).values({
+    content,
+    scheduledAt,
+    imageUrl,
+    aiGenerated,
+    status: "scheduled",
+  });
+}
+
+export async function getScheduledPosts() {
+  const db = await getDb();
+  return db
+    .select()
+    .from(scheduledPosts)
+    .orderBy(desc(scheduledPosts.scheduledAt))
+    .limit(100);
+}
+
+/** Posts that are due. Claimed one at a time by the cron worker. */
+export async function getDuePosts() {
+  const db = await getDb();
+  return db
+    .select()
+    .from(scheduledPosts)
+    .where(
+      and(
+        eq(scheduledPosts.status, "scheduled"),
+        lte(scheduledPosts.scheduledAt, new Date())
+      )
+    )
+    .limit(10);
+}
+
+export async function updatePostStatus(
+  id: number,
+  status: "draft" | "scheduled" | "published" | "failed",
+  extra?: { facebookPostId?: string; lastError?: string }
+) {
+  const db = await getDb();
+  await db
+    .update(scheduledPosts)
+    .set({
+      status,
+      facebookPostId: extra?.facebookPostId,
+      lastError: extra?.lastError ?? null,
+      publishedAt: status === "published" ? new Date() : undefined,
+    })
+    .where(eq(scheduledPosts.id, id));
+}
+
+export async function deletePost(id: number) {
+  const db = await getDb();
+  await db.delete(scheduledPosts).where(eq(scheduledPosts.id, id));
+}
+
+/* ------------------------------------------------------------------ */
+/* Config                                                              */
+/* ------------------------------------------------------------------ */
+
+export async function getFacebookConfig() {
+  const db = await getDb();
+  const result = await db.select().from(facebookConfig).limit(1);
+  return result[0];
+}
+
+export async function setFacebookConfig(input: {
+  pageId: string;
+  pageAccessToken: string;
+  appId: string;
+  appSecret: string;
+  webhookVerifyToken: string;
+  pageName?: string;
+}) {
+  const db = await getDb();
+  const existing = await getFacebookConfig();
+  if (existing) {
+    await db
+      .update(facebookConfig)
+      .set({ ...input, isConfigured: true })
+      .where(eq(facebookConfig.id, existing.id));
+  } else {
+    await db.insert(facebookConfig).values({ ...input, isConfigured: true });
+  }
+}
+
+export async function getTimelyConfig() {
+  const db = await getDb();
+  const result = await db.select().from(timelyConfig).limit(1);
+  return result[0];
+}
+
+export async function setTimelyConfig(input: {
+  bookingPageUrl: string;
+  businessId?: string;
+  defaultServiceId?: string;
+}) {
+  const db = await getDb();
+  const existing = await getTimelyConfig();
+  if (existing) {
+    await db
+      .update(timelyConfig)
+      .set({ ...input, isConfigured: true })
+      .where(eq(timelyConfig.id, existing.id));
+  } else {
+    await db.insert(timelyConfig).values({ ...input, isConfigured: true });
+  }
+}
+
+export async function getStats() {
+  const db = await getDb();
+  const [convs] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(messengerConversations);
+  const [msgs] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(messengerMessages);
+  const [bookings] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(messengerMessages)
+    .where(eq(messengerMessages.senderType, "bot"));
+  const [pending] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(scheduledPosts)
+    .where(eq(scheduledPosts.status, "scheduled"));
+
+  return {
+    conversations: Number(convs?.count ?? 0),
+    messages: Number(msgs?.count ?? 0),
+    botReplies: Number(bookings?.count ?? 0),
+    pendingPosts: Number(pending?.count ?? 0),
+  };
+}
