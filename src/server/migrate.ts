@@ -104,6 +104,18 @@ const STATEMENTS = [
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP
   )`,
+
+  `CREATE TABLE IF NOT EXISTS pending_replies (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    conversation_id VARCHAR(191) NOT NULL,
+    customer_message_id VARCHAR(191) NOT NULL,
+    draft_text TEXT NOT NULL,
+    status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    resolved_at TIMESTAMP NULL,
+    UNIQUE KEY pending_msg_idx (customer_message_id),
+    KEY pending_conv_idx (conversation_id)
+  )`,
 ];
 
 /**

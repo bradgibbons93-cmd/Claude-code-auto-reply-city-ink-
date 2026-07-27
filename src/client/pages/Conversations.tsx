@@ -5,10 +5,63 @@ import { trpc } from "@/lib/trpc";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 function isPaused(until: string | Date | null | undefined) {
   return !!until && new Date(until) > new Date();
+}
+
+function PendingReplyCard({
+  draft,
+  senderName,
+}: {
+  draft: { id: number; draftText: string; createdAt: string | Date | null };
+  senderName: string;
+}) {
+  const utils = trpc.useUtils();
+  const [text, setText] = useState(draft.draftText);
+
+  const approve = trpc.pendingReplies.approve.useMutation({
+    onSuccess: () => {
+      toast.success("Sent");
+      utils.pendingReplies.list.invalidate();
+    },
+    onError: () => toast.error("Couldn't send that reply."),
+  });
+  const reject = trpc.pendingReplies.reject.useMutation({
+    onSuccess: () => {
+      toast("Discarded — nothing was sent");
+      utils.pendingReplies.list.invalidate();
+    },
+  });
+
+  return (
+    <Card className="border-amber-500/30 bg-amber-500/5">
+      <CardContent className="space-y-3 pt-6">
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>To {senderName}</span>
+          {draft.createdAt && <span>{formatDistanceToNow(new Date(draft.createdAt), { addSuffix: true })}</span>}
+        </div>
+        <Textarea value={text} onChange={(e) => setText(e.target.value)} className="min-h-20" />
+        <div className="flex gap-2">
+          <Button
+            onClick={() => approve.mutate({ id: draft.id, editedText: text })}
+            disabled={approve.isPending || reject.isPending}
+          >
+            {approve.isPending ? "Sending…" : "Approve & send"}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => reject.mutate({ id: draft.id })}
+            disabled={approve.isPending || reject.isPending}
+          >
+            Discard
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 export default function Conversations() {
@@ -22,6 +75,9 @@ export default function Conversations() {
     { conversationId: selected ?? "" },
     { enabled: !!selected, refetchInterval: 10000 }
   );
+  const { data: pendingReplies } = trpc.pendingReplies.list.useQuery(undefined, {
+    refetchInterval: 10000,
+  });
 
   const pause = trpc.conversations.pause.useMutation({
     onSuccess: () => {
@@ -37,9 +93,27 @@ export default function Conversations() {
   });
 
   const active = conversations?.find((c) => c.conversationId === selected);
+  const senderNameFor = (conversationId: string) =>
+    conversations?.find((c) => c.conversationId === conversationId)?.senderName || "a customer";
 
   return (
     <div className="space-y-8">
+      {!!pendingReplies?.length && (
+        <div className="space-y-3">
+          <h2 className="font-serif text-xl text-amber-400">
+            Waiting for your OK ({pendingReplies.length})
+          </h2>
+          <div className="grid gap-3 md:grid-cols-2">
+            {pendingReplies.map((draft) => (
+              <PendingReplyCard
+                key={draft.id}
+                draft={draft}
+                senderName={senderNameFor(draft.conversationId)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {[
           ["Threads", stats?.conversations],

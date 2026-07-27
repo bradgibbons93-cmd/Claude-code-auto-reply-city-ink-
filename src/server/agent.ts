@@ -8,6 +8,8 @@ import {
   updateBookingDetails,
   markBookingNotified,
   setOwnerPsid,
+  createPendingReply,
+  resolvePendingReply,
   pauseBot,
 } from "./db.js";
 import { invokeLLMJson, type ChatMessage } from "./llm.js";
@@ -144,6 +146,20 @@ async function notifyOwner(details: {
   }
 }
 
+/** Pings the owner that a draft is sitting in the dashboard waiting on them. */
+async function notifyOwnerOfDraft() {
+  const config = await getFacebookConfig();
+  if (!config?.ownerPsid) return;
+  try {
+    await sendMessengerMessage(
+      config.ownerPsid,
+      "A reply is waiting for your OK — open the dashboard's Conversations tab."
+    );
+  } catch (error) {
+    console.error("[Agent] Failed to notify the owner of a pending draft:", (error as Error).message);
+  }
+}
+
 /** Deterministic rules beat the model. Brad's rules table is the override. */
 async function matchRule(text: string) {
   const rules = await getActiveAutoReplyRules();
@@ -206,13 +222,18 @@ export async function handleCustomerMessage(
   let reply: string;
   let intent: Intent = "other";
   let extracted: AgentDecision["extracted"];
+  // Text Brad wrote himself in Auto-replies is pre-approved — it sends
+  // immediately, same as before. Anything the model composed (a free-form
+  // reply, or the "you're all set" line once a booking completes) waits in
+  // the dashboard for him to approve, edit, or reject first.
+  const isPrewritten = !!rule && !rule.sendBookingLink;
 
   // A plain rule (no booking flag) is a fixed answer — no need to spend an
   // LLM call on it. A rule marked to start the booking hand-off still uses
   // its own wording, but also runs extraction so the flow below can start
   // collecting name/phone/dates on the same turn.
-  if (rule && !rule.sendBookingLink) {
-    reply = rule.responseText;
+  if (isPrewritten) {
+    reply = rule!.responseText;
   } else if (rule && rule.sendBookingLink) {
     const turns = await getRecentTurns(senderId, 10);
     const history: ChatMessage[] = turns.map((t) => ({
@@ -266,8 +287,26 @@ export async function handleCustomerMessage(
     }
   }
 
-  await sendMessengerMessage(senderId, reply);
-  await recordMessage(senderId, `${messageId}_reply`, "bot", reply, reply);
+  if (isPrewritten) {
+    await sendMessengerMessage(senderId, reply);
+    await recordMessage(senderId, `${messageId}_reply`, "bot", reply, reply);
+  } else {
+    const queued = await createPendingReply(senderId, messageId, reply);
+    if (queued) await notifyOwnerOfDraft();
+  }
+}
+
+/** Sends an approved draft (optionally with edited wording) and logs it as sent. */
+export async function approveDraft(id: number, editedText?: string): Promise<void> {
+  const resolved = await resolvePendingReply(id, "approved", editedText);
+  if (!resolved) return;
+  await sendMessengerMessage(resolved.conversationId, resolved.text);
+  await recordMessage(resolved.conversationId, `draft_${id}_sent`, "bot", resolved.text, resolved.text);
+}
+
+/** Discards a draft — nothing is sent to the customer. */
+export async function rejectDraft(id: number): Promise<void> {
+  await resolvePendingReply(id, "rejected");
 }
 
 /**

@@ -17,11 +17,12 @@ import {
   getStudioKnowledge,
   createKnowledge,
   deleteKnowledge,
+  getPendingReplies,
   getStats,
   pauseBot,
   resumeBot,
 } from "./db.js";
-import { generateCaption } from "./agent.js";
+import { generateCaption, approveDraft, rejectDraft } from "./agent.js";
 
 const t = initTRPC.create();
 const publicProcedure = t.procedure;
@@ -40,6 +41,16 @@ export const appRouter = t.router({
     resume: publicProcedure
       .input(z.object({ conversationId: z.string() }))
       .mutation(({ input }) => resumeBot(input.conversationId)),
+  }),
+
+  pendingReplies: t.router({
+    list: publicProcedure.query(() => getPendingReplies()),
+    approve: publicProcedure
+      .input(z.object({ id: z.number(), editedText: z.string().optional() }))
+      .mutation(({ input }) => approveDraft(input.id, input.editedText)),
+    reject: publicProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(({ input }) => rejectDraft(input.id)),
   }),
 
   autoReply: t.router({
