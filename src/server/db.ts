@@ -145,6 +145,57 @@ export async function resumeBot(conversationId: string) {
     .where(eq(messengerConversations.conversationId, conversationId));
 }
 
+/**
+ * Manual-booking handoff. Fields accumulate across turns — only the
+ * non-empty ones in `patch` overwrite what's stored, so a later message
+ * ("actually make it Friday") can update just the dates without wiping
+ * the name and phone already collected.
+ */
+export async function updateBookingDetails(
+  conversationId: string,
+  patch: { name?: string; phone?: string; dates?: string; newPhotoUrls?: string[] }
+) {
+  const db = await getDb();
+  const [existing] = await db
+    .select()
+    .from(messengerConversations)
+    .where(eq(messengerConversations.conversationId, conversationId))
+    .limit(1);
+  if (!existing) return;
+
+  const mergedPhotos = patch.newPhotoUrls?.length
+    ? [...(existing.bookingPhotoUrls || []), ...patch.newPhotoUrls].slice(-8)
+    : existing.bookingPhotoUrls;
+
+  await db
+    .update(messengerConversations)
+    .set({
+      bookingName: patch.name || existing.bookingName,
+      bookingPhone: patch.phone || existing.bookingPhone,
+      bookingDates: patch.dates || existing.bookingDates,
+      bookingPhotoUrls: mergedPhotos,
+    })
+    .where(eq(messengerConversations.conversationId, conversationId));
+}
+
+export async function markBookingNotified(conversationId: string) {
+  const db = await getDb();
+  await db
+    .update(messengerConversations)
+    .set({ bookingNotifiedAt: new Date() })
+    .where(eq(messengerConversations.conversationId, conversationId));
+}
+
+export async function setOwnerPsid(psid: string) {
+  const db = await getDb();
+  const existing = await getFacebookConfig();
+  if (!existing) throw new Error("Connect the Facebook Page first.");
+  await db
+    .update(facebookConfig)
+    .set({ ownerPsid: psid })
+    .where(eq(facebookConfig.id, existing.id));
+}
+
 /* ------------------------------------------------------------------ */
 /* Auto-reply rules                                                    */
 /* ------------------------------------------------------------------ */
@@ -283,9 +334,16 @@ export async function setFacebookConfig(input: {
   const db = await getDb();
   const existing = await getFacebookConfig();
   if (existing) {
+    // Blank token/secret means "keep the one already saved" — the browser
+    // never gets the real values back, so it can't show them to re-submit.
     await db
       .update(facebookConfig)
-      .set({ ...input, isConfigured: true })
+      .set({
+        ...input,
+        pageAccessToken: input.pageAccessToken || existing.pageAccessToken,
+        appSecret: input.appSecret || existing.appSecret,
+        isConfigured: true,
+      })
       .where(eq(facebookConfig.id, existing.id));
   } else {
     await db.insert(facebookConfig).values({ ...input, isConfigured: true });

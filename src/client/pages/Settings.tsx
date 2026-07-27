@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,21 @@ export default function Settings() {
   const [bookingUrl, setBookingUrl] = useState("");
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
+
+  // The server never sends the token/app secret back down (they're
+  // write-only from here), so those two stay blank on load — everything
+  // else pre-fills to prove a reload didn't lose what you saved.
+  useEffect(() => {
+    if (!fb) return;
+    setPageId(fb.pageId || "");
+    setPageName(fb.pageName || "");
+    setAppId(fb.appId || "");
+    setVerifyToken(fb.webhookVerifyToken || "city_ink_webhook_2024");
+  }, [fb]);
+
+  useEffect(() => {
+    if (timely?.bookingPageUrl) setBookingUrl(timely.bookingPageUrl);
+  }, [timely]);
 
   const saveFacebook = trpc.config.saveFacebook.useMutation({
     onSuccess: () => {
@@ -75,14 +90,14 @@ export default function Settings() {
             onChange={(e) => setPageName(e.target.value)}
           />
           <Input
-            placeholder="Page access token"
+            placeholder={fb?.hasToken ? "Page access token — saved, leave blank to keep it" : "Page access token"}
             type="password"
             value={pageAccessToken}
             onChange={(e) => setPageAccessToken(e.target.value)}
           />
           <Input placeholder="App ID" value={appId} onChange={(e) => setAppId(e.target.value)} />
           <Input
-            placeholder="App secret"
+            placeholder={fb?.isConfigured ? "App secret — saved, leave blank to keep it" : "App secret"}
             type="password"
             value={appSecret}
             onChange={(e) => setAppSecret(e.target.value)}
@@ -112,11 +127,41 @@ export default function Settings() {
 
       <Card className="border-amber-500/20">
         <CardHeader>
-          <CardTitle className="font-serif text-xl text-amber-400">Booking link</CardTitle>
+          <CardTitle className="font-serif text-xl text-amber-400">Booking alerts</CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
-            {timely?.bookingPageUrl
-              ? `Sending customers to ${timely.bookingPageUrl}`
-              : "The agent won't offer bookings until this is set."}
+            Bookings are entered by hand — the agent collects the customer's name, phone, and
+            preferred dates, then messages the studio's own Facebook account so it can be typed
+            into Timely.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div
+            className={`rounded-lg border p-3 text-sm ${
+              fb?.hasOwner
+                ? "border-green-500/30 bg-green-500/10 text-green-400"
+                : "border-amber-500/30 bg-amber-500/10 text-amber-400"
+            }`}
+          >
+            {fb?.hasOwner ? (
+              "An alert contact is registered — booking pings will land in that Messenger chat."
+            ) : (
+              <>
+                No alert contact yet. From the personal Facebook account that should receive
+                bookings, message the City Ink Page:{" "}
+                <code className="rounded bg-black/30 px-1">
+                  set owner {verifyToken || "<your webhook verify token>"}
+                </code>
+              </>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-amber-500/20">
+        <CardHeader>
+          <CardTitle className="font-serif text-xl text-amber-400">Timely link (optional)</CardTitle>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Not sent to customers — this is just for your own reference.
           </p>
         </CardHeader>
         <CardContent className="space-y-3">

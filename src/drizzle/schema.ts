@@ -40,6 +40,13 @@ export const messengerConversations = mysqlTable(
     lastCustomerMessageAt: timestamp("last_customer_message_at"),
     lastMessageAt: timestamp("last_message_at").defaultNow(),
     createdAt: timestamp("created_at").defaultNow(),
+    // Manual-booking handoff: collected piece by piece as the customer
+    // replies, then pushed to the studio owner once complete.
+    bookingName: varchar("booking_name", { length: 255 }),
+    bookingPhone: varchar("booking_phone", { length: 64 }),
+    bookingDates: varchar("booking_dates", { length: 255 }),
+    bookingPhotoUrls: json("booking_photo_urls").$type<string[]>(),
+    bookingNotifiedAt: timestamp("booking_notified_at"),
   },
   (t) => ({
     convIdx: uniqueIndex("conv_id_idx").on(t.conversationId),
@@ -102,6 +109,9 @@ export const facebookConfig = mysqlTable("facebook_config", {
   appSecret: varchar("app_secret", { length: 255 }).notNull(),
   webhookVerifyToken: varchar("webhook_verify_token", { length: 255 }).notNull(),
   isConfigured: boolean("is_configured").default(false),
+  // Messenger PSID of the studio owner's own account. Set by sending
+  // "set owner <verify token>" from that account — see agent.ts.
+  ownerPsid: varchar("owner_psid", { length: 191 }),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
 

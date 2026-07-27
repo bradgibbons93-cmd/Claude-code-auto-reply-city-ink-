@@ -104,22 +104,26 @@ export const appRouter = t.router({
     facebook: publicProcedure.query(async () => {
       const config = await getFacebookConfig();
       if (!config) return null;
-      // Never ship secrets to the browser.
+      // Never ship secrets to the browser — token and app secret stay out.
       return {
         pageId: config.pageId,
         pageName: config.pageName,
         appId: config.appId,
+        webhookVerifyToken: config.webhookVerifyToken,
         isConfigured: config.isConfigured,
         hasToken: !!config.pageAccessToken,
+        hasOwner: !!config.ownerPsid,
       };
     }),
     saveFacebook: publicProcedure
       .input(
         z.object({
           pageId: z.string().min(1),
-          pageAccessToken: z.string().min(1),
+          // Blank is allowed on an update — it means "keep the saved one".
+          // setFacebookConfig() only accepts that when a row already exists.
+          pageAccessToken: z.string(),
           appId: z.string().min(1),
-          appSecret: z.string().min(1),
+          appSecret: z.string(),
           webhookVerifyToken: z.string().min(1),
           pageName: z.string().optional(),
         })

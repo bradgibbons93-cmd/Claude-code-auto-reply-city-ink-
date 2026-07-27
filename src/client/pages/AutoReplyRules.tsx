@@ -111,7 +111,7 @@ export default function AutoReplyRules() {
                   className="rounded border-amber-500/30"
                 />
                 <label htmlFor="booking" className="cursor-pointer text-sm">
-                  Follow up with the booking link
+                  Also start the booking hand-off (collect name/phone/dates, alert the studio)
                 </label>
               </div>
 
@@ -136,7 +136,7 @@ export default function AutoReplyRules() {
                       </Badge>
                       {rule.sendBookingLink && (
                         <Badge className="border-green-500/50 bg-green-500/20 text-green-400">
-                          Sends booking link
+                          Starts booking hand-off
                         </Badge>
                       )}
                     </div>

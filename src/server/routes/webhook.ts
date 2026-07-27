@@ -68,12 +68,18 @@ router.post("/facebook", async (req: RawBodyRequest, res: Response) => {
             return;
           }
 
-          if (!event.sender?.id || !message.text) return;
+          const photoUrls: string[] = (message.attachments ?? [])
+            .filter((a: { type?: string }) => a.type === "image")
+            .map((a: { payload?: { url?: string } }) => a.payload?.url)
+            .filter((url: string | undefined): url is string => !!url);
+
+          if (!event.sender?.id || (!message.text && !photoUrls.length)) return;
 
           await handleCustomerMessage(
             event.sender.id,
             message.mid ?? `msg_${Date.now()}`,
-            message.text
+            message.text ?? "",
+            photoUrls
           );
         } catch (error) {
           console.error("[Webhook] Processing failed:", (error as Error).message);
