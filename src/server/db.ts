@@ -10,6 +10,7 @@ import {
   facebookConfig,
   timelyConfig,
   studioKnowledge,
+  pendingReplies,
   type InsertUser,
 } from "../drizzle/schema.js";
 
@@ -245,6 +246,59 @@ export async function createKnowledge(question: string, answer: string) {
 export async function deleteKnowledge(id: number) {
   const db = await getDb();
   await db.delete(studioKnowledge).where(eq(studioKnowledge.id, id));
+}
+
+/* ------------------------------------------------------------------ */
+/* Pending replies — AI drafts waiting for approval before they send   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * customerMessageId carries a unique index for the same reason messageId
+ * does on messenger_messages: Facebook retries deliveries, and without this
+ * a retried webhook call would queue a second draft for the same message.
+ */
+export async function createPendingReply(
+  conversationId: string,
+  customerMessageId: string,
+  draftText: string
+): Promise<boolean> {
+  const db = await getDb();
+  try {
+    await db.insert(pendingReplies).values({ conversationId, customerMessageId, draftText });
+    return true;
+  } catch (error: unknown) {
+    const code = (error as { code?: string })?.code;
+    if (code === "ER_DUP_ENTRY") return false;
+    throw error;
+  }
+}
+
+export async function getPendingReplies() {
+  const db = await getDb();
+  return db
+    .select()
+    .from(pendingReplies)
+    .where(eq(pendingReplies.status, "pending"))
+    .orderBy(asc(pendingReplies.createdAt));
+}
+
+/** Approves (optionally with edited wording) and returns the text actually sent. */
+export async function resolvePendingReply(
+  id: number,
+  decision: "approved" | "rejected",
+  editedText?: string
+): Promise<{ conversationId: string; text: string } | undefined> {
+  const db = await getDb();
+  const [row] = await db.select().from(pendingReplies).where(eq(pendingReplies.id, id)).limit(1);
+  if (!row || row.status !== "pending") return undefined;
+
+  await db
+    .update(pendingReplies)
+    .set({ status: decision, resolvedAt: new Date() })
+    .where(eq(pendingReplies.id, id));
+
+  if (decision !== "approved") return undefined;
+  return { conversationId: row.conversationId, text: editedText || row.draftText };
 }
 
 /* ------------------------------------------------------------------ */

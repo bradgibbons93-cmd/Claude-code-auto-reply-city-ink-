@@ -132,3 +132,25 @@ export const studioKnowledge = mysqlTable("studio_knowledge", {
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+/**
+ * AI-drafted replies wait here for Brad to approve, edit, or reject before
+ * they go to the customer. Fixed answers he wrote himself in Auto-replies
+ * don't go through this — he already approved that exact wording in advance.
+ */
+export const pendingReplies = mysqlTable(
+  "pending_replies",
+  {
+    id: int("id").primaryKey().autoincrement(),
+    conversationId: varchar("conversation_id", { length: 191 }).notNull(),
+    customerMessageId: varchar("customer_message_id", { length: 191 }).notNull(),
+    draftText: text("draft_text").notNull(),
+    status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    resolvedAt: timestamp("resolved_at"),
+  },
+  (t) => ({
+    msgIdx: uniqueIndex("pending_msg_idx").on(t.customerMessageId),
+    convIdx: index("pending_conv_idx").on(t.conversationId),
+  })
+);
