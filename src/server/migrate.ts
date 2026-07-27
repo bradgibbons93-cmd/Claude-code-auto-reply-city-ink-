@@ -31,6 +31,11 @@ const STATEMENTS = [
     last_customer_message_at TIMESTAMP NULL,
     last_message_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    booking_name VARCHAR(255),
+    booking_phone VARCHAR(64),
+    booking_dates VARCHAR(255),
+    booking_photo_urls JSON,
+    booking_notified_at TIMESTAMP NULL,
     UNIQUE KEY conv_id_idx (conversation_id)
   )`,
 
@@ -79,6 +84,7 @@ const STATEMENTS = [
     app_secret VARCHAR(255) NOT NULL,
     webhook_verify_token VARCHAR(255) NOT NULL,
     is_configured BOOLEAN DEFAULT FALSE,
+    owner_psid VARCHAR(191),
     updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   )`,
 
@@ -100,10 +106,43 @@ const STATEMENTS = [
   )`,
 ];
 
+/**
+ * Columns added after a table already existed on a live deploy. `CREATE
+ * TABLE IF NOT EXISTS` above only helps a brand new database — Brad's
+ * Railway database already has these tables from the first deploy, so new
+ * columns need an explicit ALTER. Checked against information_schema first
+ * because MySQL's `ADD COLUMN IF NOT EXISTS` support is version-dependent.
+ */
+const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
+  { table: "messenger_conversations", column: "booking_name", ddl: "VARCHAR(255)" },
+  { table: "messenger_conversations", column: "booking_phone", ddl: "VARCHAR(64)" },
+  { table: "messenger_conversations", column: "booking_dates", ddl: "VARCHAR(255)" },
+  { table: "messenger_conversations", column: "booking_photo_urls", ddl: "JSON" },
+  { table: "messenger_conversations", column: "booking_notified_at", ddl: "TIMESTAMP NULL" },
+  { table: "facebook_config", column: "owner_psid", ddl: "VARCHAR(191)" },
+];
+
+async function ensureColumns(): Promise<void> {
+  const db = await getDb();
+  for (const { table, column, ddl } of COLUMNS) {
+    const [rows] = (await db.execute(
+      sql.raw(
+        `SELECT COUNT(*) AS cnt FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = '${table}' AND column_name = '${column}'`
+      )
+    )) as unknown as [Array<{ cnt: number }>];
+    if (Number(rows[0]?.cnt) === 0) {
+      await db.execute(sql.raw(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`));
+      console.log(`[DB] Added column ${table}.${column}`);
+    }
+  }
+}
+
 export async function ensureTables(): Promise<void> {
   const db = await getDb();
   for (const statement of STATEMENTS) {
     await db.execute(sql.raw(statement));
   }
+  await ensureColumns();
   console.log(`[DB] Schema ready (${STATEMENTS.length} tables checked)`);
 }
