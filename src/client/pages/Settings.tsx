@@ -29,7 +29,10 @@ export default function Settings() {
       toast.success("Page connected");
       utils.config.facebook.invalidate();
     },
-    onError: () => toast.error("Couldn't save. Every field is required."),
+    // Reporting the real error matters: this used to always blame empty
+    // fields, which sent you hunting through the form when the actual
+    // failure was the database.
+    onError: (error) => toast.error(error.message || "Couldn't save the Page details."),
   });
 
   const saveTimely = trpc.config.saveTimely.useMutation({
@@ -37,7 +40,7 @@ export default function Settings() {
       toast.success("Booking link saved");
       utils.config.timely.invalidate();
     },
-    onError: () => toast.error("That doesn't look like a valid URL."),
+    onError: (error) => toast.error(error.message || "That doesn't look like a valid URL."),
   });
 
   const addKnowledge = trpc.knowledge.create.useMutation({
