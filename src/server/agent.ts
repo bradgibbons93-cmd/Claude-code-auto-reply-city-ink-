@@ -10,6 +10,10 @@ import {
   setOwnerPsid,
   createPendingReply,
   resolvePendingReply,
+  findSimilarExchanges,
+  getRecentDraftEdits,
+  recordDraftEdit,
+  getConversationMessages,
   pauseBot,
 } from "./db.js";
 import { invokeLLMJson, type ChatMessage } from "./llm.js";
@@ -58,7 +62,9 @@ async function decide(
   studioFacts: string,
   known: BookingState,
   hasPhoto: boolean,
-  availability: string
+  availability: string,
+  examples: Array<{ customerMessage: string; studioReply: string }>,
+  corrections: Array<{ draftText: string; sentText: string }>
 ): Promise<AgentDecision & { ok: boolean }> {
   const missing = [
     !known.name && "their full name",
@@ -89,7 +95,21 @@ NEVER:
 STOP AND HAND OVER — this matters more than being helpful:
 If the customer mentions anything distressing or personal — illness, hospital, a death, family violence, abuse, mental health, serious money hardship, anything you'd want a human to read first — do NOT try to answer it, comfort them at length, or carry on selling. Set "sensitive": true and make your whole reply a short, kind holding line and nothing more, e.g. "Hey, thanks for letting us know 🙂 someone from the team will get back to you as soon as possible." No price, no booking questions, no advice. A person takes it from there.
 
-WHAT THE STUDIO HAS TOLD YOU (this is your only source of facts):
+${
+    examples.length
+      ? `REAL REPLIES THE STUDIO SENT TO SIMILAR MESSAGES — copy this phrasing and length closely, but use the facts below, not the prices in these old chats:
+${examples.map((e) => `Customer: ${e.customerMessage}\nStudio: ${e.studioReply}`).join("\n\n")}
+
+`
+      : ""
+  }${
+    corrections.length
+      ? `CORRECTIONS — each time the studio rewrote one of your drafts before sending. Learn what they changed and don't repeat it:
+${corrections.map((c) => `You wrote: ${c.draftText}\nThey sent instead: ${c.sentText}`).join("\n\n")}
+
+`
+      : ""
+  }WHAT THE STUDIO HAS TOLD YOU (this is your only source of facts):
 ${studioFacts || "(nothing configured yet — stay general, don't quote prices, defer to the studio)"}
 
 THE BOOKING FLOW — work out which step you're at and do that step:
@@ -261,6 +281,11 @@ export async function handleCustomerMessage(
   const rule = await matchRule(text);
   // Read once per message so both branches below see the same free slots.
   const availability = await availabilityForPrompt().catch(() => "");
+  // How the studio answered messages like this before, plus anything Brad
+  // has rewritten recently. Both fail soft — a lookup problem must not stop
+  // a customer getting a reply.
+  const examples = text ? await findSimilarExchanges(text).catch(() => []) : [];
+  const corrections = await getRecentDraftEdits().catch(() => []);
   const known: BookingState = {
     name: conversation?.bookingName ?? null,
     phone: conversation?.bookingPhone ?? null,
@@ -285,7 +310,7 @@ export async function handleCustomerMessage(
       role: t.senderType === "customer" ? "user" : "assistant",
       content: t.content,
     }));
-    const decision = await decide(history, "", known, photoUrls.length > 0, availability);
+    const decision = await decide(history, "", known, photoUrls.length > 0, availability, examples, corrections);
     reply = rule.responseText;
     intent = "booking";
     extracted = decision.extracted;
@@ -300,7 +325,15 @@ export async function handleCustomerMessage(
       content: t.content,
     }));
 
-    const decision = await decide(history, studioFacts, known, photoUrls.length > 0, availability);
+    const decision = await decide(
+      history,
+      studioFacts,
+      known,
+      photoUrls.length > 0,
+      availability,
+      examples,
+      corrections
+    );
     reply = decision.reply;
     intent = decision.intent;
     extracted = decision.extracted;
@@ -359,6 +392,16 @@ export async function approveDraft(id: number, editedText?: string): Promise<voi
   if (!resolved) return;
   await sendMessengerMessage(resolved.conversationId, resolved.text);
   await recordMessage(resolved.conversationId, `draft_${id}_sent`, "bot", resolved.text, resolved.text);
+
+  // If Brad rewrote it, that difference is the most direct feedback there
+  // is on this agent's output — keep it and show it back to the model.
+  if (resolved.originalDraft && resolved.originalDraft !== resolved.text) {
+    const thread = await getConversationMessages(resolved.conversationId).catch(() => []);
+    const lastCustomer = [...thread].reverse().find((m) => m.senderType === "customer");
+    await recordDraftEdit(resolved.originalDraft, resolved.text, lastCustomer?.content).catch(
+      (error) => console.error("[Agent] Couldn't store the edit:", (error as Error).message)
+    );
+  }
 }
 
 /** Discards a draft — nothing is sent to the customer. */

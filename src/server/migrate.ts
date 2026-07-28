@@ -118,6 +118,25 @@ const STATEMENTS = [
     UNIQUE KEY pending_msg_idx (customer_message_id),
     KEY pending_conv_idx (conversation_id)
   )`,
+
+  `CREATE TABLE IF NOT EXISTS example_exchanges (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_message TEXT NOT NULL,
+    studio_reply TEXT NOT NULL,
+    fingerprint VARCHAR(64) NOT NULL,
+    source VARCHAR(255),
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY example_fingerprint_idx (fingerprint),
+    FULLTEXT KEY example_search_idx (customer_message)
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS draft_edits (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_message TEXT,
+    draft_text TEXT NOT NULL,
+    sent_text TEXT NOT NULL,
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
 ];
 
 /**

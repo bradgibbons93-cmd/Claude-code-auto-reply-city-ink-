@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
@@ -11,6 +12,8 @@ import {
   timelyConfig,
   studioKnowledge,
   pendingReplies,
+  exampleExchanges,
+  draftEdits,
   type InsertUser,
 } from "../drizzle/schema.js";
 
@@ -290,7 +293,7 @@ export async function resolvePendingReply(
   id: number,
   decision: "approved" | "rejected",
   editedText?: string
-): Promise<{ conversationId: string; text: string } | undefined> {
+): Promise<{ conversationId: string; text: string; originalDraft: string } | undefined> {
   const db = await getDb();
   const [row] = await db.select().from(pendingReplies).where(eq(pendingReplies.id, id)).limit(1);
   if (!row || row.status !== "pending") return undefined;
@@ -301,7 +304,12 @@ export async function resolvePendingReply(
     .where(eq(pendingReplies.id, id));
 
   if (decision !== "approved") return undefined;
-  return { conversationId: row.conversationId, text: editedText || row.draftText };
+  return {
+    conversationId: row.conversationId,
+    text: editedText || row.draftText,
+    // Kept so the caller can tell whether Brad rewrote it before sending.
+    originalDraft: row.draftText,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -533,4 +541,112 @@ export async function getDashboardStats() {
       responded?.avgMinutes == null ? null : Math.round(Number(responded.avgMinutes)),
     series: series.map((row) => ({ day: String(row.day), count: Number(row.count) })),
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Learning from real history and from Brad's edits                    */
+/* ------------------------------------------------------------------ */
+
+/** Stable id for a pair, so importing the same export twice is a no-op. */
+function fingerprint(customerMessage: string, studioReply: string): string {
+  return createHash("sha256")
+    .update(`${customerMessage.trim()} ${studioReply.trim()}`)
+    .digest("hex")
+    .slice(0, 64);
+}
+
+export async function importExampleExchanges(
+  pairs: Array<{ customerMessage: string; studioReply: string }>,
+  source?: string
+): Promise<{ imported: number; skipped: number }> {
+  const db = await getDb();
+  let imported = 0;
+  let skipped = 0;
+
+  for (const pair of pairs) {
+    const customerMessage = pair.customerMessage.trim();
+    const studioReply = pair.studioReply.trim();
+    if (!customerMessage || !studioReply) {
+      skipped++;
+      continue;
+    }
+    try {
+      await db.insert(exampleExchanges).values({
+        customerMessage,
+        studioReply,
+        fingerprint: fingerprint(customerMessage, studioReply),
+        source,
+      });
+      imported++;
+    } catch (error: unknown) {
+      // Duplicate fingerprint — already imported, which is expected on a
+      // re-upload and shouldn't fail the whole batch.
+      if ((error as { code?: string })?.code === "ER_DUP_ENTRY") skipped++;
+      else throw error;
+    }
+  }
+
+  return { imported, skipped };
+}
+
+export async function countExampleExchanges(): Promise<number> {
+  const db = await getDb();
+  const [row] = await db.select({ count: sql<number>`count(*)` }).from(exampleExchanges);
+  return Number(row?.count ?? 0);
+}
+
+export async function clearExampleExchanges() {
+  const db = await getDb();
+  await db.delete(exampleExchanges);
+}
+
+/**
+ * The closest past exchanges to what this customer just said.
+ *
+ * Full-text relevance rather than embeddings: it needs no extra API, no
+ * per-message cost, and for a few thousand short enquiries about the same
+ * dozen topics it picks the right examples. Falls back to a LIKE scan when
+ * the query is all stopwords or too short for the index to match.
+ */
+export async function findSimilarExchanges(query: string, limit = 4) {
+  const db = await getDb();
+  const cleaned = query.replace(/[+\-><()~*"@]/g, " ").trim();
+  if (cleaned.length < 3) return [];
+
+  const matched = (await db.execute(
+    sql`SELECT customer_message AS customerMessage, studio_reply AS studioReply,
+               MATCH(customer_message) AGAINST (${cleaned}) AS score
+        FROM example_exchanges
+        WHERE MATCH(customer_message) AGAINST (${cleaned})
+        ORDER BY score DESC
+        LIMIT ${limit}`
+  )) as unknown as [Array<{ customerMessage: string; studioReply: string }>];
+
+  if (matched[0]?.length) return matched[0];
+
+  const [fallback] = (await db.execute(
+    sql`SELECT customer_message AS customerMessage, studio_reply AS studioReply
+        FROM example_exchanges
+        WHERE customer_message LIKE ${"%" + cleaned.slice(0, 40) + "%"}
+        LIMIT ${limit}`
+  )) as unknown as [Array<{ customerMessage: string; studioReply: string }>];
+
+  return fallback ?? [];
+}
+
+/** Only stores a row when Brad actually changed the wording. */
+export async function recordDraftEdit(
+  draftText: string,
+  sentText: string,
+  customerMessage?: string
+) {
+  if (draftText.trim() === sentText.trim()) return;
+  const db = await getDb();
+  await db.insert(draftEdits).values({ draftText, sentText, customerMessage });
+}
+
+/** The most recent corrections, newest first — shown to the model as fixes. */
+export async function getRecentDraftEdits(limit = 5) {
+  const db = await getDb();
+  return db.select().from(draftEdits).orderBy(desc(draftEdits.createdAt)).limit(limit);
 }
