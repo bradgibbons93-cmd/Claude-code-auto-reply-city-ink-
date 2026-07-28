@@ -1,5 +1,6 @@
 import { Link } from "wouter";
-import { CalendarCheck, CalendarPlus } from "lucide-react";
+import { CalendarCheck } from "lucide-react";
+import { StampBadge } from "@/components/Logo";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,7 @@ export default function Bookings() {
     return (
       <Card>
         <CardContent className="py-12 text-center">
-          <CalendarPlus className="mx-auto mb-3 h-6 w-6 text-beige" />
+          <StampBadge className="mx-auto mb-6 h-32 w-32 text-sepia opacity-80" />
           <p className="text-charcoal">No calendar connected yet.</p>
           <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
             Bookings here are read straight from the Google Calendar that Timely syncs into. Add

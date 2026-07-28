@@ -20,6 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
 import { useTheme } from "@/lib/useTheme";
+import { Monogram } from "@/components/Logo";
 import Dashboard from "./pages/Dashboard";
 import Conversations from "./pages/Conversations";
 import Bookings from "./pages/Bookings";
@@ -41,37 +42,6 @@ const NAV = [
   { href: "/rules", label: "Auto-replies", icon: Zap, badge: false },
   { href: "/settings", label: "Settings", icon: SettingsIcon, badge: false },
 ];
-
-/** The IC monogram from the brand book, drawn rather than bitmapped. */
-function Monogram({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 64 84" className={className} aria-hidden="true">
-      <rect
-        x="1"
-        y="1"
-        width="62"
-        height="82"
-        rx="2"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1"
-        opacity="0.35"
-      />
-      <text
-        x="32"
-        y="55"
-        textAnchor="middle"
-        fontFamily="Archivo, system-ui, sans-serif"
-        fontSize="38"
-        fontWeight="600"
-        letterSpacing="-2"
-        fill="currentColor"
-      >
-        IC
-      </text>
-    </svg>
-  );
-}
 
 function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [location] = useLocation();

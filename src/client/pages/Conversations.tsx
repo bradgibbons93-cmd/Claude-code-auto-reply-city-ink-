@@ -9,7 +9,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useReveal } from "@/lib/useReveal";
 import { Avatar } from "@/components/Avatar";
-import { AlertTriangle, Send, Trash2, MessageSquare, Sparkles } from "lucide-react";
+import { StampBadge } from "@/components/Logo";
+import { AlertTriangle, Send, Trash2, Sparkles } from "lucide-react";
 
 function isPaused(until: string | Date | null | undefined) {
   return !!until && new Date(until) > new Date();
@@ -272,7 +273,7 @@ export default function Conversations() {
           ) : (
             <Card>
               <CardContent className="pt-6">
-                <MessageSquare className="mb-3 h-5 w-5 text-beige" />
+                <StampBadge className="mx-auto mb-4 h-24 w-24 text-sepia opacity-70" />
                 <p className="text-sm text-muted-foreground">
                   No messages yet. Connect the Page in Settings, then send your studio a test
                   message.
