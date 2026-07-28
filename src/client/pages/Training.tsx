@@ -29,15 +29,6 @@ const STARTERS: Array<{ question: string; answer: string }> = [
       "Small pieces start around $100 - $150. Always quote a range of about $100, and say the final price depends on the size on the day.",
   },
   {
-    question: "Apprentice option",
-    answer:
-      "We have an apprentice who can do smaller pieces from $100. Offer this when someone's budget is tight, and offer to send through some of their work.",
-  },
-  {
-    question: "Payment options",
-    answer: "We have Afterpay available.",
-  },
-  {
     question: "Studio address",
     answer: "(Add the studio address here so the agent can send it on confirmation.)",
   },
@@ -74,7 +65,7 @@ export default function Training() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="flex items-center gap-2 font-serif text-2xl text-amber-400">
+        <h2 className="flex items-center gap-2 font-display text-2xl text-charcoal">
           <BrainCircuit className="h-5 w-5" />
           Training
         </h2>
@@ -85,9 +76,9 @@ export default function Training() {
         </p>
       </div>
 
-      <Card className="border-amber-500/20">
+      <Card className="border-border">
         <CardHeader>
-          <CardTitle className="font-serif text-lg text-amber-400">Add something</CardTitle>
+          <CardTitle className="font-display text-lg text-charcoal">Add something</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <Input
@@ -117,9 +108,9 @@ export default function Training() {
       </Card>
 
       {!!unusedStarters.length && (
-        <Card className="border-amber-500/20">
+        <Card className="border-border">
           <CardHeader>
-            <CardTitle className="font-serif text-lg text-amber-400">Suggested</CardTitle>
+            <CardTitle className="font-display text-lg text-charcoal">Suggested</CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
               Pulled from how you already answer these on Messenger. Tap to add, then edit the
               wording to suit.
@@ -131,9 +122,9 @@ export default function Training() {
                 key={s.question}
                 onClick={() => addStarter(s)}
                 disabled={addKnowledge.isPending}
-                className="w-full rounded-lg border border-amber-500/15 p-3 text-left transition-colors hover:border-amber-500/40 disabled:opacity-50"
+                className="w-full rounded-lg border border-border p-3 text-left transition-colors hover:border-sepia/40 disabled:opacity-50"
               >
-                <p className="text-sm text-amber-400">{s.question}</p>
+                <p className="text-sm text-charcoal">{s.question}</p>
                 <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{s.answer}</p>
               </button>
             ))}
@@ -141,9 +132,9 @@ export default function Training() {
         </Card>
       )}
 
-      <Card className="border-amber-500/20">
+      <Card className="border-border">
         <CardHeader>
-          <CardTitle className="font-serif text-lg text-amber-400">
+          <CardTitle className="font-display text-lg text-charcoal">
             What it knows ({knowledge?.length ?? 0})
           </CardTitle>
         </CardHeader>
@@ -152,10 +143,10 @@ export default function Training() {
             knowledge.map((k) => (
               <div
                 key={k.id}
-                className="flex items-start justify-between gap-3 rounded-lg border border-amber-500/15 p-3"
+                className="flex items-start justify-between gap-3 rounded-lg border border-border p-3"
               >
                 <div>
-                  <p className="text-sm text-amber-400">{k.question}</p>
+                  <p className="text-sm text-charcoal">{k.question}</p>
                   <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
                     {k.answer}
                   </p>

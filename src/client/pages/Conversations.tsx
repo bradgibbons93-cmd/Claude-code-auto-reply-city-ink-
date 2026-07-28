@@ -7,9 +7,63 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { useReveal } from "@/lib/useReveal";
+import { AlertTriangle, Send, Trash2, MessageSquare, Sparkles } from "lucide-react";
 
 function isPaused(until: string | Date | null | undefined) {
   return !!until && new Date(until) > new Date();
+}
+
+function initials(name: string) {
+  return name
+    .split(" ")
+    .map((part) => part[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
+function Avatar({ name, className }: { name: string; className?: string }) {
+  return (
+    <div
+      className={cn(
+        "flex h-9 w-9 shrink-0 items-center justify-center rounded-full",
+        "bg-beige/40 text-xs font-medium text-charcoal",
+        className
+      )}
+    >
+      {initials(name) || "?"}
+    </div>
+  );
+}
+
+function StatTile({
+  label,
+  value,
+  hint,
+  emphasise,
+}: {
+  label: string;
+  value: number | undefined;
+  hint?: string;
+  emphasise?: boolean;
+}) {
+  return (
+    <Card className={cn(emphasise && value ? "border-sepia/40 shadow-glow" : undefined)}>
+      <CardContent className="pt-6">
+        {value === undefined ? (
+          <div className="shimmer h-9 w-14 animate-shimmer rounded-md bg-beige/25" />
+        ) : (
+          <p className="font-display text-3xl text-charcoal tabular-nums">{value}</p>
+        )}
+        <p className="mt-2 text-[0.65rem] uppercase tracking-[0.18em] text-muted-foreground">
+          {label}
+        </p>
+        {hint && <p className="mt-1 text-xs text-sepia">{hint}</p>}
+      </CardContent>
+    </Card>
+  );
 }
 
 function PendingReplyCard({
@@ -21,6 +75,7 @@ function PendingReplyCard({
     id: number;
     conversationId: string;
     draftText: string;
+    isSensitive?: boolean | null;
     createdAt: string | Date | null;
   };
   senderName: string;
@@ -52,39 +107,77 @@ function PendingReplyCard({
     },
   });
 
-  return (
-    <Card className="border-amber-500/30 bg-amber-500/5">
-      <CardContent className="space-y-3 pt-6">
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <button
-            onClick={() => onOpenThread(draft.conversationId)}
-            className="underline-offset-2 hover:text-amber-400 hover:underline"
-          >
-            To {senderName} — open thread
-          </button>
-          {draft.createdAt && <span>{formatDistanceToNow(new Date(draft.createdAt), { addSuffix: true })}</span>}
-        </div>
+  const busy = approve.isPending || reject.isPending;
 
-        {lastFromCustomer && (
-          <div className="rounded-lg border border-amber-500/15 bg-card px-3 py-2">
-            <p className="text-[11px] uppercase tracking-wider text-muted-foreground">They said</p>
-            <p className="mt-1 whitespace-pre-wrap text-sm">{lastFromCustomer.content}</p>
+  return (
+    <Card
+      className={cn(
+        "animate-fade-up",
+        draft.isSensitive ? "border-destructive/40 bg-destructive/[0.03]" : "border-sepia/25"
+      )}
+    >
+      <CardContent className="space-y-3 pt-6">
+        {draft.isSensitive && (
+          <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <p className="text-xs text-destructive">
+              They've raised something personal. This draft is only a holding line — read the
+              thread and reply yourself.
+            </p>
           </div>
         )}
 
-        <Textarea value={text} onChange={(e) => setText(e.target.value)} className="min-h-20" />
-        <div className="flex gap-2">
+        <div className="flex items-center justify-between gap-3">
+          <button
+            onClick={() => onOpenThread(draft.conversationId)}
+            className="flex min-w-0 items-center gap-2 text-left"
+          >
+            <Avatar name={senderName} className="h-7 w-7" />
+            <span className="truncate text-sm text-charcoal underline-offset-2 hover:underline">
+              {senderName}
+            </span>
+          </button>
+          {draft.createdAt && (
+            <span className="shrink-0 text-xs text-muted-foreground">
+              {formatDistanceToNow(new Date(draft.createdAt), { addSuffix: true })}
+            </span>
+          )}
+        </div>
+
+        {lastFromCustomer && (
+          <div className="rounded-xl bg-surface px-3 py-2">
+            <p className="text-[0.6rem] uppercase tracking-[0.18em] text-muted-foreground">
+              They said
+            </p>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-charcoal">
+              {lastFromCustomer.content}
+            </p>
+          </div>
+        )}
+
+        <div>
+          <p className="mb-1.5 flex items-center gap-1.5 text-[0.6rem] uppercase tracking-[0.18em] text-sepia">
+            <Sparkles className="h-3 w-3" />
+            Draft reply
+          </p>
+          <Textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            className="min-h-24"
+            aria-label={`Draft reply to ${senderName}`}
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-2">
           <Button
             onClick={() => approve.mutate({ id: draft.id, editedText: text })}
-            disabled={approve.isPending || reject.isPending}
+            disabled={busy}
           >
+            <Send className="mr-2 h-3.5 w-3.5" />
             {approve.isPending ? "Sending…" : "Approve & send"}
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => reject.mutate({ id: draft.id })}
-            disabled={approve.isPending || reject.isPending}
-          >
+          <Button variant="outline" onClick={() => reject.mutate({ id: draft.id })} disabled={busy}>
+            <Trash2 className="mr-2 h-3.5 w-3.5" />
             Discard
           </Button>
         </div>
@@ -95,8 +188,9 @@ function PendingReplyCard({
 
 export default function Conversations() {
   const [selected, setSelected] = useState<string | null>(null);
+  const inboxRef = useReveal<HTMLDivElement>();
 
-  const { data: stats } = trpc.stats.useQuery();
+  const { data: stats } = trpc.stats.useQuery({} as never, { refetchInterval: 30000 });
   const { data: conversations, refetch } = trpc.conversations.list.useQuery(undefined, {
     refetchInterval: 20000,
   });
@@ -125,15 +219,31 @@ export default function Conversations() {
   const senderNameFor = (conversationId: string) =>
     conversations?.find((c) => c.conversationId === conversationId)?.senderName || "a customer";
 
+  const waiting = pendingReplies?.length ?? 0;
+  const sensitiveCount = pendingReplies?.filter((d) => d.isSensitive).length ?? 0;
+
   return (
     <div className="space-y-8">
-      {!!pendingReplies?.length && (
-        <div className="space-y-3">
-          <h2 className="font-serif text-xl text-amber-400">
-            Waiting for your OK ({pendingReplies.length})
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatTile label="Threads" value={stats?.conversations} />
+        <StatTile label="Messages" value={stats?.messages} />
+        <StatTile
+          label="Awaiting your OK"
+          value={pendingReplies?.length}
+          hint={sensitiveCount ? `${sensitiveCount} needs a person` : undefined}
+          emphasise
+        />
+        <StatTile label="Posts queued" value={stats?.pendingPosts} />
+      </div>
+
+      {waiting > 0 && (
+        <section className="space-y-3">
+          <h2 className="font-display text-lg tracking-[0.1em] text-charcoal">
+            Waiting for your OK
+            <span className="ml-2 text-sepia">({waiting})</span>
           </h2>
-          <div className="grid gap-3 md:grid-cols-2">
-            {pendingReplies.map((draft) => (
+          <div className="grid items-start gap-3 lg:grid-cols-2">
+            {pendingReplies?.map((draft) => (
               <PendingReplyCard
                 key={draft.id}
                 draft={draft}
@@ -142,56 +252,50 @@ export default function Conversations() {
               />
             ))}
           </div>
-        </div>
+        </section>
       )}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        {[
-          ["Threads", stats?.conversations],
-          ["Messages", stats?.messages],
-          ["Awaiting your OK", pendingReplies?.length],
-          ["Posts queued", stats?.pendingPosts],
-        ].map(([label, value]) => (
-          <Card key={label as string} className="border-amber-500/15">
-            <CardContent className="pt-6">
-              <p className="font-serif text-3xl text-amber-400">{value ?? "—"}</p>
-              <p className="mt-1 text-xs uppercase tracking-wider text-muted-foreground">{label}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
 
-      <div className="grid gap-6 md:grid-cols-[280px_1fr]">
+      <div ref={inboxRef} className="grid gap-6 md:grid-cols-[290px_1fr]">
         <div className="space-y-2">
+          <h2 className="px-1 font-display text-sm tracking-[0.14em] text-muted-foreground">
+            INBOX
+          </h2>
           {conversations?.length ? (
             conversations.map((c) => (
               <button
                 key={c.conversationId}
                 onClick={() => setSelected(c.conversationId)}
                 className={cn(
-                  "w-full rounded-lg border p-3 text-left transition-colors",
+                  "flex w-full items-center gap-3 rounded-2xl border p-3 text-left transition-all duration-300",
                   selected === c.conversationId
-                    ? "border-amber-500/50 bg-amber-500/5"
-                    : "border-amber-500/15 hover:border-amber-500/30"
+                    ? "border-sepia/45 bg-beige/20 shadow-soft"
+                    : "border-border bg-card hover:border-beige hover:shadow-soft"
                 )}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm">{c.senderName || "Unknown customer"}</span>
-                  {isPaused(c.botPausedUntil) && (
-                    <Badge className="border-amber-500/40 bg-amber-500/10 text-amber-400">
-                      You
-                    </Badge>
+                <Avatar name={c.senderName || "?"} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-sm text-charcoal">
+                      {c.senderName || "Unknown customer"}
+                    </span>
+                    {isPaused(c.botPausedUntil) && (
+                      <Badge className="border-sepia/40 bg-beige/30 text-[0.6rem] text-sepia">
+                        You
+                      </Badge>
+                    )}
+                  </div>
+                  {c.lastMessageAt && (
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {formatDistanceToNow(new Date(c.lastMessageAt), { addSuffix: true })}
+                    </p>
                   )}
                 </div>
-                {c.lastMessageAt && (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {formatDistanceToNow(new Date(c.lastMessageAt), { addSuffix: true })}
-                  </p>
-                )}
               </button>
             ))
           ) : (
-            <Card className="border-amber-500/15">
+            <Card>
               <CardContent className="pt-6">
+                <MessageSquare className="mb-3 h-5 w-5 text-beige" />
                 <p className="text-sm text-muted-foreground">
                   No messages yet. Connect the Page in Settings, then send your studio a test
                   message.
@@ -203,7 +307,7 @@ export default function Conversations() {
 
         <div>
           {!selected ? (
-            <Card className="border-amber-500/15">
+            <Card>
               <CardContent className="pt-6">
                 <p className="text-sm text-muted-foreground">Pick a thread to read it.</p>
               </CardContent>
@@ -211,7 +315,12 @@ export default function Conversations() {
           ) : (
             <div className="space-y-4">
               <div className="flex items-center justify-between gap-3">
-                <h2 className="font-serif text-xl">{active?.senderName || "Customer"}</h2>
+                <div className="flex items-center gap-3">
+                  <Avatar name={active?.senderName || "Customer"} />
+                  <h2 className="font-display text-lg tracking-[0.08em] text-charcoal">
+                    {active?.senderName || "Customer"}
+                  </h2>
+                </div>
                 {isPaused(active?.botPausedUntil) ? (
                   <Button
                     variant="outline"
@@ -236,15 +345,24 @@ export default function Conversations() {
                   <div
                     key={m.id}
                     className={cn(
-                      "max-w-[85%] rounded-lg px-4 py-2 text-sm",
+                      "max-w-[85%] animate-fade-up rounded-2xl px-4 py-2.5 text-sm",
                       m.senderType === "customer"
-                        ? "border border-amber-500/15 bg-card"
-                        : "ml-auto bg-amber-500/10 text-amber-100"
+                        ? "border border-border bg-card text-charcoal shadow-soft"
+                        : "ml-auto bg-charcoal text-white"
                     )}
                   >
                     <p className="whitespace-pre-wrap">{m.content}</p>
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      {m.senderType === "manual" ? "Studio (typed)" : m.senderType}
+                    <p
+                      className={cn(
+                        "mt-1 text-[0.65rem]",
+                        m.senderType === "customer" ? "text-muted-foreground" : "text-white/55"
+                      )}
+                    >
+                      {m.senderType === "manual"
+                        ? "Studio (typed)"
+                        : m.senderType === "bot"
+                          ? "Sent by agent"
+                          : "Customer"}
                     </p>
                   </div>
                 ))}

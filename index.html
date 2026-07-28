@@ -1,14 +1,20 @@
 <!doctype html>
-<html lang="en-AU" class="dark">
+<html lang="en-AU">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#FFFFFF" />
     <title>City Ink — Front of House</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,400;6..96,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+    <!-- Montserrat is the brand body face. Archivo stands in for Monument
+         Extended (paid licence) until those files are added. -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Montserrat:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
   </head>
-  <body class="bg-background text-foreground antialiased">
+  <body class="bg-background font-sans text-foreground antialiased">
     <div id="root"></div>
     <script type="module" src="/src/client/main.tsx"></script>
   </body>

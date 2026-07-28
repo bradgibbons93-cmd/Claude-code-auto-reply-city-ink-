@@ -28,13 +28,13 @@ export function DialogContent({ className, children }: HTMLAttributes<HTMLDivEle
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      className="fixed inset-0 z-50 flex animate-fade-up items-center justify-center bg-charcoal/25 p-4 backdrop-blur-sm"
       onClick={() => onOpenChange(false)}
     >
       <div
         role="dialog"
         aria-modal="true"
-        className={cn("w-full max-w-lg rounded-lg border p-6", className)}
+        className={cn("w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-lift", className)}
         onClick={(e) => e.stopPropagation()}
       >
         {children}
@@ -48,5 +48,5 @@ export function DialogHeader({ className, ...props }: HTMLAttributes<HTMLDivElem
 }
 
 export function DialogTitle({ className, ...props }: HTMLAttributes<HTMLHeadingElement>) {
-  return <h2 className={cn("font-serif text-xl", className)} {...props} />;
+  return <h2 className={cn("font-display text-xl", className)} {...props} />;
 }

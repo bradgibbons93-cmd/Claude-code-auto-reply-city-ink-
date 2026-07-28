@@ -3,15 +3,109 @@
 @tailwind utilities;
 
 @layer base {
+  body {
+    /* Soft radial warmth behind everything — the brand's editorial feel. */
+    background-color: #ffffff;
+    background-image:
+      radial-gradient(60rem 40rem at 12% -10%, rgba(208, 195, 168, 0.22), transparent 60%),
+      radial-gradient(50rem 34rem at 105% 8%, rgba(163, 139, 122, 0.14), transparent 62%);
+    background-attachment: fixed;
+  }
+
   *:focus-visible {
-    outline: 2px solid #fbbf24;
+    outline: 2px solid #a38b7a;
     outline-offset: 2px;
   }
 }
 
+@layer components {
+  /* Frosted panel — the glassmorphism from the mockup. */
+  .glass {
+    background: rgba(255, 255, 255, 0.72);
+    backdrop-filter: blur(14px) saturate(1.15);
+    -webkit-backdrop-filter: blur(14px) saturate(1.15);
+    border: 1px solid rgba(237, 231, 222, 0.9);
+  }
+
+  /* Cards lift slightly under the cursor. */
+  .lift {
+    transition:
+      transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .lift:hover {
+    transform: translateY(-2px);
+    box-shadow:
+      0 2px 4px rgba(26, 26, 26, 0.05),
+      0 18px 40px -16px rgba(26, 26, 26, 0.16);
+  }
+
+  /* Live dot: steady core, ring breathing out of it. */
+  .live-dot {
+    position: relative;
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 9999px;
+    background: #5a7a5e;
+  }
+  .live-dot::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    background: #5a7a5e;
+    animation: ping-soft 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+
+  @keyframes ping-soft {
+    0% {
+      transform: scale(1);
+      opacity: 0.6;
+    }
+    75%,
+    100% {
+      transform: scale(2.4);
+      opacity: 0;
+    }
+  }
+
+  .shimmer {
+    background-image: linear-gradient(
+      90deg,
+      rgba(208, 195, 168, 0) 0%,
+      rgba(208, 195, 168, 0.35) 50%,
+      rgba(208, 195, 168, 0) 100%
+    );
+    background-size: 200% 100%;
+  }
+}
+
+/* Reveal-on-scroll, driven by the useReveal hook. The hidden state is added
+   by script, so with JS off or broken nothing ends up invisible. */
+@layer utilities {
+  .reveal {
+    opacity: 0;
+    transform: translateY(12px);
+    transition:
+      opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1),
+      transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .reveal.is-visible {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
   }
 }
