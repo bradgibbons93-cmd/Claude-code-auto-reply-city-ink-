@@ -121,6 +121,10 @@ export const timelyConfig = mysqlTable("timely_config", {
   bookingPageUrl: varchar("booking_page_url", { length: 1024 }).notNull(),
   defaultServiceId: varchar("default_service_id", { length: 191 }),
   isConfigured: boolean("is_configured").default(false),
+  // Google Calendar's private "secret address in iCal format". Timely syncs
+  // into that calendar, so this is how the agent sees what's already booked
+  // without needing Timely API credentials.
+  calendarIcsUrl: varchar("calendar_ics_url", { length: 1024 }),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
 
@@ -146,6 +150,10 @@ export const pendingReplies = mysqlTable(
     customerMessageId: varchar("customer_message_id", { length: 191 }).notNull(),
     draftText: text("draft_text").notNull(),
     status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
+    // Set when the customer raised something the agent shouldn't answer on
+    // its own — illness, violence, grief, anything distressing. The draft is
+    // only a holding line and the dashboard flags it for a person to read.
+    isSensitive: boolean("is_sensitive").default(false),
     createdAt: timestamp("created_at").defaultNow(),
     resolvedAt: timestamp("resolved_at"),
   },

@@ -147,6 +147,7 @@ export const appRouter = t.router({
           bookingPageUrl: z.string().url(),
           businessId: z.string().optional(),
           defaultServiceId: z.string().optional(),
+          calendarIcsUrl: z.string().url().optional().or(z.literal("")),
         })
       )
       .mutation(({ input }) => setTimelyConfig(input)),
