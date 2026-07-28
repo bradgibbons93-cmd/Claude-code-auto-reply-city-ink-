@@ -13,6 +13,29 @@
       href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Montserrat:wght@300;400;500;600&display=swap"
       rel="stylesheet"
     />
+    <script>
+      // Applied before first paint so a saved dark theme doesn't flash white
+      // while React boots. Mirrors the logic in lib/useTheme.ts.
+      (function () {
+        try {
+          var saved = localStorage.getItem("cityink-theme");
+          var theme =
+            saved === "light" || saved === "dark"
+              ? saved
+              : window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+          document.documentElement.dataset.theme = theme;
+          if (theme === "dark") {
+            document
+              .querySelector('meta[name="theme-color"]')
+              .setAttribute("content", "#0A0810");
+          }
+        } catch (e) {
+          document.documentElement.dataset.theme = "light";
+        }
+      })();
+    </script>
   </head>
   <body class="bg-background font-sans text-foreground antialiased">
     <div id="root"></div>

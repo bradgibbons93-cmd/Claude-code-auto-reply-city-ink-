@@ -8,34 +8,11 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useReveal } from "@/lib/useReveal";
+import { Avatar } from "@/components/Avatar";
 import { AlertTriangle, Send, Trash2, MessageSquare, Sparkles } from "lucide-react";
 
 function isPaused(until: string | Date | null | undefined) {
   return !!until && new Date(until) > new Date();
-}
-
-function initials(name: string) {
-  return name
-    .split(" ")
-    .map((part) => part[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-}
-
-function Avatar({ name, className }: { name: string; className?: string }) {
-  return (
-    <div
-      className={cn(
-        "flex h-9 w-9 shrink-0 items-center justify-center rounded-full",
-        "bg-beige/40 text-xs font-medium text-charcoal",
-        className
-      )}
-    >
-      {initials(name) || "?"}
-    </div>
-  );
 }
 
 function StatTile({
@@ -348,14 +325,14 @@ export default function Conversations() {
                       "max-w-[85%] animate-fade-up rounded-2xl px-4 py-2.5 text-sm",
                       m.senderType === "customer"
                         ? "border border-border bg-card text-charcoal shadow-soft"
-                        : "ml-auto bg-charcoal text-white"
+                        : "ml-auto bg-primary text-primary-foreground"
                     )}
                   >
                     <p className="whitespace-pre-wrap">{m.content}</p>
                     <p
                       className={cn(
                         "mt-1 text-[0.65rem]",
-                        m.senderType === "customer" ? "text-muted-foreground" : "text-white/55"
+                        m.senderType === "customer" ? "text-muted-foreground" : "text-primary-foreground/60"
                       )}
                     >
                       {m.senderType === "manual"
