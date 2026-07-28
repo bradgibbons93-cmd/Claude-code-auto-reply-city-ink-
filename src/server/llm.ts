@@ -23,7 +23,7 @@ export async function invokeLLM(
     const { data } = await axios.post(
       `${process.env.LLM_BASE_URL || "https://api.anthropic.com"}/v1/messages`,
       {
-        model: process.env.LLM_MODEL || "claude-sonnet-4-6",
+        model: process.env.LLM_MODEL || "claude-sonnet-5",
         max_tokens: maxTokens,
         temperature,
         system: system || undefined,
