@@ -1,13 +1,15 @@
 import { Link, Route, Switch, useLocation } from "wouter";
-import { MessageSquare, Zap, Calendar, Settings as SettingsIcon } from "lucide-react";
+import { MessageSquare, Zap, Calendar, BrainCircuit, Settings as SettingsIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Conversations from "./pages/Conversations";
 import AutoReplyRules from "./pages/AutoReplyRules";
 import PostScheduler from "./pages/PostScheduler";
+import Training from "./pages/Training";
 import Settings from "./pages/Settings";
 
 const NAV = [
   { href: "/", label: "Conversations", icon: MessageSquare },
+  { href: "/training", label: "Training", icon: BrainCircuit },
   { href: "/rules", label: "Auto-replies", icon: Zap },
   { href: "/posts", label: "Posts", icon: Calendar },
   { href: "/settings", label: "Settings", icon: SettingsIcon },
@@ -52,6 +54,7 @@ export default function App() {
       <main className="mx-auto max-w-5xl px-4 py-8 md:px-8">
         <Switch>
           <Route path="/" component={Conversations} />
+          <Route path="/training" component={Training} />
           <Route path="/rules" component={AutoReplyRules} />
           <Route path="/posts" component={PostScheduler} />
           <Route path="/settings" component={Settings} />
