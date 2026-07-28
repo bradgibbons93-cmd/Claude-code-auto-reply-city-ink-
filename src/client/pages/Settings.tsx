@@ -21,6 +21,7 @@ export default function Settings() {
   const [appSecret, setAppSecret] = useState("");
   const [verifyToken, setVerifyToken] = useState("city_ink_webhook_2024");
   const [bookingUrl, setBookingUrl] = useState("");
+  const [calendarUrl, setCalendarUrl] = useState("");
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
 
@@ -37,6 +38,7 @@ export default function Settings() {
 
   useEffect(() => {
     if (timely?.bookingPageUrl) setBookingUrl(timely.bookingPageUrl);
+    if (timely?.calendarIcsUrl) setCalendarUrl(timely.calendarIcsUrl);
   }, [timely]);
 
   const saveFacebook = trpc.config.saveFacebook.useMutation({
@@ -52,7 +54,7 @@ export default function Settings() {
 
   const saveTimely = trpc.config.saveTimely.useMutation({
     onSuccess: () => {
-      toast.success("Booking link saved");
+      toast.success("Calendar saved");
       utils.config.timely.invalidate();
     },
     onError: (error) => toast.error(error.message || "That doesn't look like a valid URL."),
@@ -159,22 +161,40 @@ export default function Settings() {
 
       <Card className="border-amber-500/20">
         <CardHeader>
-          <CardTitle className="font-serif text-xl text-amber-400">Timely link (optional)</CardTitle>
+          <CardTitle className="font-serif text-xl text-amber-400">Calendar</CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
-            Not sent to customers — this is just for your own reference.
+            {timely?.calendarIcsUrl
+              ? "Connected — the agent checks this before offering any time, and only offers slots that are actually free."
+              : "Paste the private iCal address of the Google Calendar that Timely syncs into. Without it the agent won't name a time, it'll say it's checking and get back to them."}
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
           <Input
-            placeholder="https://cityink.gettimely.com/book"
+            placeholder="https://calendar.google.com/calendar/ical/.../private-.../basic.ics"
+            value={calendarUrl}
+            onChange={(e) => setCalendarUrl(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            Google Calendar → the calendar's ⋮ → Settings and sharing → scroll to{" "}
+            <span className="text-amber-400/80">Secret address in iCal format</span> → copy. Treat
+            it like a password — anyone with it can read the calendar.
+          </p>
+
+          <Input
+            placeholder="Timely booking page (optional, for your reference)"
             value={bookingUrl}
             onChange={(e) => setBookingUrl(e.target.value)}
           />
           <Button
-            onClick={() => saveTimely.mutate({ bookingPageUrl: bookingUrl })}
+            onClick={() =>
+              saveTimely.mutate({
+                bookingPageUrl: bookingUrl || "https://bookings.gettimely.com/cityinktattoo/bb/book",
+                calendarIcsUrl: calendarUrl,
+              })
+            }
             disabled={saveTimely.isPending}
           >
-            {saveTimely.isPending ? "Saving…" : "Save link"}
+            {saveTimely.isPending ? "Saving…" : "Save calendar"}
           </Button>
         </CardContent>
       </Card>

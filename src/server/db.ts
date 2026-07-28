@@ -260,11 +260,14 @@ export async function deleteKnowledge(id: number) {
 export async function createPendingReply(
   conversationId: string,
   customerMessageId: string,
-  draftText: string
+  draftText: string,
+  isSensitive = false
 ): Promise<boolean> {
   const db = await getDb();
   try {
-    await db.insert(pendingReplies).values({ conversationId, customerMessageId, draftText });
+    await db
+      .insert(pendingReplies)
+      .values({ conversationId, customerMessageId, draftText, isSensitive });
     return true;
   } catch (error: unknown) {
     const code = (error as { code?: string })?.code;
@@ -414,6 +417,7 @@ export async function setTimelyConfig(input: {
   bookingPageUrl: string;
   businessId?: string;
   defaultServiceId?: string;
+  calendarIcsUrl?: string;
 }) {
   const db = await getDb();
   const existing = await getTimelyConfig();

@@ -94,6 +94,7 @@ const STATEMENTS = [
     booking_page_url VARCHAR(1024) NOT NULL,
     default_service_id VARCHAR(191),
     is_configured BOOLEAN DEFAULT FALSE,
+    calendar_ics_url VARCHAR(1024),
     updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   )`,
 
@@ -111,6 +112,7 @@ const STATEMENTS = [
     customer_message_id VARCHAR(191) NOT NULL,
     draft_text TEXT NOT NULL,
     status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+    is_sensitive BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
     resolved_at TIMESTAMP NULL,
     UNIQUE KEY pending_msg_idx (customer_message_id),
@@ -132,6 +134,8 @@ const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "messenger_conversations", column: "booking_photo_urls", ddl: "JSON" },
   { table: "messenger_conversations", column: "booking_notified_at", ddl: "TIMESTAMP NULL" },
   { table: "facebook_config", column: "owner_psid", ddl: "VARCHAR(191)" },
+  { table: "timely_config", column: "calendar_ics_url", ddl: "VARCHAR(1024)" },
+  { table: "pending_replies", column: "is_sensitive", ddl: "BOOLEAN DEFAULT FALSE" },
 ];
 
 async function ensureColumns(): Promise<void> {

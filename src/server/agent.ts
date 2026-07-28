@@ -13,6 +13,7 @@ import {
   pauseBot,
 } from "./db.js";
 import { invokeLLMJson, type ChatMessage } from "./llm.js";
+import { availabilityForPrompt } from "./calendar.js";
 import { sendMessengerMessage, sendTypingIndicator, getSenderProfile } from "./facebook.js";
 
 const HANDOFF_HOURS = Number(process.env.HANDOFF_PAUSE_HOURS || 12);
@@ -22,6 +23,10 @@ type Intent = "booking" | "pricing" | "aftercare" | "artists" | "other";
 interface AgentDecision {
   reply: string;
   intent: Intent;
+  // True when the customer has raised something distressing — illness,
+  // bereavement, family violence, money hardship. Brad's instruction: don't
+  // answer it, just say the studio will come back to them, and flag it.
+  sensitive?: boolean;
   // Only present when intent is "booking" — whatever the model could pick
   // out of THIS message. Missing/unclear fields come back empty, and the
   // caller merges them onto what earlier messages already gave.
@@ -52,7 +57,8 @@ async function decide(
   history: ChatMessage[],
   studioFacts: string,
   known: BookingState,
-  hasPhoto: boolean
+  hasPhoto: boolean,
+  availability: string
 ): Promise<AgentDecision> {
   const missing = [
     !known.name && "their full name",
@@ -69,13 +75,19 @@ HOW THE STUDIO ACTUALLY TALKS (match this closely — it's taken from real chats
 - "Yeah 😊 it would take about an hour and a half I'd say, mayb less"
 - "Hey Bethany, sorry for the late reply."
 - "Let me know whenever your ready and il send over the details"
+- "Il get back to you in the next 5 minutes 🙂"
+- "Umm roughly an hour"
+- "Okay so for two in one hand would be around 200 for the four of them would be around 300"
 
 So: warm, casual, short. First name if you know it. An emoji here and there (😊 👌) but not every message. Contractions and relaxed grammar are fine — this is a text, not an email. Never corporate, never "We appreciate your enquiry". One or two sentences most of the time.
 
 NEVER:
 - Invent a price, a date, an artist's availability, or a policy that isn't given to you below.
 - Give medical advice. Anything that sounds infected or isn't healing → tell them to see a doctor.
-- Promise a specific appointment time. Offer times only if they're listed under "Times the studio has confirmed" below; otherwise say you'll check and come back to them.
+- Promise an appointment time that isn't listed as free below.
+
+STOP AND HAND OVER — this matters more than being helpful:
+If the customer mentions anything distressing or personal — illness, hospital, a death, family violence, abuse, mental health, serious money hardship, anything you'd want a human to read first — do NOT try to answer it, comfort them at length, or carry on selling. Set "sensitive": true and make your whole reply a short, kind holding line and nothing more, e.g. "Hey, thanks for letting us know 🙂 someone from the team will get back to you as soon as possible." No price, no booking questions, no advice. A person takes it from there.
 
 WHAT THE STUDIO HAS TOLD YOU (this is your only source of facts):
 ${studioFacts || "(nothing configured yet — stay general, don't quote prices, defer to the studio)"}
@@ -84,7 +96,11 @@ THE BOOKING FLOW — work out which step you're at and do that step:
 1. First enquiry / "get a quote" → ask for a reference photo, rough size, and where on the body. Real example: "Please send over any ideas and/ or reference photos along with a rough size and area you would like for the tattoo."
 2. Photo + details received → thank them and give a BALLPARK RANGE of about $100 wide, e.g. "Hey ${"${name}"} 😊 thanks for sending this through! You would be looking at about $200 - $250, would that suit you?" Only quote from the price guidance above — if there's none, say the team will confirm a price shortly.
 3. They push back on price or give a lower budget → don't just say no. Ask their budget, then offer a cheaper option if the studio has one listed above (a less experienced artist or apprentice), or mention Afterpay. Real example: "Okay no worries at all sorry to hear! We do have an apprentice that would be able to do this for $100 if you'd be comfortable with that? I can send over some of their work if you like"
-4. Happy with the price → this is where a time gets offered. Do NOT make one up. Say you'll check what's free and come straight back to them.
+4. Happy with the price → offer times. ${
+    availability
+      ? `These slots are FREE in the studio calendar right now — offer these exact ones and nothing else: ${availability}. Real example: "Mim can do this at 3pm 🙂 would you like to confirm the booking?"`
+      : `You cannot see the calendar right now, so do NOT name a time. Say you'll check and come straight back — real example: "Il get back to you in the next 5 minutes 🙂"`
+  }
 5. Time agreed → deposit. Real example: "We do just need a $50 deposit, which would leave just $50 on the day. Let me know whenever your ready and il send over the details"
 6. Deposit paid → confirm the booking with the address and what to expect on the day.
 
@@ -112,7 +128,7 @@ Classify the customer's latest message as exactly one intent:
 If intent is "booking", pull out anything the LATEST message gives you toward name/phone/dates — leave a field out of "extracted" entirely if this message doesn't mention it.
 
 Reply with JSON only, no prose, no code fence:
-{"reply": "your message to the customer", "intent": "booking", "extracted": {"name": "...", "phone": "...", "dates": "..."}}`;
+{"reply": "your message to the customer", "intent": "booking", "sensitive": false, "extracted": {"name": "...", "phone": "...", "dates": "..."}}`;
 
   return invokeLLMJson<AgentDecision>(
     [{ role: "system", content: system }, ...history],
@@ -231,6 +247,8 @@ export async function handleCustomerMessage(
   await sendTypingIndicator(senderId);
 
   const rule = await matchRule(text);
+  // Read once per message so both branches below see the same free slots.
+  const availability = await availabilityForPrompt().catch(() => "");
   const known: BookingState = {
     name: conversation?.bookingName ?? null,
     phone: conversation?.bookingPhone ?? null,
@@ -240,6 +258,7 @@ export async function handleCustomerMessage(
   let reply: string;
   let intent: Intent = "other";
   let extracted: AgentDecision["extracted"];
+  let sensitive = false;
 
   // A plain rule (no booking flag) is a fixed answer — no need to spend an
   // LLM call on it. A rule marked to start the booking hand-off still uses
@@ -253,7 +272,7 @@ export async function handleCustomerMessage(
       role: t.senderType === "customer" ? "user" : "assistant",
       content: t.content,
     }));
-    const decision = await decide(history, "", known, photoUrls.length > 0);
+    const decision = await decide(history, "", known, photoUrls.length > 0, availability);
     reply = rule.responseText;
     intent = "booking";
     extracted = decision.extracted;
@@ -267,10 +286,11 @@ export async function handleCustomerMessage(
       content: t.content,
     }));
 
-    const decision = await decide(history, studioFacts, known, photoUrls.length > 0);
+    const decision = await decide(history, studioFacts, known, photoUrls.length > 0, availability);
     reply = decision.reply;
     intent = decision.intent;
     extracted = decision.extracted;
+    sensitive = !!decision.sensitive;
   }
 
   if (intent === "booking" || photoUrls.length > 0) {
@@ -302,7 +322,7 @@ export async function handleCustomerMessage(
 
   // Nothing reaches a customer without Brad seeing it first — every reply,
   // including fixed Auto-reply text, waits in the dashboard for approval.
-  const queued = await createPendingReply(senderId, messageId, reply);
+  const queued = await createPendingReply(senderId, messageId, reply, sensitive);
   if (queued) {
     console.log(`[Agent] Draft queued for ${senderId} (message ${messageId})`);
     await notifyOwnerOfDraft();
