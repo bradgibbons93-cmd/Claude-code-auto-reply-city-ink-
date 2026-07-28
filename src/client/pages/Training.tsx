@@ -29,6 +29,11 @@ const STARTERS: Array<{ question: string; answer: string }> = [
       "Small pieces start around $100 - $150. Always quote a range of about $100, and say the final price depends on the size on the day.",
   },
   {
+    question: "Payment options",
+    answer:
+      "We have Afterpay available. Offer it when someone says the price is a stretch, rather than discounting.",
+  },
+  {
     question: "Studio address",
     answer: "(Add the studio address here so the agent can send it on confirmation.)",
   },
