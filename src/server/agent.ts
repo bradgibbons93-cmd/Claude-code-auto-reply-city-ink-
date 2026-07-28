@@ -60,43 +60,56 @@ async function decide(
     !known.dates && "which day(s) or timeframe they'd like",
   ].filter(Boolean);
 
-  const system = `You are the front-of-house assistant for City Ink, a tattoo studio. You reply to Facebook Messenger enquiries.
+  const system = `You are answering Facebook Messenger enquiries for City Ink Tattoo Geelong, as if you were Brad or one of the team. Everything you write is reviewed by Brad before it sends, so write it exactly as he would send it.
 
-How to write:
-- Two sentences at most. Messenger, not email.
-- Warm and straight-talking. No corporate filler, no exclamation-mark spam.
-- Never invent prices, dates, artist availability, or policies. If you don't know, say the studio will confirm.
-- Never give medical advice. For anything that sounds infected or is not healing, tell them to see a doctor.
+HOW THE STUDIO ACTUALLY TALKS (match this closely — it's taken from real chats):
+- "Hey Amber 😊 thanks for sending this over"
+- "Okay cool no worries at all 😊"
+- "No worries at all 👌"
+- "Yeah 😊 it would take about an hour and a half I'd say, mayb less"
+- "Hey Bethany, sorry for the late reply."
+- "Let me know whenever your ready and il send over the details"
 
-What the studio has told you:
-${studioFacts || "(nothing configured yet — stay general and defer to the studio)"}
+So: warm, casual, short. First name if you know it. An emoji here and there (😊 👌) but not every message. Contractions and relaxed grammar are fine — this is a text, not an email. Never corporate, never "We appreciate your enquiry". One or two sentences most of the time.
 
-Bookings are entered by hand, there's no online booking page. When someone wants to book:
-- Already collected from them: ${
+NEVER:
+- Invent a price, a date, an artist's availability, or a policy that isn't given to you below.
+- Give medical advice. Anything that sounds infected or isn't healing → tell them to see a doctor.
+- Promise a specific appointment time. Offer times only if they're listed under "Times the studio has confirmed" below; otherwise say you'll check and come back to them.
+
+WHAT THE STUDIO HAS TOLD YOU (this is your only source of facts):
+${studioFacts || "(nothing configured yet — stay general, don't quote prices, defer to the studio)"}
+
+THE BOOKING FLOW — work out which step you're at and do that step:
+1. First enquiry / "get a quote" → ask for a reference photo, rough size, and where on the body. Real example: "Please send over any ideas and/ or reference photos along with a rough size and area you would like for the tattoo."
+2. Photo + details received → thank them and give a BALLPARK RANGE of about $100 wide, e.g. "Hey ${"${name}"} 😊 thanks for sending this through! You would be looking at about $200 - $250, would that suit you?" Only quote from the price guidance above — if there's none, say the team will confirm a price shortly.
+3. They push back on price or give a lower budget → don't just say no. Ask their budget, then offer a cheaper option if the studio has one listed above (a less experienced artist or apprentice), or mention Afterpay. Real example: "Okay no worries at all sorry to hear! We do have an apprentice that would be able to do this for $100 if you'd be comfortable with that? I can send over some of their work if you like"
+4. Happy with the price → this is where a time gets offered. Do NOT make one up. Say you'll check what's free and come straight back to them.
+5. Time agreed → deposit. Real example: "We do just need a $50 deposit, which would leave just $50 on the day. Let me know whenever your ready and il send over the details"
+6. Deposit paid → confirm the booking with the address and what to expect on the day.
+
+RETURNING CUSTOMERS: if the history shows they've booked or paid a deposit with you before, open warmly and thank them for coming back.
+
+WHAT YOU'VE COLLECTED SO FAR FOR THIS BOOKING:
+- ${
     known.name || known.phone || known.dates
-      ? [known.name && `name: ${known.name}`, known.phone && `phone: ${known.phone}`, known.dates && `dates: ${known.dates}`]
+      ? [known.name && `name: ${known.name}`, known.phone && `phone: ${known.phone}`, known.dates && `days they want: ${known.dates}`]
           .filter(Boolean)
-          .join(", ")
+          .join("\n- ")
       : "nothing yet"
   }
 - Still needed: ${missing.length ? missing.join(", ") : "nothing — everything's in"}
-- Ask only for what's still needed, one or two things at a time. Don't re-ask for what's already given.
-- Mention once that a reference photo of what they want is welcome if they have one, but don't insist on it.
-${hasPhoto ? "- They just sent an image — acknowledge you've got it." : ""}
-- Once everything needed is in, tell them the studio will confirm and be in touch shortly. Don't promise a time yourself.
+Ask only for what's still missing, one or two things at a time, and never re-ask for something they've already given.
+${hasPhoto ? "- They just sent a photo — acknowledge you've got it before anything else." : ""}
 
 Classify the customer's latest message as exactly one intent:
-- "booking" — they want to make, move, or ask about an appointment. Also
-  "booking" if "Still needed" above is non-empty and this message looks like
-  it's answering that — a name, a phone number, or a day/date on its own,
-  with no booking keyword, still counts once the conversation is already
-  mid-booking.
-- "pricing" — they're asking what something costs
+- "booking" — they want to make, move, or ask about an appointment, OR they're answering something you still need (a name, a number, a day) while a booking is already in progress
+- "pricing" — asking what something costs
 - "aftercare" — healing, washing, peeling, touch-ups
 - "artists" — who works there, styles, portfolios
 - "other" — anything else
 
-If intent is "booking", also pull out anything the LATEST message gives you toward name/phone/dates — leave a field out of "extracted" entirely if this message doesn't mention it.
+If intent is "booking", pull out anything the LATEST message gives you toward name/phone/dates — leave a field out of "extracted" entirely if this message doesn't mention it.
 
 Reply with JSON only, no prose, no code fence:
 {"reply": "your message to the customer", "intent": "booking", "extracted": {"name": "...", "phone": "...", "dates": "..."}}`;
@@ -181,6 +194,11 @@ export async function handleCustomerMessage(
 ): Promise<void> {
   const profile = await getSenderProfile(senderId);
   const conversation = await getOrCreateConversation(senderId, profile?.name);
+  console.log(
+    `[Agent] Message from ${senderId} (${profile?.name || "name unavailable"}), conversation row ${
+      conversation?.id ?? "MISSING"
+    }`
+  );
 
   // BUG FIX #4 — Facebook retries deliveries. A duplicate mid stops here.
   const isNew = await recordMessage(senderId, messageId, "customer", text || "(sent a photo)");
@@ -222,18 +240,13 @@ export async function handleCustomerMessage(
   let reply: string;
   let intent: Intent = "other";
   let extracted: AgentDecision["extracted"];
-  // Text Brad wrote himself in Auto-replies is pre-approved — it sends
-  // immediately, same as before. Anything the model composed (a free-form
-  // reply, or the "you're all set" line once a booking completes) waits in
-  // the dashboard for him to approve, edit, or reject first.
-  const isPrewritten = !!rule && !rule.sendBookingLink;
 
   // A plain rule (no booking flag) is a fixed answer — no need to spend an
   // LLM call on it. A rule marked to start the booking hand-off still uses
   // its own wording, but also runs extraction so the flow below can start
   // collecting name/phone/dates on the same turn.
-  if (isPrewritten) {
-    reply = rule!.responseText;
+  if (rule && !rule.sendBookingLink) {
+    reply = rule.responseText;
   } else if (rule && rule.sendBookingLink) {
     const turns = await getRecentTurns(senderId, 10);
     const history: ChatMessage[] = turns.map((t) => ({
@@ -287,12 +300,14 @@ export async function handleCustomerMessage(
     }
   }
 
-  if (isPrewritten) {
-    await sendMessengerMessage(senderId, reply);
-    await recordMessage(senderId, `${messageId}_reply`, "bot", reply, reply);
+  // Nothing reaches a customer without Brad seeing it first — every reply,
+  // including fixed Auto-reply text, waits in the dashboard for approval.
+  const queued = await createPendingReply(senderId, messageId, reply);
+  if (queued) {
+    console.log(`[Agent] Draft queued for ${senderId} (message ${messageId})`);
+    await notifyOwnerOfDraft();
   } else {
-    const queued = await createPendingReply(senderId, messageId, reply);
-    if (queued) await notifyOwnerOfDraft();
+    console.warn(`[Agent] Draft already queued for message ${messageId} — skipped`);
   }
 }
 

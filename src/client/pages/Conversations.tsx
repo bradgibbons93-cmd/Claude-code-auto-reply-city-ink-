@@ -15,12 +15,28 @@ function isPaused(until: string | Date | null | undefined) {
 function PendingReplyCard({
   draft,
   senderName,
+  onOpenThread,
 }: {
-  draft: { id: number; draftText: string; createdAt: string | Date | null };
+  draft: {
+    id: number;
+    conversationId: string;
+    draftText: string;
+    createdAt: string | Date | null;
+  };
   senderName: string;
+  onOpenThread: (conversationId: string) => void;
 }) {
   const utils = trpc.useUtils();
   const [text, setText] = useState(draft.draftText);
+
+  // What the customer actually said, so the draft can be judged without
+  // having to go hunting for the thread first.
+  const { data: thread } = trpc.conversations.messages.useQuery({
+    conversationId: draft.conversationId,
+  });
+  const lastFromCustomer = [...(thread ?? [])]
+    .reverse()
+    .find((m) => m.senderType === "customer");
 
   const approve = trpc.pendingReplies.approve.useMutation({
     onSuccess: () => {
@@ -40,9 +56,22 @@ function PendingReplyCard({
     <Card className="border-amber-500/30 bg-amber-500/5">
       <CardContent className="space-y-3 pt-6">
         <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>To {senderName}</span>
+          <button
+            onClick={() => onOpenThread(draft.conversationId)}
+            className="underline-offset-2 hover:text-amber-400 hover:underline"
+          >
+            To {senderName} — open thread
+          </button>
           {draft.createdAt && <span>{formatDistanceToNow(new Date(draft.createdAt), { addSuffix: true })}</span>}
         </div>
+
+        {lastFromCustomer && (
+          <div className="rounded-lg border border-amber-500/15 bg-card px-3 py-2">
+            <p className="text-[11px] uppercase tracking-wider text-muted-foreground">They said</p>
+            <p className="mt-1 whitespace-pre-wrap text-sm">{lastFromCustomer.content}</p>
+          </div>
+        )}
+
         <Textarea value={text} onChange={(e) => setText(e.target.value)} className="min-h-20" />
         <div className="flex gap-2">
           <Button
@@ -109,6 +138,7 @@ export default function Conversations() {
                 key={draft.id}
                 draft={draft}
                 senderName={senderNameFor(draft.conversationId)}
+                onOpenThread={setSelected}
               />
             ))}
           </div>
@@ -118,7 +148,7 @@ export default function Conversations() {
         {[
           ["Threads", stats?.conversations],
           ["Messages", stats?.messages],
-          ["Agent replies", stats?.botReplies],
+          ["Awaiting your OK", pendingReplies?.length],
           ["Posts queued", stats?.pendingPosts],
         ].map(([label, value]) => (
           <Card key={label as string} className="border-amber-500/15">
