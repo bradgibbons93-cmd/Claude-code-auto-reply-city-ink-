@@ -67,16 +67,60 @@ export async function invokeLLM(
 }
 
 /** Asks for JSON and tolerates the model wrapping it in a code fence. */
-export async function invokeLLMJson<T>(messages: ChatMessage[], fallback: T): Promise<T> {
+/** The last thing that went wrong, so /health can report it without logs. */
+let lastError: { message: string; at: string } | null = null;
+export function getLastLlmError() {
+  return lastError;
+}
+
+export interface LlmResult<T> {
+  data: T;
+  /** False when the model never answered — the caller got the fallback. */
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * Asks for JSON and tolerates the model wrapping it in a code fence.
+ *
+ * Returns `ok: false` rather than throwing, but callers must not treat a
+ * failed call as a considered answer: a missing API key used to surface as
+ * "one of the team will come back to you shortly" on every single message,
+ * which reads like a decision the agent made instead of the outage it is.
+ */
+export async function invokeLLMJson<T>(
+  messages: ChatMessage[],
+  fallback: T
+): Promise<LlmResult<T>> {
+  if (!process.env.LLM_API_KEY) {
+    const message = "LLM_API_KEY is not set — no reply can be generated.";
+    lastError = { message, at: new Date().toISOString() };
+    console.error(`[LLM] ${message}`);
+    return { data: fallback, ok: false, error: message };
+  }
+
   try {
     const raw = await invokeLLM(messages, { temperature: 0.3 });
     const cleaned = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
     const start = cleaned.indexOf("{");
     const end = cleaned.lastIndexOf("}");
-    if (start === -1 || end === -1) return fallback;
-    return JSON.parse(cleaned.slice(start, end + 1)) as T;
+    if (start === -1 || end === -1) {
+      const message = "Model replied without JSON.";
+      lastError = { message, at: new Date().toISOString() };
+      console.error(`[LLM] ${message} Raw: ${raw.slice(0, 200)}`);
+      return { data: fallback, ok: false, error: message };
+    }
+    lastError = null;
+    return { data: JSON.parse(cleaned.slice(start, end + 1)) as T, ok: true };
   } catch (error) {
-    console.error("[LLM] JSON parse failed:", (error as Error).message);
-    return fallback;
+    // Axios puts the useful part (401 invalid key, 429 out of credit) in the
+    // response body, so surface that rather than just "Request failed".
+    const err = error as { message?: string; response?: { status?: number; data?: unknown } };
+    const detail = err.response
+      ? `HTTP ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 300)}`
+      : err.message || String(error);
+    lastError = { message: detail, at: new Date().toISOString() };
+    console.error(`[LLM] Call failed — ${detail}`);
+    return { data: fallback, ok: false, error: detail };
   }
 }
