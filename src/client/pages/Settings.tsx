@@ -75,9 +75,9 @@ export default function Settings() {
 
   return (
     <div className="space-y-6">
-      <Card className="border-amber-500/20">
+      <Card className="border-border">
         <CardHeader>
-          <CardTitle className="font-serif text-xl text-amber-400">Facebook Page</CardTitle>
+          <CardTitle className="font-display text-xl text-charcoal">Facebook Page</CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
             {fb?.isConfigured
               ? `Connected to ${fb.pageName || fb.pageId}.`
@@ -127,9 +127,9 @@ export default function Settings() {
         </CardContent>
       </Card>
 
-      <Card className="border-amber-500/20">
+      <Card className="border-border">
         <CardHeader>
-          <CardTitle className="font-serif text-xl text-amber-400">Booking alerts</CardTitle>
+          <CardTitle className="font-display text-xl text-charcoal">Booking alerts</CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
             Bookings are entered by hand — the agent collects the customer's name, phone, and
             preferred dates, then messages the studio's own Facebook account so it can be typed
@@ -140,8 +140,8 @@ export default function Settings() {
           <div
             className={`rounded-lg border p-3 text-sm ${
               fb?.hasOwner
-                ? "border-green-500/30 bg-green-500/10 text-green-400"
-                : "border-amber-500/30 bg-amber-500/10 text-amber-400"
+                ? "border-success/40 bg-success/10 text-success"
+                : "border-border bg-beige/20 text-charcoal"
             }`}
           >
             {fb?.hasOwner ? (
@@ -150,7 +150,7 @@ export default function Settings() {
               <>
                 No alert contact yet. From the personal Facebook account that should receive
                 bookings, message the City Ink Page:{" "}
-                <code className="rounded bg-black/30 px-1">
+                <code className="rounded bg-surface px-1">
                   set owner {verifyToken || "<your webhook verify token>"}
                 </code>
               </>
@@ -159,9 +159,9 @@ export default function Settings() {
         </CardContent>
       </Card>
 
-      <Card className="border-amber-500/20">
+      <Card className="border-border">
         <CardHeader>
-          <CardTitle className="font-serif text-xl text-amber-400">Calendar</CardTitle>
+          <CardTitle className="font-display text-xl text-charcoal">Calendar</CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
             {timely?.calendarIcsUrl
               ? "Connected — the agent checks this before offering any time, and only offers slots that are actually free."
@@ -176,7 +176,7 @@ export default function Settings() {
           />
           <p className="text-xs text-muted-foreground">
             Google Calendar → the calendar's ⋮ → Settings and sharing → scroll to{" "}
-            <span className="text-amber-400/80">Secret address in iCal format</span> → copy. Treat
+            <span className="text-charcoal/80">Secret address in iCal format</span> → copy. Treat
             it like a password — anyone with it can read the calendar.
           </p>
 
@@ -199,9 +199,9 @@ export default function Settings() {
         </CardContent>
       </Card>
 
-      <Card className="border-amber-500/20">
+      <Card className="border-border">
         <CardHeader>
-          <CardTitle className="font-serif text-xl text-amber-400">What the agent knows</CardTitle>
+          <CardTitle className="font-display text-xl text-charcoal">What the agent knows</CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
             Opening hours, deposit policy, parking, minimum age. Anything not in here, the agent
             won't claim to know.
@@ -238,10 +238,10 @@ export default function Settings() {
             {knowledge?.map((k) => (
               <div
                 key={k.id}
-                className="flex items-start justify-between gap-3 rounded-lg border border-amber-500/15 p-3"
+                className="flex items-start justify-between gap-3 rounded-lg border border-border p-3"
               >
                 <div>
-                  <p className="text-sm text-amber-400">{k.question}</p>
+                  <p className="text-sm text-charcoal">{k.question}</p>
                   <p className="mt-1 text-sm text-muted-foreground">{k.answer}</p>
                 </div>
                 <Button

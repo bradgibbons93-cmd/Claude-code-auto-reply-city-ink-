@@ -17,9 +17,9 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 
 const STATUS_STYLES: Record<string, string> = {
-  published: "border-green-500/50 bg-green-500/20 text-green-400",
+  published: "border-success/40 bg-success/10 text-success",
   scheduled: "border-blue-500/50 bg-blue-500/20 text-blue-400",
-  draft: "border-amber-500/50 bg-amber-500/20 text-amber-400",
+  draft: "border-sepia/45 bg-beige/30 text-charcoal",
   failed: "border-red-500/50 bg-red-500/20 text-red-400",
 };
 
@@ -78,7 +78,7 @@ export default function PostScheduler() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="flex items-center gap-2 font-serif text-2xl text-amber-400">
+          <h2 className="flex items-center gap-2 font-display text-2xl text-charcoal">
             <Calendar className="h-5 w-5" />
             Posts
           </h2>
@@ -94,9 +94,9 @@ export default function PostScheduler() {
               New post
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl border-amber-500/20 bg-card">
+          <DialogContent className="max-w-2xl border-border bg-card">
             <DialogHeader>
-              <DialogTitle className="text-amber-400">Schedule a post</DialogTitle>
+              <DialogTitle className="text-charcoal">Schedule a post</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
               <div>
@@ -105,7 +105,7 @@ export default function PostScheduler() {
                   placeholder="Write it, or describe what you want and let the agent draft it."
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
-                  className="mt-2 min-h-32 border-amber-500/20"
+                  className="mt-2 min-h-32 border-border"
                 />
                 <Button
                   variant="outline"
@@ -132,7 +132,7 @@ export default function PostScheduler() {
                     type="datetime-local"
                     value={scheduledAt}
                     onChange={(e) => setScheduledAt(e.target.value)}
-                    className="mt-2 border-amber-500/20"
+                    className="mt-2 border-border"
                   />
                 </div>
                 <div>
@@ -141,7 +141,7 @@ export default function PostScheduler() {
                     placeholder="https://…"
                     value={imageUrl}
                     onChange={(e) => setImageUrl(e.target.value)}
-                    className="mt-2 border-amber-500/20"
+                    className="mt-2 border-border"
                   />
                 </div>
               </div>
@@ -157,7 +157,7 @@ export default function PostScheduler() {
       <div className="grid gap-4">
         {posts?.length ? (
           posts.map((post) => (
-            <Card key={post.id} className="border-amber-500/20">
+            <Card key={post.id} className="border-border">
               <CardContent className="pt-6">
                 <div className="mb-3 flex items-start justify-between gap-4">
                   <div className="flex flex-wrap items-center gap-2">
@@ -186,13 +186,13 @@ export default function PostScheduler() {
                   <img
                     src={post.imageUrl}
                     alt=""
-                    className="mb-3 max-h-32 rounded border border-amber-500/20"
+                    className="mb-3 max-h-32 rounded border border-border"
                   />
                 )}
 
                 <p className="text-sm text-muted-foreground">
                   {post.status === "published" ? "Published" : "Publishing"}{" "}
-                  <span className="text-amber-400">
+                  <span className="text-charcoal">
                     {format(new Date(post.scheduledAt), "d MMM yyyy, HH:mm")}
                   </span>
                 </p>
@@ -204,7 +204,7 @@ export default function PostScheduler() {
             </Card>
           ))
         ) : (
-          <Card className="border-amber-500/20">
+          <Card className="border-border">
             <CardContent className="py-12 text-center">
               <p className="text-muted-foreground">Nothing queued.</p>
             </CardContent>
