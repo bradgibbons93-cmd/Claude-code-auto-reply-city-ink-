@@ -59,7 +59,7 @@ async function decide(
   known: BookingState,
   hasPhoto: boolean,
   availability: string
-): Promise<AgentDecision> {
+): Promise<AgentDecision & { ok: boolean }> {
   const missing = [
     !known.name && "their full name",
     !known.phone && "a phone number",
@@ -130,13 +130,16 @@ If intent is "booking", pull out anything the LATEST message gives you toward na
 Reply with JSON only, no prose, no code fence:
 {"reply": "your message to the customer", "intent": "booking", "sensitive": false, "extracted": {"name": "...", "phone": "...", "dates": "..."}}`;
 
-  return invokeLLMJson<AgentDecision>(
+  const result = await invokeLLMJson<AgentDecision>(
     [{ role: "system", content: system }, ...history],
     {
+      // Only ever seen when the model didn't answer. The caller flags the
+      // draft so this can't be mistaken for the agent's own judgement.
       reply: "Thanks for getting in touch — one of the team will come back to you shortly.",
       intent: "other",
     }
   );
+  return { ...result.data, ok: result.ok };
 }
 
 /** Pings the studio owner's own Messenger thread so they can enter it into Timely. */
@@ -244,6 +247,15 @@ export async function handleCustomerMessage(
     }
   }
 
+  // The studio's own account messages the Page to register for alerts and to
+  // test things. Drafting a customer reply back at them is noise, and it was
+  // the reason the same line kept arriving.
+  const config = await getFacebookConfig().catch(() => undefined);
+  if (config?.ownerPsid && config.ownerPsid === senderId) {
+    console.log("[Agent] Message from the studio's own account — not drafting a reply");
+    return;
+  }
+
   await sendTypingIndicator(senderId);
 
   const rule = await matchRule(text);
@@ -259,6 +271,7 @@ export async function handleCustomerMessage(
   let intent: Intent = "other";
   let extracted: AgentDecision["extracted"];
   let sensitive = false;
+  let llmFailed = false;
 
   // A plain rule (no booking flag) is a fixed answer — no need to spend an
   // LLM call on it. A rule marked to start the booking hand-off still uses
@@ -276,6 +289,7 @@ export async function handleCustomerMessage(
     reply = rule.responseText;
     intent = "booking";
     extracted = decision.extracted;
+    llmFailed = !decision.ok;
   } else {
     const knowledge = await getStudioKnowledge().catch(() => []);
     const studioFacts = knowledge.map((k) => `Q: ${k.question}\nA: ${k.answer}`).join("\n\n");
@@ -291,6 +305,14 @@ export async function handleCustomerMessage(
     intent = decision.intent;
     extracted = decision.extracted;
     sensitive = !!decision.sensitive;
+    llmFailed = !decision.ok;
+
+    // A failed call must not look like a considered reply. Say plainly that
+    // it needs writing by hand, and flag the row so the dashboard shows it.
+    if (llmFailed) {
+      reply =
+        "[The AI couldn't generate a reply — check LLM_API_KEY in Railway. Write this one yourself.]";
+    }
   }
 
   if (intent === "booking" || photoUrls.length > 0) {
@@ -322,7 +344,7 @@ export async function handleCustomerMessage(
 
   // Nothing reaches a customer without Brad seeing it first — every reply,
   // including fixed Auto-reply text, waits in the dashboard for approval.
-  const queued = await createPendingReply(senderId, messageId, reply, sensitive);
+  const queued = await createPendingReply(senderId, messageId, reply, sensitive || llmFailed);
   if (queued) {
     console.log(`[Agent] Draft queued for ${senderId} (message ${messageId})`);
     await notifyOwnerOfDraft();
@@ -369,7 +391,7 @@ export async function generateCaption(prompt: string): Promise<string> {
   const knowledge = await getStudioKnowledge().catch(() => []);
   const facts = knowledge.map((k) => `${k.question}: ${k.answer}`).join("\n");
 
-  const result = await invokeLLMJson<{ caption: string }>(
+  const { data: result, ok } = await invokeLLMJson<{ caption: string }>(
     [
       {
         role: "system",
@@ -391,6 +413,6 @@ Reply with JSON only: {"caption": "..."}`,
     { caption: "" }
   );
 
-  if (!result.caption) throw new Error("Caption generation failed");
+  if (!ok || !result.caption) throw new Error("Caption generation failed");
   return result.caption;
 }
