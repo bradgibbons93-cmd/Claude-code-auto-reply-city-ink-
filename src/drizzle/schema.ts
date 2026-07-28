@@ -162,3 +162,32 @@ export const pendingReplies = mysqlTable(
     convIdx: index("pending_conv_idx").on(t.conversationId),
   })
 );
+
+/**
+ * Real exchanges from the studio's exported Messenger history, imported
+ * through the Training tab. The agent looks up the closest few of these
+ * when drafting, so it answers new enquiries the way the studio already
+ * answered similar ones.
+ */
+export const exampleExchanges = mysqlTable("example_exchanges", {
+  id: int("id").primaryKey().autoincrement(),
+  customerMessage: text("customer_message").notNull(),
+  studioReply: text("studio_reply").notNull(),
+  // Hash of the pair, so re-importing the same export doesn't duplicate.
+  fingerprint: varchar("fingerprint", { length: 64 }).notNull(),
+  source: varchar("source", { length: 255 }),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+/**
+ * What Brad changed a draft into before sending. These are the strongest
+ * signal available — a direct before/after on this exact agent's output —
+ * so recent ones are shown to the model as corrections to learn from.
+ */
+export const draftEdits = mysqlTable("draft_edits", {
+  id: int("id").primaryKey().autoincrement(),
+  customerMessage: text("customer_message"),
+  draftText: text("draft_text").notNull(),
+  sentText: text("sent_text").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});

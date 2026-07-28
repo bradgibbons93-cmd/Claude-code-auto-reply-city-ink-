@@ -18,6 +18,10 @@ import {
   createKnowledge,
   deleteKnowledge,
   getPendingReplies,
+  importExampleExchanges,
+  countExampleExchanges,
+  clearExampleExchanges,
+  getRecentDraftEdits,
   getStats,
   getDashboardStats,
   pauseBot,
@@ -117,6 +121,24 @@ export const appRouter = t.router({
     remove: publicProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteKnowledge(input.id)),
+  }),
+
+  history: t.router({
+    count: publicProcedure.query(() => countExampleExchanges()),
+    edits: publicProcedure.query(() => getRecentDraftEdits(20)),
+    // Pairs are extracted in the browser so a big export never has to be
+    // uploaded whole; only the useful message/reply pairs come over.
+    import: publicProcedure
+      .input(
+        z.object({
+          source: z.string().optional(),
+          pairs: z
+            .array(z.object({ customerMessage: z.string(), studioReply: z.string() }))
+            .max(5000),
+        })
+      )
+      .mutation(({ input }) => importExampleExchanges(input.pairs, input.source)),
+    clear: publicProcedure.mutation(() => clearExampleExchanges()),
   }),
 
   config: t.router({

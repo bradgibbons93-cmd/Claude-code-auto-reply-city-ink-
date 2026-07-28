@@ -4,7 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Trash2, BrainCircuit } from "lucide-react";
+import { Trash2, BrainCircuit, Upload, MessageSquareQuote, PencilLine } from "lucide-react";
+import { parseMessengerExport, type ExchangePair } from "@/lib/parseMessengerExport";
 import { toast } from "sonner";
 
 /**
@@ -42,9 +43,67 @@ const STARTERS: Array<{ question: string; answer: string }> = [
 export default function Training() {
   const utils = trpc.useUtils();
   const { data: knowledge } = trpc.knowledge.list.useQuery();
+  const { data: exampleCount } = trpc.history.count.useQuery();
+  const { data: edits } = trpc.history.edits.useQuery();
 
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
+  const [importing, setImporting] = useState(false);
+
+  const importHistory = trpc.history.import.useMutation();
+
+  /**
+   * Parses each exported thread in the browser and sends only the extracted
+   * pairs, so a folder of large JSON files never has to be uploaded whole.
+   */
+  const handleFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setImporting(true);
+    let imported = 0;
+    let skipped = 0;
+    let unreadable = 0;
+
+    try {
+      for (const file of Array.from(files)) {
+        let pairs: ExchangePair[] = [];
+        try {
+          pairs = parseMessengerExport(JSON.parse(await file.text()), "City Ink");
+        } catch {
+          unreadable++;
+          continue;
+        }
+        if (!pairs.length) continue;
+
+        // Chunked so one enormous thread can't blow the request limit.
+        for (let i = 0; i < pairs.length; i += 500) {
+          const result = await importHistory.mutateAsync({
+            pairs: pairs.slice(i, i + 500),
+            source: file.name,
+          });
+          imported += result.imported;
+          skipped += result.skipped;
+        }
+      }
+
+      utils.history.count.invalidate();
+      if (!imported && !skipped) {
+        toast.error(
+          unreadable
+            ? "Couldn't read those files — they need to be the message_1.json files from a Facebook export."
+            : "No usable exchanges found in those files."
+        );
+      } else {
+        toast.success(
+          `Learned ${imported} exchange${imported === 1 ? "" : "s"}` +
+            (skipped ? ` — ${skipped} already known or unusable` : "")
+        );
+      }
+    } catch (error) {
+      toast.error((error as Error).message || "Import failed.");
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const addKnowledge = trpc.knowledge.create.useMutation({
     onSuccess: () => {
@@ -83,7 +142,70 @@ export default function Training() {
 
       <Card className="border-border">
         <CardHeader>
-          <CardTitle className="font-display text-lg text-charcoal">Add something</CardTitle>
+          <CardTitle className="flex items-center gap-2 font-display text-lg text-charcoal">
+            <MessageSquareQuote className="h-4 w-4 text-sepia" />
+            Learn from past chats
+          </CardTitle>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {exampleCount
+              ? `${exampleCount} real exchanges learned. Before every draft, the closest few are looked up and used as the example to follow.`
+              : "Upload your exported Messenger history and the agent will answer new enquiries the way you already answered similar ones."}
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-border bg-surface px-4 py-8 text-center transition-colors hover:border-sepia">
+            <Upload className="mb-2 h-5 w-5 text-sepia" />
+            <span className="text-sm text-charcoal">
+              {importing ? "Reading…" : "Choose your message_1.json files"}
+            </span>
+            <span className="mt-1 text-xs text-muted-foreground">
+              Select them all at once — duplicates are ignored
+            </span>
+            <input
+              type="file"
+              accept=".json,application/json"
+              multiple
+              disabled={importing}
+              className="hidden"
+              onChange={(e) => handleFiles(e.target.files)}
+            />
+          </label>
+          <p className="text-xs text-muted-foreground">
+            From Facebook: Settings &amp; privacy → Your information → Download your information →
+            select Messages → JSON. The files are read in your browser; only the
+            message-and-reply pairs are sent.
+          </p>
+        </CardContent>
+      </Card>
+
+      {!!edits?.length && (
+        <Card className="border-border">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 font-display text-lg text-charcoal">
+              <PencilLine className="h-4 w-4 text-sepia" />
+              Your corrections ({edits.length})
+            </CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Every time you rewrite a draft before sending, it's kept here and shown to the agent
+              as a correction. These carry the most weight of anything on this page.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {edits.slice(0, 5).map((edit) => (
+              <div key={edit.id} className="rounded-xl border border-border p-3 text-sm">
+                <p className="text-xs text-muted-foreground">It drafted</p>
+                <p className="mt-1 line-clamp-2 text-muted-foreground">{edit.draftText}</p>
+                <p className="mt-2 text-xs text-sepia">You sent</p>
+                <p className="mt-1 line-clamp-2 text-charcoal">{edit.sentText}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      <Card className="border-border">
+        <CardHeader>
+          <CardTitle className="font-display text-lg text-charcoal">Add a fact</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <Input
