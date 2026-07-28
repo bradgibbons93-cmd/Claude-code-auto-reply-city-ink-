@@ -3,31 +3,85 @@
 @tailwind utilities;
 
 @layer base {
+  /* Light — straight off the brand book, section 09. */
+  :root {
+    --c-background: 255 255 255;
+    --c-surface: 250 248 245;
+    --c-foreground: 26 26 26;
+    --c-card: 255 255 255;
+    --c-input: 255 255 255;
+    --c-border: 237 231 222;
+    --c-muted: 138 129 120;
+    --c-accent: 208 195 168; /* warm beige */
+    --c-accent-strong: 163 139 122; /* faded sepia */
+    --c-destructive: 180 84 74;
+    --c-success: 90 122 94;
+    --c-primary: 26 26 26;
+    --c-primary-foreground: 255 255 255;
+
+    --shadow-soft: 0 1px 2px rgb(26 26 26 / 0.04), 0 8px 24px -12px rgb(26 26 26 / 0.1);
+    --shadow-lift: 0 2px 4px rgb(26 26 26 / 0.05), 0 18px 40px -16px rgb(26 26 26 / 0.16);
+    --shadow-glow: 0 0 0 1px rgb(208 195 168 / 0.5), 0 0 28px -6px rgb(208 195 168 / 0.55);
+
+    --page-wash:
+      radial-gradient(60rem 40rem at 12% -10%, rgb(208 195 168 / 0.22), transparent 60%),
+      radial-gradient(50rem 34rem at 105% 8%, rgb(163 139 122 / 0.14), transparent 62%);
+    --glass-bg: 255 255 255;
+    --glass-alpha: 0.72;
+  }
+
+  /* Dark — near-black with the glowing purple. */
+  :root[data-theme="dark"] {
+    --c-background: 10 8 16;
+    --c-surface: 22 18 33;
+    --c-foreground: 240 238 248;
+    --c-card: 19 15 29;
+    --c-input: 26 21 39;
+    --c-border: 51 41 74;
+    --c-muted: 155 146 176;
+    --c-accent: 167 139 250; /* violet */
+    --c-accent-strong: 196 152 255; /* brighter violet for emphasis */
+    --c-destructive: 248 113 113;
+    --c-success: 110 200 140;
+    --c-primary: 167 139 250;
+    --c-primary-foreground: 12 9 20;
+
+    --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 24px -12px rgb(139 92 246 / 0.35);
+    --shadow-lift: 0 2px 6px rgb(0 0 0 / 0.55), 0 20px 46px -18px rgb(167 139 250 / 0.5);
+    --shadow-glow: 0 0 0 1px rgb(167 139 250 / 0.45), 0 0 34px -4px rgb(167 139 250 / 0.65);
+
+    --page-wash:
+      radial-gradient(60rem 40rem at 12% -10%, rgb(139 92 246 / 0.28), transparent 62%),
+      radial-gradient(50rem 34rem at 105% 8%, rgb(196 152 255 / 0.18), transparent 64%),
+      radial-gradient(40rem 30rem at 50% 120%, rgb(109 40 217 / 0.22), transparent 60%);
+    --glass-bg: 19 15 29;
+    --glass-alpha: 0.7;
+  }
+
   body {
-    /* Soft radial warmth behind everything — the brand's editorial feel. */
-    background-color: #ffffff;
-    background-image:
-      radial-gradient(60rem 40rem at 12% -10%, rgba(208, 195, 168, 0.22), transparent 60%),
-      radial-gradient(50rem 34rem at 105% 8%, rgba(163, 139, 122, 0.14), transparent 62%);
+    background-color: rgb(var(--c-background));
+    background-image: var(--page-wash);
     background-attachment: fixed;
+    color: rgb(var(--c-foreground));
+    transition:
+      background-color 0.4s ease,
+      color 0.4s ease;
   }
 
   *:focus-visible {
-    outline: 2px solid #a38b7a;
+    outline: 2px solid rgb(var(--c-accent-strong));
     outline-offset: 2px;
   }
 }
 
 @layer components {
-  /* Frosted panel — the glassmorphism from the mockup. */
   .glass {
-    background: rgba(255, 255, 255, 0.72);
+    background: rgb(var(--glass-bg) / var(--glass-alpha));
     backdrop-filter: blur(14px) saturate(1.15);
     -webkit-backdrop-filter: blur(14px) saturate(1.15);
-    border: 1px solid rgba(237, 231, 222, 0.9);
+    border-color: rgb(var(--c-border));
   }
 
-  /* Cards lift slightly under the cursor. */
   .lift {
     transition:
       transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
@@ -35,26 +89,23 @@
   }
   .lift:hover {
     transform: translateY(-2px);
-    box-shadow:
-      0 2px 4px rgba(26, 26, 26, 0.05),
-      0 18px 40px -16px rgba(26, 26, 26, 0.16);
+    box-shadow: var(--shadow-lift);
   }
 
-  /* Live dot: steady core, ring breathing out of it. */
   .live-dot {
     position: relative;
     display: inline-block;
     width: 0.5rem;
     height: 0.5rem;
     border-radius: 9999px;
-    background: #5a7a5e;
+    background: rgb(var(--c-success));
   }
   .live-dot::after {
     content: "";
     position: absolute;
     inset: 0;
     border-radius: 9999px;
-    background: #5a7a5e;
+    background: rgb(var(--c-success));
     animation: ping-soft 2s cubic-bezier(0, 0, 0.2, 1) infinite;
   }
 
@@ -73,9 +124,9 @@
   .shimmer {
     background-image: linear-gradient(
       90deg,
-      rgba(208, 195, 168, 0) 0%,
-      rgba(208, 195, 168, 0.35) 50%,
-      rgba(208, 195, 168, 0) 100%
+      rgb(var(--c-accent) / 0) 0%,
+      rgb(var(--c-accent) / 0.35) 50%,
+      rgb(var(--c-accent) / 0) 100%
     );
     background-size: 200% 100%;
   }

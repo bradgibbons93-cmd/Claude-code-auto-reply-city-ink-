@@ -455,3 +455,82 @@ export async function getStats() {
     pendingPosts: Number(pending?.count ?? 0),
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* Dashboard                                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Everything the dashboard header needs, computed from real rows. Nothing
+ * here is estimated — if there's no data yet the number is genuinely 0
+ * rather than a plausible-looking placeholder.
+ */
+export async function getDashboardStats() {
+  const db = await getDb();
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
+
+  const [today] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(messengerMessages)
+    .where(
+      and(eq(messengerMessages.senderType, "customer"), gte(messengerMessages.createdAt, dayAgo))
+    );
+
+  const [yesterday] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(messengerMessages)
+    .where(
+      and(
+        eq(messengerMessages.senderType, "customer"),
+        gte(messengerMessages.createdAt, twoDaysAgo),
+        lte(messengerMessages.createdAt, dayAgo)
+      )
+    );
+
+  // A "new booking" is a thread that reached the point of being handed over.
+  const [bookings] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(messengerConversations)
+    .where(gte(messengerConversations.bookingNotifiedAt, dayAgo));
+
+  const [drafts] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(pendingReplies)
+    .where(eq(pendingReplies.status, "pending"));
+
+  // Median-ish response time: how long approved drafts sat before sending.
+  const [responded] = await db
+    .select({
+      avgMinutes: sql<number>`avg(timestampdiff(minute, created_at, resolved_at))`,
+    })
+    .from(pendingReplies)
+    .where(eq(pendingReplies.status, "approved"));
+
+  // Seven-day message count for the sparkline.
+  const series = await db
+    .select({
+      day: sql<string>`date(created_at)`,
+      count: sql<number>`count(*)`,
+    })
+    .from(messengerMessages)
+    .where(gte(messengerMessages.createdAt, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)))
+    .groupBy(sql`date(created_at)`)
+    .orderBy(sql`date(created_at)`);
+
+  const todayCount = Number(today?.count ?? 0);
+  const yesterdayCount = Number(yesterday?.count ?? 0);
+
+  return {
+    todayMessages: todayCount,
+    messagesDeltaPct:
+      yesterdayCount > 0
+        ? Math.round(((todayCount - yesterdayCount) / yesterdayCount) * 100)
+        : null,
+    newBookings: Number(bookings?.count ?? 0),
+    draftsWaiting: Number(drafts?.count ?? 0),
+    avgResponseMinutes:
+      responded?.avgMinutes == null ? null : Math.round(Number(responded.avgMinutes)),
+    series: series.map((row) => ({ day: String(row.day), count: Number(row.count) })),
+  };
+}

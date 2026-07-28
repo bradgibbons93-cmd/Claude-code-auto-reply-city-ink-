@@ -19,16 +19,24 @@ import {
   deleteKnowledge,
   getPendingReplies,
   getStats,
+  getDashboardStats,
   pauseBot,
   resumeBot,
 } from "./db.js";
 import { generateCaption, approveDraft, rejectDraft } from "./agent.js";
+import { getUpcomingBookings, findFreeSlots } from "./calendar.js";
 
 const t = initTRPC.create();
 const publicProcedure = t.procedure;
 
 export const appRouter = t.router({
   stats: publicProcedure.query(() => getStats()),
+  dashboard: publicProcedure.query(() => getDashboardStats()),
+
+  calendar: t.router({
+    upcoming: publicProcedure.query(() => getUpcomingBookings()),
+    freeSlots: publicProcedure.query(() => findFreeSlots({ limit: 5 })),
+  }),
 
   conversations: t.router({
     list: publicProcedure.query(() => getRecentConversations()),

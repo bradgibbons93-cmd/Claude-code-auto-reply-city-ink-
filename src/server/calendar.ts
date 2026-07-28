@@ -35,6 +35,7 @@ export interface FreeSlot {
 interface BusyBlock {
   start: Date;
   end: Date;
+  title?: string;
 }
 
 /**
@@ -140,17 +141,28 @@ async function fetchBusyBlocks(icsUrl: string, from: Date, to: Date): Promise<Bu
     if (vevent.rrule) {
       // Recurring: take the occurrences that land in our window.
       for (const occurrence of vevent.rrule.between(from, to, true)) {
-        busy.push({ start: occurrence, end: new Date(occurrence.getTime() + durationMs) });
+        busy.push({
+          start: occurrence,
+          end: new Date(occurrence.getTime() + durationMs),
+          title: summaryText(vevent.summary),
+        });
       }
       continue;
     }
 
     const start = new Date(vevent.start);
     const end = new Date(vevent.end);
-    if (end > from && start < to) busy.push({ start, end });
+    if (end > from && start < to) busy.push({ start, end, title: summaryText(vevent.summary) });
   }
 
   return busy;
+}
+
+/** node-ical types SUMMARY as either a plain string or a {val, params} pair. */
+function summaryText(summary: VEvent["summary"]): string | undefined {
+  if (typeof summary === "string") return summary;
+  if (summary && typeof summary === "object" && "val" in summary) return String(summary.val);
+  return undefined;
 }
 
 function overlaps(slotStart: Date, slotEnd: Date, busy: BusyBlock[]): boolean {
@@ -223,4 +235,39 @@ export async function availabilityForPrompt(): Promise<string> {
   const slots = await findFreeSlots();
   if (!slots.length) return "";
   return slots.map((s) => s.label).join(", ");
+}
+
+export interface UpcomingBooking {
+  title: string;
+  start: Date;
+  label: string;
+}
+
+/**
+ * The next few appointments already in the calendar. Read-only, same feed as
+ * availability — this is what fills the Upcoming Bookings panel rather than
+ * a separate bookings table the studio would have to maintain twice.
+ */
+export async function getUpcomingBookings(limit = 6): Promise<UpcomingBooking[]> {
+  const config = await getTimelyConfig().catch(() => undefined);
+  if (!config?.calendarIcsUrl) return [];
+
+  const now = new Date();
+  const horizon = new Date(now.getTime() + 30 * 24 * 60 * 60_000);
+
+  try {
+    const blocks = await fetchBusyBlocks(config.calendarIcsUrl, now, horizon);
+    return blocks
+      .filter((b) => b.start >= now)
+      .sort((a, b) => a.start.getTime() - b.start.getTime())
+      .slice(0, limit)
+      .map((b) => ({
+        title: b.title || "Appointment",
+        start: b.start,
+        label: describeSlot(b.start),
+      }));
+  } catch (error) {
+    console.error("[Calendar] Couldn't read upcoming bookings:", (error as Error).message);
+    return [];
+  }
 }

@@ -16,7 +16,7 @@ export function Button({ className, variant = "default", size = "default", asChi
         "active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50",
         size === "sm" ? "h-8 px-3" : "h-10 px-4",
         variant === "default" &&
-          "bg-charcoal text-white shadow-soft hover:bg-charcoal/90 hover:shadow-lift",
+          "bg-primary text-primary-foreground shadow-soft hover:opacity-90 hover:shadow-lift",
         variant === "ghost" && "text-charcoal hover:bg-beige/25",
         variant === "outline" && "border border-border text-charcoal hover:border-sepia hover:bg-beige/20",
         className
