@@ -29,6 +29,7 @@ import {
 } from "./db.js";
 import { generateCaption, approveDraft, rejectDraft } from "./agent.js";
 import { getUpcomingBookings, findFreeSlots } from "./calendar.js";
+import { testLlm, llmProvider, llmModel, llmBaseUrl, getLastLlmError } from "./llm.js";
 
 const t = initTRPC.create();
 const publicProcedure = t.procedure;
@@ -40,6 +41,19 @@ export const appRouter = t.router({
   calendar: t.router({
     upcoming: publicProcedure.query(() => getUpcomingBookings()),
     freeSlots: publicProcedure.query(() => findFreeSlots({ limit: 5 })),
+  }),
+
+  llm: t.router({
+    // Cheap: reports the settings without calling anyone.
+    status: publicProcedure.query(() => ({
+      provider: llmProvider(),
+      model: llmModel(),
+      baseUrl: llmBaseUrl(),
+      keySet: !!process.env.LLM_API_KEY,
+      lastError: getLastLlmError(),
+    })),
+    // A mutation so it only ever fires on a click, never on a page load.
+    test: publicProcedure.mutation(() => testLlm()),
   }),
 
   conversations: t.router({
