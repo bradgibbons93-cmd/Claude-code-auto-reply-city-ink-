@@ -8,7 +8,7 @@ import webhookRouter from "./routes/webhook.js";
 import { startScheduler } from "./scheduler.js";
 import { ensureTables } from "./migrate.js";
 import { getFacebookConfig, getTimelyConfig } from "./db.js";
-import { getLastLlmError } from "./llm.js";
+import { getLastLlmError, llmProvider, llmModel, llmBaseUrl } from "./llm.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -52,9 +52,10 @@ app.get("/health", async (_req, res) => {
     time: new Date().toISOString(),
     facebookConnected: !!fb?.isConfigured,
     bookingLinkSet: !!timely?.bookingPageUrl,
-    llmProvider: process.env.LLM_PROVIDER || "anthropic",
+    llmProvider: llmProvider(),
     llmKeySet: !!process.env.LLM_API_KEY,
-    llmModel: process.env.LLM_MODEL || "(default)",
+    llmModel: llmModel(),
+    llmBaseUrl: llmBaseUrl(),
     // Whatever the model last rejected — an invalid key or spent credit
     // shows up here rather than only in the logs.
     lastLlmError: getLastLlmError(),

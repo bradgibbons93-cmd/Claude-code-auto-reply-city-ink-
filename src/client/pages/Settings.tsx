@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Trash2 } from "lucide-react";
+import { Trash2, CheckCircle2, XCircle, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Settings() {
@@ -13,6 +13,16 @@ export default function Settings() {
   const { data: fb } = trpc.config.facebook.useQuery();
   const { data: timely } = trpc.config.timely.useQuery();
   const { data: knowledge } = trpc.knowledge.list.useQuery();
+  const { data: llm } = trpc.llm.status.useQuery();
+
+  const testLlm = trpc.llm.test.useMutation({
+    onSuccess: (result) => {
+      if (result.ok) toast.success("AI connected");
+      else toast.error("Not connected");
+      utils.llm.status.invalidate();
+    },
+    onError: (error) => toast.error(error.message || "Couldn't run the test."),
+  });
 
   const [pageId, setPageId] = useState("");
   const [pageName, setPageName] = useState("");
@@ -73,8 +83,69 @@ export default function Settings() {
     onSuccess: () => utils.knowledge.list.invalidate(),
   });
 
+  const result = testLlm.data;
+
   return (
     <div className="space-y-6">
+      <Card className="border-border">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 font-display text-xl text-charcoal">
+            <Sparkles className="h-4 w-4 text-sepia" />
+            AI connection
+          </CardTitle>
+          <p className="mt-1 text-sm text-muted-foreground">
+            The agent can't draft anything without this. Set{" "}
+            <code className="rounded bg-surface px-1">LLM_PROVIDER</code>,{" "}
+            <code className="rounded bg-surface px-1">LLM_BASE_URL</code>,{" "}
+            <code className="rounded bg-surface px-1">LLM_MODEL</code> and{" "}
+            <code className="rounded bg-surface px-1">LLM_API_KEY</code> in Railway, then test it
+            here — no need to wait for a customer to message in to find out.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1 text-sm">
+            <dt className="text-muted-foreground">Provider</dt>
+            <dd className="text-charcoal">{llm?.provider ?? "…"}</dd>
+            <dt className="text-muted-foreground">Model</dt>
+            <dd className="break-all text-charcoal">{llm?.model ?? "…"}</dd>
+            <dt className="text-muted-foreground">Endpoint</dt>
+            <dd className="break-all text-charcoal">{llm?.baseUrl ?? "…"}</dd>
+            <dt className="text-muted-foreground">Key</dt>
+            <dd className={llm?.keySet ? "text-charcoal" : "text-destructive"}>
+              {llm?.keySet ? "set" : "not set"}
+            </dd>
+          </dl>
+
+          {result && (
+            <div
+              className={`flex items-start gap-2 rounded-lg border p-3 text-sm ${
+                result.ok
+                  ? "border-success/40 bg-success/10 text-success"
+                  : "border-destructive/40 bg-destructive/10 text-destructive"
+              }`}
+            >
+              {result.ok ? (
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+              ) : (
+                <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              )}
+              <span>{result.detail}</span>
+            </div>
+          )}
+
+          {!result && llm?.lastError && (
+            <div className="rounded-lg border border-border bg-beige/20 p-3 text-sm text-charcoal">
+              <p className="text-xs text-muted-foreground">Last failure</p>
+              <p className="mt-1">{llm.lastError.message}</p>
+            </div>
+          )}
+
+          <Button onClick={() => testLlm.mutate()} disabled={testLlm.isPending}>
+            {testLlm.isPending ? "Testing…" : "Test connection"}
+          </Button>
+        </CardContent>
+      </Card>
+
       <Card className="border-border">
         <CardHeader>
           <CardTitle className="font-display text-xl text-charcoal">Facebook Page</CardTitle>

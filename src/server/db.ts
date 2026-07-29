@@ -246,6 +246,14 @@ export async function createKnowledge(question: string, answer: string) {
   await db.insert(studioKnowledge).values({ question, answer });
 }
 
+export async function updateKnowledge(id: number, question: string, answer: string) {
+  const db = await getDb();
+  await db
+    .update(studioKnowledge)
+    .set({ question, answer })
+    .where(eq(studioKnowledge.id, id));
+}
+
 export async function deleteKnowledge(id: number) {
   const db = await getDb();
   await db.delete(studioKnowledge).where(eq(studioKnowledge.id, id));
