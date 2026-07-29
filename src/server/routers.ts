@@ -16,6 +16,7 @@ import {
   setTimelyConfig,
   getStudioKnowledge,
   createKnowledge,
+  updateKnowledge,
   deleteKnowledge,
   getPendingReplies,
   importExampleExchanges,
@@ -132,6 +133,15 @@ export const appRouter = t.router({
     create: publicProcedure
       .input(z.object({ question: z.string().min(1), answer: z.string().min(1) }))
       .mutation(({ input }) => createKnowledge(input.question, input.answer)),
+    update: publicProcedure
+      .input(
+        z.object({
+          id: z.number(),
+          question: z.string().min(1),
+          answer: z.string().min(1),
+        })
+      )
+      .mutation(({ input }) => updateKnowledge(input.id, input.question, input.answer)),
     remove: publicProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteKnowledge(input.id)),
