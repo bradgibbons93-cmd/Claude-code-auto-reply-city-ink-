@@ -23,12 +23,19 @@ import {
   countExampleExchanges,
   clearExampleExchanges,
   getRecentDraftEdits,
+  recordDraftEdit,
   getStats,
   getDashboardStats,
   pauseBot,
   resumeBot,
 } from "./db.js";
-import { generateCaption, approveDraft, rejectDraft } from "./agent.js";
+import {
+  generateCaption,
+  approveDraft,
+  rejectDraft,
+  practiceReply,
+  suggestPosts,
+} from "./agent.js";
 import { getUpcomingBookings, findFreeSlots } from "./calendar.js";
 import { testLlm, llmProvider, llmModel, llmBaseUrl, getLastLlmError } from "./llm.js";
 
@@ -126,6 +133,52 @@ export const appRouter = t.router({
     generateCaption: publicProcedure
       .input(z.object({ prompt: z.string().min(1) }))
       .mutation(async ({ input }) => ({ caption: await generateCaption(input.prompt) })),
+    suggest: publicProcedure.mutation(() => suggestPosts()),
+  }),
+
+  /**
+   * Rehearsal. Draft a reply to a made-up enquiry and keep the good ones.
+   * Nothing here can reach a customer — practice never queues or sends.
+   */
+  practice: t.router({
+    draft: publicProcedure
+      .input(
+        z.object({
+          message: z.string().min(1),
+          priorTurns: z
+            .array(
+              z.object({
+                role: z.enum(["user", "assistant"]),
+                content: z.string(),
+              })
+            )
+            .max(20)
+            .default([]),
+        })
+      )
+      .mutation(({ input }) => practiceReply(input.message, input.priorTurns)),
+
+    // Thumbs up saves it as an example. An edit saves the corrected version
+    // AND records the difference, which is weighted more heavily than
+    // anything else the agent reads.
+    keep: publicProcedure
+      .input(
+        z.object({
+          customerMessage: z.string().min(1),
+          reply: z.string().min(1),
+          originalDraft: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const result = await importExampleExchanges(
+          [{ customerMessage: input.customerMessage, studioReply: input.reply }],
+          "practice"
+        );
+        if (input.originalDraft && input.originalDraft !== input.reply) {
+          await recordDraftEdit(input.originalDraft, input.reply, input.customerMessage);
+        }
+        return result;
+      }),
   }),
 
   knowledge: t.router({
