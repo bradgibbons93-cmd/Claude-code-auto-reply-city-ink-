@@ -71,13 +71,16 @@ function StatCard({
 }) {
   const up = (deltaPct ?? 0) >= 0;
   return (
-    <Card>
+    <Card className="relative overflow-hidden">
       <CardContent className="pt-6">
-        <div className="flex items-start gap-4">
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-beige/30 text-sepia">
-            <Icon className="h-5 w-5" />
+        {/* Icon on its own row above the text. Beside it, a 44px circle plus
+            its gap left the label too narrow at four across and "Avg approval
+            time" wrapped onto three lines; in the corner it overlapped. */}
+        <div>
+          <span className="mb-3 flex h-9 w-9 items-center justify-center rounded-full bg-beige/30 text-sepia">
+            <Icon className="h-4 w-4" />
           </span>
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0">
             <p className="text-xs text-muted-foreground">{label}</p>
             {loading ? (
               <div className="shimmer mt-1.5 h-8 w-16 animate-shimmer rounded-md bg-beige/25" />
@@ -114,6 +117,8 @@ function StatCard({
           </div>
         </div>
       </CardContent>
+      {/* A gold hairline that catches the eye as the card lifts. */}
+      <span className="pointer-events-none absolute inset-x-6 bottom-0 h-px bg-gradient-to-r from-transparent via-sepia/40 to-transparent" />
     </Card>
   );
 }

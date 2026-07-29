@@ -28,13 +28,13 @@ export function DialogContent({ className, children }: HTMLAttributes<HTMLDivEle
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-50 flex animate-fade-up items-center justify-center bg-charcoal/25 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex animate-fade-up items-center justify-center bg-background/70 p-4 backdrop-blur-md"
       onClick={() => onOpenChange(false)}
     >
       <div
         role="dialog"
         aria-modal="true"
-        className={cn("w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-lift", className)}
+        className={cn("menu-surface animate-ink-rise w-full max-w-lg rounded-2xl p-6", className)}
         onClick={(e) => e.stopPropagation()}
       >
         {children}

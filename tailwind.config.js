@@ -11,12 +11,12 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        // Monument Extended is the brand headline face but it's a paid
-        // licence — listed first so it takes over the moment the files land,
-        // with Archivo (a wide grotesque on Google Fonts) standing in.
-        display: ["'Monument Extended'", "Archivo", "system-ui", "sans-serif"],
+        // The logo sheet's wordmark is a high-contrast serif with wide
+        // tracking. Cormorant Garamond is the closest free match; swap it for
+        // the licensed face here if the studio ever buys one.
+        display: ["'Cormorant Garamond'", "Georgia", "serif"],
         sans: ["Montserrat", "system-ui", "sans-serif"],
-        serif: ["'Monument Extended'", "Archivo", "system-ui", "sans-serif"],
+        serif: ["'Cormorant Garamond'", "Georgia", "serif"],
       },
       colors: {
         background: withOpacity("--c-background"),
@@ -34,6 +34,10 @@ export default {
         charcoal: withOpacity("--c-foreground"),
         beige: withOpacity("--c-accent"),
         sepia: withOpacity("--c-accent-strong"),
+        // The counter-light: magenta in dark, terracotta in light. Gives the
+        // palette a second direction so it isn't one flat purple everywhere.
+        ink: withOpacity("--c-accent-alt"),
+        elevated: withOpacity("--c-elevated"),
 
         // Solid fills that need a guaranteed-readable text colour on top.
         primary: withOpacity("--c-primary"),
@@ -64,11 +68,29 @@ export default {
           from: { backgroundPosition: "-200% 0" },
           to: { backgroundPosition: "200% 0" },
         },
+        // A slow swell rather than a pulse — closer to ink spreading than to
+        // a notification badge.
+        "ink-swell": {
+          "0%, 100%": {
+            boxShadow:
+              "0 0 0 0 rgb(var(--c-accent) / 0.4), 0 0 24px -8px rgb(var(--c-accent-alt) / 0.3)",
+          },
+          "50%": {
+            boxShadow:
+              "0 0 0 6px rgb(var(--c-accent) / 0), 0 0 46px -6px rgb(var(--c-accent-alt) / 0.55)",
+          },
+        },
+        "ink-rise": {
+          from: { opacity: "0", transform: "translateY(16px) scale(0.98)", filter: "blur(6px)" },
+          to: { opacity: "1", transform: "none", filter: "blur(0)" },
+        },
       },
       animation: {
         "fade-up": "fade-up 0.5s cubic-bezier(0.22,1,0.36,1) both",
         "glow-pulse": "glow-pulse 2.6s ease-out infinite",
         shimmer: "shimmer 2.8s linear infinite",
+        "ink-swell": "ink-swell 4.5s ease-in-out infinite",
+        "ink-rise": "ink-rise 0.65s cubic-bezier(0.22,1,0.36,1) both",
       },
     },
   },
