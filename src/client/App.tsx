@@ -20,7 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
 import { useTheme } from "@/lib/useTheme";
-import { Monogram, InkDefs } from "@/components/Logo";
+import { StampBadge, InkDefs } from "@/components/Logo";
 import Dashboard from "./pages/Dashboard";
 import Conversations from "./pages/Conversations";
 import Bookings from "./pages/Bookings";
@@ -94,7 +94,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
 
       <div className="mt-auto flex flex-col items-center px-6 pb-8 pt-10">
-        <Monogram className="logo-glow h-16 w-14 text-sepia" />
+        <StampBadge className="h-20 w-20" ink />
         <p className="mt-5 text-center text-[0.55rem] uppercase tracking-[0.28em] text-muted-foreground">
           Create. Express.
         </p>

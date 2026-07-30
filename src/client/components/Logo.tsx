@@ -1,12 +1,15 @@
 import { cn } from "@/lib/utils";
+import badge from "@/assets/badge.png";
+import badge2x from "@/assets/badge@2x.png";
 
 /**
- * The City Ink marks, from the studio's logo sheet.
+ * The City Ink marks.
  *
- * The brand is a high-contrast serif wordmark — CITY INK widely tracked over
- * TATTOO GEELONG — with the interlocking IC submark in gold (#C6A47D). Drawn
- * rather than shipped as images so they stay sharp at any size and take the
- * theme colour: black on the light theme, violet-lit on the dark one.
+ * StampBadge is the studio's real artwork, shipped as an image — it is the
+ * mark to reach for. The drawn wordmark and IC submark below it exist for the
+ * places the badge's fine ring text would turn to mush: inline at text size,
+ * or anywhere the mark has to take the theme colour rather than sit on its
+ * own white plate.
  */
 
 /** Organic edge filter — turbulence displacement, the way ink bleeds. */
@@ -106,65 +109,21 @@ export function LogoStacked({ className, ink = false }: { className?: string; in
 }
 
 /**
- * The badge for empty states — the submark ringed, so a page with nothing in
- * it still looks deliberate rather than broken.
+ * The studio's actual badge artwork, cut out of its white plate so it sits on
+ * any background. This is the real mark — everything drawn below it is only
+ * used where the badge would be too detailed to read.
+ *
+ * `ink` adds the breathing glow used on hero placements.
  */
 export function StampBadge({ className, ink = false }: { className?: string; ink?: boolean }) {
   return (
-    <svg
-      viewBox="0 0 200 200"
-      className={className}
-      role="img"
-      aria-label="City Ink Tattoo Geelong"
-    >
-      <g filter={ink ? "url(#ink-bleed)" : undefined}>
-        <circle cx="100" cy="100" r="92" fill="none" stroke="currentColor" strokeWidth="1.5" />
-        <circle
-          cx="100"
-          cy="100"
-          r="84"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="0.75"
-          opacity="0.5"
-        />
-
-        <text
-          x="100"
-          y="88"
-          textAnchor="middle"
-          fill="currentColor"
-          fontFamily="'Bodoni Moda', Didot, Georgia, serif"
-          fontSize="30"
-          letterSpacing="5"
-        >
-          CITY INK
-        </text>
-
-        <line
-          x1="56"
-          y1="102"
-          x2="144"
-          y2="102"
-          stroke="currentColor"
-          strokeWidth="0.75"
-          opacity="0.6"
-        />
-
-        <text
-          x="100"
-          y="122"
-          textAnchor="middle"
-          fill="currentColor"
-          fontFamily="Montserrat, system-ui, sans-serif"
-          fontSize="9"
-          letterSpacing="4.5"
-          opacity="0.85"
-        >
-          TATTOO GEELONG
-        </text>
-      </g>
-    </svg>
+    <img
+      src={badge}
+      srcSet={`${badge} 1x, ${badge2x} 2x`}
+      alt="City Ink Tattoo Geelong"
+      className={cn("select-none object-contain", ink && "logo-glow", className)}
+      draggable={false}
+    />
   );
 }
 
