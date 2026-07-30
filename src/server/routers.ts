@@ -24,6 +24,8 @@ import {
   clearExampleExchanges,
   getRecentDraftEdits,
   recordDraftEdit,
+  updateDraftEdit,
+  deleteDraftEdit,
   getStats,
   getDashboardStats,
   pauseBot,
@@ -203,6 +205,14 @@ export const appRouter = t.router({
   history: t.router({
     count: publicProcedure.query(() => countExampleExchanges()),
     edits: publicProcedure.query(() => getRecentDraftEdits(20)),
+    // A correction outweighs everything else the agent reads, so a wrong one
+    // has to be fixable — not just visible.
+    updateEdit: publicProcedure
+      .input(z.object({ id: z.number(), sentText: z.string().min(1) }))
+      .mutation(({ input }) => updateDraftEdit(input.id, input.sentText)),
+    removeEdit: publicProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(({ input }) => deleteDraftEdit(input.id)),
     // Pairs are extracted in the browser so a big export never has to be
     // uploaded whole; only the useful message/reply pairs come over.
     import: publicProcedure

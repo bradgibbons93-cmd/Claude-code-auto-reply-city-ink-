@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   BrainCircuit,
+  Pencil,
+  Trash2,
   Upload,
   MessageSquareQuote,
   PencilLine,
@@ -73,6 +75,10 @@ export default function Training() {
   const [draft, setDraft] = useState<string | null>(null);
   const [originalDraft, setOriginalDraft] = useState("");
   const [wasSensitive, setWasSensitive] = useState(false);
+  // Repairing a stored correction — a slip while editing a draft gets saved
+  // as deliberate phrasing, and these outweigh everything else the agent reads.
+  const [editingEditId, setEditingEditId] = useState<number | null>(null);
+  const [editSentText, setEditSentText] = useState("");
 
   const practiceDraft = trpc.practice.draft.useMutation({
     onSuccess: (result) => {
@@ -94,6 +100,23 @@ export default function Training() {
       utils.history.edits.invalidate();
     },
     onError: (error) => toast.error(error.message || "Couldn't save that."),
+  });
+
+  const updateEdit = trpc.history.updateEdit.useMutation({
+    onSuccess: () => {
+      toast.success("Correction fixed");
+      setEditingEditId(null);
+      utils.history.edits.invalidate();
+    },
+    onError: (error) => toast.error(error.message || "Couldn't save that."),
+  });
+
+  const removeEdit = trpc.history.removeEdit.useMutation({
+    onSuccess: () => {
+      toast.success("Forgotten");
+      utils.history.edits.invalidate();
+    },
+    onError: (error) => toast.error(error.message || "Couldn't remove that."),
   });
 
   const runPractice = (message: string) => {
@@ -357,18 +380,78 @@ export default function Training() {
             </CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
               Every time you rewrite a draft before sending, it's kept here and shown to the agent
-              as a correction. These carry the most weight of anything on this page.
+              as a correction. These carry the most weight of anything on this page — so if you
+              clipped a word by accident, fix it here or the agent will copy the mistake.
             </p>
           </CardHeader>
           <CardContent className="space-y-2">
-            {edits.slice(0, 5).map((edit) => (
-              <div key={edit.id} className="rounded-xl border border-border p-3 text-sm">
-                <p className="text-xs text-muted-foreground">It drafted</p>
-                <p className="mt-1 line-clamp-2 text-muted-foreground">{edit.draftText}</p>
-                <p className="mt-2 text-xs text-sepia">You sent</p>
-                <p className="mt-1 line-clamp-2 text-charcoal">{edit.sentText}</p>
-              </div>
-            ))}
+            {edits.map((edit) =>
+              editingEditId === edit.id ? (
+                <div key={edit.id} className="space-y-2 rounded-xl border border-sepia/40 p-3">
+                  <p className="text-xs text-muted-foreground">It drafted</p>
+                  <p className="whitespace-pre-wrap text-sm text-muted-foreground">
+                    {edit.draftText}
+                  </p>
+                  <p className="pt-1 text-xs text-sepia">You sent — fix it here</p>
+                  <Textarea
+                    value={editSentText}
+                    onChange={(e) => setEditSentText(e.target.value)}
+                    className="min-h-24"
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        if (!editSentText.trim()) {
+                          toast.error("Can't be blank — delete it instead.");
+                          return;
+                        }
+                        updateEdit.mutate({ id: edit.id, sentText: editSentText });
+                      }}
+                      disabled={updateEdit.isPending}
+                    >
+                      {updateEdit.isPending ? "Saving…" : "Save"}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setEditingEditId(null)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div key={edit.id} className="rounded-xl border border-border p-3 text-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs text-muted-foreground">It drafted</p>
+                      <p className="mt-1 line-clamp-2 text-muted-foreground">{edit.draftText}</p>
+                      <p className="mt-2 text-xs text-sepia">You sent</p>
+                      <p className="mt-1 line-clamp-2 text-charcoal">{edit.sentText}</p>
+                    </div>
+                    <div className="flex shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label="Fix this correction"
+                        onClick={() => {
+                          setEditingEditId(edit.id);
+                          setEditSentText(edit.sentText);
+                        }}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label="Forget this correction"
+                        className="text-destructive"
+                        onClick={() => removeEdit.mutate({ id: edit.id })}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )
+            )}
           </CardContent>
         </Card>
       )}
