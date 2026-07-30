@@ -5,14 +5,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Trash2,
   BrainCircuit,
+  Pencil,
+  Trash2,
   Upload,
   MessageSquareQuote,
   PencilLine,
-  Pencil,
-  AlertTriangle,
+  ThumbsUp,
+  Send,
+  FlaskConical,
 } from "lucide-react";
+import KnowledgeList, { isPlaceholder } from "@/components/KnowledgeList";
 import { parseMessengerExport, type ExchangePair } from "@/lib/parseMessengerExport";
 import { toast } from "sonner";
 
@@ -48,15 +51,14 @@ const STARTERS: Array<{ question: string; answer: string }> = [
   },
 ];
 
-/**
- * A suggestion whose answer is still a bracketed instruction is a prompt to
- * you, not a fact. Saving one verbatim means the agent will cheerfully tell a
- * customer the studio is at "(Add the studio address here…)", so these load
- * into the form to be written rather than saving on tap.
- */
-function isPlaceholder(answer: string): boolean {
-  return /^\s*\(.*\)\s*$/.test(answer);
-}
+/** Things customers actually open with, to save typing while rehearsing. */
+const PRACTICE_PROMPTS = [
+  "hey how much for a small tattoo on the wrist?",
+  "do you have anything available this weekend?",
+  "whats your address?",
+  "do you do payment plans?",
+  "how much is a half sleeve",
+];
 
 export default function Training() {
   const utils = trpc.useUtils();
@@ -67,9 +69,63 @@ export default function Training() {
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [importing, setImporting] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editQuestion, setEditQuestion] = useState("");
-  const [editAnswer, setEditAnswer] = useState("");
+  // Practice panel: what you asked, what it drafted, and your version of it.
+  const [practiceMessage, setPracticeMessage] = useState("");
+  const [asked, setAsked] = useState("");
+  const [draft, setDraft] = useState<string | null>(null);
+  const [originalDraft, setOriginalDraft] = useState("");
+  const [wasSensitive, setWasSensitive] = useState(false);
+  // Repairing a stored correction — a slip while editing a draft gets saved
+  // as deliberate phrasing, and these outweigh everything else the agent reads.
+  const [editingEditId, setEditingEditId] = useState<number | null>(null);
+  const [editSentText, setEditSentText] = useState("");
+
+  const practiceDraft = trpc.practice.draft.useMutation({
+    onSuccess: (result) => {
+      setDraft(result.reply);
+      setOriginalDraft(result.reply);
+      setWasSensitive(result.sensitive);
+      if (!result.ok) toast.error("The AI didn't answer — check Settings → Test connection.");
+    },
+    onError: (error) => toast.error(error.message || "Couldn't draft that."),
+  });
+
+  const keepPractice = trpc.practice.keep.useMutation({
+    onSuccess: (result) => {
+      toast.success(result.imported ? "Saved — it'll follow this next time" : "Already knew that one");
+      setDraft(null);
+      setAsked("");
+      setPracticeMessage("");
+      utils.history.count.invalidate();
+      utils.history.edits.invalidate();
+    },
+    onError: (error) => toast.error(error.message || "Couldn't save that."),
+  });
+
+  const updateEdit = trpc.history.updateEdit.useMutation({
+    onSuccess: () => {
+      toast.success("Correction fixed");
+      setEditingEditId(null);
+      utils.history.edits.invalidate();
+    },
+    onError: (error) => toast.error(error.message || "Couldn't save that."),
+  });
+
+  const removeEdit = trpc.history.removeEdit.useMutation({
+    onSuccess: () => {
+      toast.success("Forgotten");
+      utils.history.edits.invalidate();
+    },
+    onError: (error) => toast.error(error.message || "Couldn't remove that."),
+  });
+
+  const runPractice = (message: string) => {
+    const text = message.trim();
+    if (!text) return;
+    setAsked(text);
+    setDraft(null);
+    practiceDraft.mutate({ message: text, priorTurns: [] });
+  };
 
   const importHistory = trpc.history.import.useMutation();
 
@@ -135,25 +191,6 @@ export default function Training() {
     onError: (error) => toast.error(error.message || "Couldn't save that."),
   });
 
-  const updateKnowledge = trpc.knowledge.update.useMutation({
-    onSuccess: () => {
-      toast.success("Saved");
-      setEditingId(null);
-      utils.knowledge.list.invalidate();
-    },
-    onError: (error) => toast.error(error.message || "Couldn't save that."),
-  });
-
-  const removeKnowledge = trpc.knowledge.remove.useMutation({
-    onSuccess: () => utils.knowledge.list.invalidate(),
-  });
-
-  const startEditing = (entry: { id: number; question: string; answer: string }) => {
-    setEditingId(entry.id);
-    setEditQuestion(entry.question);
-    setEditAnswer(entry.answer);
-  };
-
   const addStarter = (starter: { question: string; answer: string }) => {
     // Placeholders go to the form so you write the real answer first.
     if (isPlaceholder(starter.answer)) {
@@ -184,6 +221,117 @@ export default function Training() {
           know.
         </p>
       </div>
+
+      <Card className="border-border">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 font-display text-lg text-charcoal">
+            <FlaskConical className="h-4 w-4 text-sepia" />
+            Practice
+          </CardTitle>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Ask something a customer would ask. It drafts a reply using everything it knows —
+            same as it would for real. Approve it or rewrite it, and it learns from that. Nothing
+            here reaches a customer.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex gap-2">
+            <Input
+              placeholder="hey how much for a small tattoo?"
+              value={practiceMessage}
+              onChange={(e) => setPracticeMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") runPractice(practiceMessage);
+              }}
+            />
+            <Button
+              onClick={() => runPractice(practiceMessage)}
+              disabled={practiceDraft.isPending || !practiceMessage.trim()}
+            >
+              {practiceDraft.isPending ? "…" : <Send className="h-4 w-4" />}
+            </Button>
+          </div>
+
+          {!draft && !practiceDraft.isPending && (
+            <div className="flex flex-wrap gap-2">
+              {PRACTICE_PROMPTS.map((p) => (
+                <button
+                  key={p}
+                  onClick={() => {
+                    setPracticeMessage(p);
+                    runPractice(p);
+                  }}
+                  className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-sepia/50 hover:text-charcoal"
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {asked && (
+            <div className="space-y-2">
+              <div className="ml-auto max-w-[85%] rounded-2xl rounded-br-sm bg-beige/40 px-3 py-2 text-sm text-charcoal">
+                {asked}
+              </div>
+
+              {practiceDraft.isPending && (
+                <p className="text-sm text-muted-foreground">Drafting…</p>
+              )}
+
+              {draft !== null && (
+                <>
+                  {wasSensitive && (
+                    <p className="text-xs text-sepia">
+                      Flagged sensitive — for a real message it would hand over to you rather than
+                      answer.
+                    </p>
+                  )}
+                  <Textarea
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    className="min-h-24"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() =>
+                        keepPractice.mutate({
+                          customerMessage: asked,
+                          reply: draft,
+                          originalDraft,
+                        })
+                      }
+                      disabled={keepPractice.isPending || !draft.trim()}
+                    >
+                      <ThumbsUp className="mr-1.5 h-3.5 w-3.5" />
+                      {draft === originalDraft ? "Good — keep it" : "Save my version"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => runPractice(asked)}
+                      disabled={practiceDraft.isPending}
+                    >
+                      Try again
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setDraft(null);
+                        setAsked("");
+                      }}
+                    >
+                      Discard
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card className="border-border">
         <CardHeader>
@@ -232,18 +380,78 @@ export default function Training() {
             </CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
               Every time you rewrite a draft before sending, it's kept here and shown to the agent
-              as a correction. These carry the most weight of anything on this page.
+              as a correction. These carry the most weight of anything on this page — so if you
+              clipped a word by accident, fix it here or the agent will copy the mistake.
             </p>
           </CardHeader>
           <CardContent className="space-y-2">
-            {edits.slice(0, 5).map((edit) => (
-              <div key={edit.id} className="rounded-xl border border-border p-3 text-sm">
-                <p className="text-xs text-muted-foreground">It drafted</p>
-                <p className="mt-1 line-clamp-2 text-muted-foreground">{edit.draftText}</p>
-                <p className="mt-2 text-xs text-sepia">You sent</p>
-                <p className="mt-1 line-clamp-2 text-charcoal">{edit.sentText}</p>
-              </div>
-            ))}
+            {edits.map((edit) =>
+              editingEditId === edit.id ? (
+                <div key={edit.id} className="space-y-2 rounded-xl border border-sepia/40 p-3">
+                  <p className="text-xs text-muted-foreground">It drafted</p>
+                  <p className="whitespace-pre-wrap text-sm text-muted-foreground">
+                    {edit.draftText}
+                  </p>
+                  <p className="pt-1 text-xs text-sepia">You sent — fix it here</p>
+                  <Textarea
+                    value={editSentText}
+                    onChange={(e) => setEditSentText(e.target.value)}
+                    className="min-h-24"
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        if (!editSentText.trim()) {
+                          toast.error("Can't be blank — delete it instead.");
+                          return;
+                        }
+                        updateEdit.mutate({ id: edit.id, sentText: editSentText });
+                      }}
+                      disabled={updateEdit.isPending}
+                    >
+                      {updateEdit.isPending ? "Saving…" : "Save"}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setEditingEditId(null)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div key={edit.id} className="rounded-xl border border-border p-3 text-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs text-muted-foreground">It drafted</p>
+                      <p className="mt-1 line-clamp-2 text-muted-foreground">{edit.draftText}</p>
+                      <p className="mt-2 text-xs text-sepia">You sent</p>
+                      <p className="mt-1 line-clamp-2 text-charcoal">{edit.sentText}</p>
+                    </div>
+                    <div className="flex shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label="Fix this correction"
+                        onClick={() => {
+                          setEditingEditId(edit.id);
+                          setEditSentText(edit.sentText);
+                        }}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label="Forget this correction"
+                        className="text-destructive"
+                        onClick={() => removeEdit.mutate({ id: edit.id })}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )
+            )}
           </CardContent>
         </Card>
       )}
@@ -310,92 +518,8 @@ export default function Training() {
             What it knows ({knowledge?.length ?? 0})
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2">
-          {knowledge?.length ? (
-            knowledge.map((k) =>
-              editingId === k.id ? (
-                <div key={k.id} className="space-y-2 rounded-lg border border-sepia/40 p-3">
-                  <Input
-                    value={editQuestion}
-                    onChange={(e) => setEditQuestion(e.target.value)}
-                    placeholder="What is it?"
-                  />
-                  <Textarea
-                    value={editAnswer}
-                    onChange={(e) => setEditAnswer(e.target.value)}
-                    className="min-h-24"
-                    placeholder="The answer, in your words."
-                  />
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        if (!editQuestion.trim() || !editAnswer.trim()) {
-                          toast.error("Fill in both boxes.");
-                          return;
-                        }
-                        updateKnowledge.mutate({
-                          id: k.id,
-                          question: editQuestion,
-                          answer: editAnswer,
-                        });
-                      }}
-                      disabled={updateKnowledge.isPending}
-                    >
-                      {updateKnowledge.isPending ? "Saving…" : "Save"}
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div
-                  key={k.id}
-                  className={`flex items-start justify-between gap-3 rounded-lg border p-3 ${
-                    isPlaceholder(k.answer) ? "border-destructive/40" : "border-border"
-                  }`}
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm text-charcoal">{k.question}</p>
-                    <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
-                      {k.answer}
-                    </p>
-                    {isPlaceholder(k.answer) && (
-                      <p className="mt-2 flex items-center gap-1.5 text-xs text-destructive">
-                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                        The agent will say this word for word. Edit it before a customer asks.
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex shrink-0">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => startEditing(k)}
-                      aria-label="Edit"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeKnowledge.mutate({ id: k.id })}
-                      aria-label="Remove"
-                      className="text-destructive"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              )
-            )
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Nothing yet — until you add prices and policies here, the agent won't quote
-              anything and will say the studio will confirm.
-            </p>
-          )}
+        <CardContent>
+          <KnowledgeList />
         </CardContent>
       </Card>
     </div>

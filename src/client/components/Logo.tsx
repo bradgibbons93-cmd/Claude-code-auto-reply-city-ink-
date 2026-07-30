@@ -1,46 +1,87 @@
 import { cn } from "@/lib/utils";
+import badge from "@/assets/badge.png";
+import badge2x from "@/assets/badge@2x.png";
 
 /**
- * The brand marks, drawn as SVG rather than shipped as images so they stay
- * sharp at any size and pick up the current theme colour — the monogram is
- * sepia on white and violet on the dark theme without needing two files.
+ * The City Ink marks.
+ *
+ * StampBadge is the studio's real artwork, shipped as an image — it is the
+ * mark to reach for. The drawn wordmark and IC submark below it exist for the
+ * places the badge's fine ring text would turn to mush: inline at text size,
+ * or anywhere the mark has to take the theme colour rather than sit on its
+ * own white plate.
  */
 
-/** The interlocking IC monogram: a serif C with an I struck through it. */
-export function Monogram({ className }: { className?: string }) {
+/** Organic edge filter — turbulence displacement, the way ink bleeds. */
+export function InkDefs() {
   return (
-    <svg
-      viewBox="0 0 100 140"
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      role="img"
-      aria-label="City Ink monogram"
-    >
-      {/* C — open to the right, weighted like the brand's serif face. */}
-      <path
-        d="M74 40 A34 34 0 1 0 74 100"
-        strokeWidth="8"
-        strokeLinecap="butt"
-        transform="rotate(-12 50 70)"
-      />
-      {/* I — the vertical stroke through the centre, with serif caps. */}
-      <line x1="50" y1="10" x2="50" y2="130" strokeWidth="7" />
-      <line x1="34" y1="11" x2="66" y2="11" strokeWidth="6" strokeLinecap="round" />
-      <line x1="34" y1="129" x2="66" y2="129" strokeWidth="6" strokeLinecap="round" />
+    <svg width="0" height="0" className="absolute" aria-hidden="true">
+      <defs>
+        <filter id="ink-bleed" x="-20%" y="-20%" width="140%" height="140%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="2" seed="7">
+            <animate
+              attributeName="baseFrequency"
+              dur="20s"
+              values="0.03;0.045;0.03"
+              repeatCount="indefinite"
+            />
+          </feTurbulence>
+          <feDisplacementMap
+            in="SourceGraphic"
+            scale="1.6"
+            xChannelSelector="R"
+            yChannelSelector="G"
+          />
+        </filter>
+      </defs>
     </svg>
   );
 }
 
-/** Stacked primary logo — monogram over the wordmark. */
-export function LogoStacked({ className }: { className?: string }) {
+/**
+ * The IC submark — a Didone C with the I struck through it, interlocking.
+ */
+export function Monogram({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 100 130"
+      className={className}
+      fill="currentColor"
+      role="img"
+      aria-label="City Ink"
+    >
+      {/*
+        Paths, not type — glyph metrics shift with whichever serif loads, and
+        at sidebar size that drift clipped the C.
+
+        The C is a filled crescent rather than a stroked arc so it carries the
+        thick/thin contrast of the sheet's Didone: heavy through the left
+        flank, tapering to hairline terminals top and bottom.
+      */}
+      <path
+        d="M70 42
+           A30 34 0 1 0 70 88
+           L70 79
+           A22 26 0 1 1 70 51
+           Z"
+      />
+      {/* The I runs taller than the C and crosses its counter, with the slab
+          serifs that give the mark its weight. */}
+      <rect x="45.5" y="18" width="6" height="94" />
+      <rect x="34" y="18" width="29" height="5.5" />
+      <rect x="34" y="106.5" width="29" height="5.5" />
+    </svg>
+  );
+}
+
+/** The wordmark alone — CITY INK over TATTOO GEELONG. */
+export function Wordmark({ className }: { className?: string }) {
   return (
     <div className={cn("flex flex-col items-center", className)}>
-      <Monogram className="h-14 w-10 text-sepia" />
-      <p className="mt-4 font-display text-[1.1rem] leading-none tracking-[0.3em] text-charcoal">
+      <p className="font-display text-[1.6rem] font-normal leading-none tracking-[0.22em] text-charcoal">
         CITY INK
       </p>
-      <p className="mt-2 text-[0.5rem] uppercase tracking-[0.4em] text-muted-foreground">
+      <p className="mt-2 text-[0.5rem] uppercase tracking-[0.42em] text-muted-foreground">
         Tattoo Geelong
       </p>
     </div>
@@ -48,72 +89,57 @@ export function LogoStacked({ className }: { className?: string }) {
 }
 
 /**
- * The stamp/badge lockup — monogram ringed by curved text. Used where a
- * page has nothing to show yet, so an empty state still looks deliberate.
+ * The primary lockup: wordmark, then a rule broken by the gold submark.
+ * `ink` softens the edges for hero placements.
  */
-export function StampBadge({ className }: { className?: string }) {
+export function LogoStacked({ className, ink = false }: { className?: string; ink?: boolean }) {
+  return (
+    <div className={cn("flex flex-col items-center", className)}>
+      <Wordmark />
+      <div className="mt-3 flex w-full items-center gap-3">
+        <span className="h-px flex-1 bg-sepia/50" />
+        <Monogram
+          className={cn("h-7 w-6 text-sepia", ink && "logo-glow")}
+          {...(ink ? { filter: "url(#ink-bleed)" } : {})}
+        />
+        <span className="h-px flex-1 bg-sepia/50" />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The studio's actual badge artwork, cut out of its white plate so it sits on
+ * any background. This is the real mark — everything drawn below it is only
+ * used where the badge would be too detailed to read.
+ *
+ * `ink` adds the breathing glow used on hero placements.
+ */
+export function StampBadge({ className, ink = false }: { className?: string; ink?: boolean }) {
+  return (
+    <img
+      src={badge}
+      srcSet={`${badge} 1x, ${badge2x} 2x`}
+      alt="City Ink Tattoo Geelong"
+      className={cn("select-none object-contain", ink && "logo-glow", className)}
+      draggable={false}
+    />
+  );
+}
+
+/**
+ * A slow ink drip. Purely decorative — sits behind headers to give the page
+ * movement without competing for attention.
+ */
+export function InkDrip({ className }: { className?: string }) {
   return (
     <svg
-      viewBox="0 0 200 200"
+      viewBox="0 0 120 200"
       className={className}
-      role="img"
-      aria-label="City Ink Tattoo Geelong stamp"
+      aria-hidden="true"
+      preserveAspectRatio="none"
     >
-      <defs>
-        <path id="stamp-top" d="M100,100 m-74,0 a74,74 0 0,1 148,0" fill="none" />
-        <path id="stamp-bottom" d="M100,100 m-64,0 a64,64 0 0,0 128,0" fill="none" />
-      </defs>
-
-      <circle cx="100" cy="100" r="94" fill="none" stroke="currentColor" strokeWidth="2.5" />
-      <circle
-        cx="100"
-        cy="100"
-        r="78"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1"
-        opacity="0.55"
-      />
-
-      <text
-        fill="currentColor"
-        fontFamily="Archivo, system-ui, sans-serif"
-        fontSize="19"
-        letterSpacing="5"
-      >
-        <textPath href="#stamp-top" startOffset="50%" textAnchor="middle">
-          CITY INK
-        </textPath>
-      </text>
-
-      <text
-        fill="currentColor"
-        fontFamily="Archivo, system-ui, sans-serif"
-        fontSize="11"
-        letterSpacing="4"
-        opacity="0.85"
-      >
-        <textPath href="#stamp-bottom" startOffset="50%" textAnchor="middle">
-          TATTOO GEELONG
-        </textPath>
-      </text>
-
-      {/* The two dots that separate the upper and lower text on the badge. */}
-      <circle cx="17" cy="100" r="2.6" fill="currentColor" />
-      <circle cx="183" cy="100" r="2.6" fill="currentColor" />
-
-      <g transform="translate(70, 55) scale(0.43)">
-        <g fill="none" stroke="currentColor">
-          <path
-            d="M74 40 A34 34 0 1 0 74 100"
-            strokeWidth="8"
-            transform="rotate(-12 50 70)"
-          />
-          <line x1="50" y1="10" x2="50" y2="130" strokeWidth="7" />
-          <line x1="34" y1="11" x2="66" y2="11" strokeWidth="6" strokeLinecap="round" />
-          <line x1="34" y1="129" x2="66" y2="129" strokeWidth="6" strokeLinecap="round" />
-        </g>
-      </g>
+      <path className="ink-drip-path" d="M60 0 C 74 40, 46 62, 60 96 C 72 124, 50 140, 60 168" />
     </svg>
   );
 }

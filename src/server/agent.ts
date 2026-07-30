@@ -430,6 +430,45 @@ export async function handleEcho(
   console.log(`[Agent] Human replied to ${recipientId} — paused until ${until.toISOString()}`);
 }
 
+/**
+ * Runs a pretend enquiry through the exact same drafting path a real one
+ * takes, and returns the draft without touching anything.
+ *
+ * Nothing here writes to a conversation, queues a reply, or sends a message —
+ * that matters, because this is reachable while the bot is live. It's also
+ * the only way to train the agent before Meta approves live messaging.
+ */
+export async function practiceReply(
+  message: string,
+  priorTurns: Array<{ role: "user" | "assistant"; content: string }> = []
+): Promise<{ reply: string; sensitive: boolean; ok: boolean }> {
+  const knowledge = await getStudioKnowledge().catch(() => []);
+  const studioFacts = knowledge.map((k) => `Q: ${k.question}\nA: ${k.answer}`).join("\n\n");
+  const availability = await availabilityForPrompt().catch(() => "");
+  const examples = await findSimilarExchanges(message).catch(() => []);
+  const corrections = await getRecentDraftEdits().catch(() => []);
+
+  const history: ChatMessage[] = [...priorTurns, { role: "user", content: message }];
+
+  const decision = await decide(
+    history,
+    studioFacts,
+    { name: null, phone: null, dates: null },
+    false,
+    availability,
+    examples,
+    corrections
+  );
+
+  return {
+    reply: decision.ok
+      ? decision.reply
+      : "[The AI couldn't generate a reply — check the AI connection in Settings.]",
+    sensitive: !!decision.sensitive,
+    ok: decision.ok,
+  };
+}
+
 export async function generateCaption(prompt: string): Promise<string> {
   const knowledge = await getStudioKnowledge().catch(() => []);
   const facts = knowledge.map((k) => `${k.question}: ${k.answer}`).join("\n");
@@ -458,4 +497,45 @@ Reply with JSON only: {"caption": "..."}`,
 
   if (!ok || !result.caption) throw new Error("Caption generation failed");
   return result.caption;
+}
+
+export interface PostIdea {
+  hook: string;
+  caption: string;
+  bestTime: string;
+}
+
+/** Post ideas for the week, grounded in what the studio actually offers. */
+export async function suggestPosts(): Promise<PostIdea[]> {
+  const knowledge = await getStudioKnowledge().catch(() => []);
+  const facts = knowledge.map((k) => `${k.question}: ${k.answer}`).join("\n");
+
+  const { data, ok } = await invokeLLMJson<{ ideas: PostIdea[] }>(
+    [
+      {
+        role: "system",
+        content: `You plan Facebook posts for City Ink, a tattoo studio in Geelong, Australia.
+
+Give 4 ideas for the coming week. Vary them — healed work, a booking nudge, something
+about the process or aftercare, a flash or walk-in prompt.
+
+Rules:
+- Captions under 50 words, confident and grounded, Australian spelling.
+- Never invent a price, a discount, or an available time.
+- Three hashtags at most, only if they earn it.
+- bestTime is a plain suggestion like "Thursday evening" — when tattoo customers browse.
+
+Reply with JSON only:
+{"ideas":[{"hook":"short label","caption":"the post text","bestTime":"Thursday evening"}]}`,
+      },
+      {
+        role: "user",
+        content: `Studio context:\n${facts || "(nothing configured — keep it general)"}`,
+      },
+    ],
+    { ideas: [] }
+  );
+
+  if (!ok) throw new Error("Couldn't reach the AI — check the connection in Settings.");
+  return data.ideas ?? [];
 }
