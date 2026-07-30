@@ -11,12 +11,12 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        // The logo sheet's wordmark is a high-contrast serif with wide
-        // tracking. Cormorant Garamond is the closest free match; swap it for
-        // the licensed face here if the studio ever buys one.
-        display: ["'Cormorant Garamond'", "Georgia", "serif"],
+        // The wordmark is a Didone — thick stems, hairline serifs, wide
+        // tracking. Bodoni Moda matches it; Cormorant was tried first and is
+        // too low-contrast. Swap here if the studio licenses the real face.
+        display: ["'Bodoni Moda'", "Didot", "Georgia", "serif"],
         sans: ["Montserrat", "system-ui", "sans-serif"],
-        serif: ["'Cormorant Garamond'", "Georgia", "serif"],
+        serif: ["'Bodoni Moda'", "Didot", "Georgia", "serif"],
       },
       colors: {
         background: withOpacity("--c-background"),

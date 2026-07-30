@@ -36,28 +36,37 @@ export function InkDefs() {
 }
 
 /**
- * The IC submark — a serif C with the I struck through it, the two
- * interlocking. Set as type so it inherits the loaded serif rather than
- * approximating the curves with paths.
+ * The IC submark — a Didone C with the I struck through it, interlocking.
  */
 export function Monogram({ className }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 100 130"
       className={className}
-      fill="none"
-      stroke="currentColor"
+      fill="currentColor"
       role="img"
       aria-label="City Ink"
     >
-      {/* Drawn as paths rather than set as type: glyph metrics vary with
-          whichever serif actually loads, and at this size a few pixels of
-          drift clipped the C. */}
-      <path d="M78 38 A32 32 0 1 0 78 92" strokeWidth="7" strokeLinecap="butt" />
-      {/* The I sits left of the C's centre and runs taller, as on the sheet. */}
-      <line x1="42" y1="16" x2="42" y2="114" strokeWidth="6" />
-      <line x1="29" y1="17" x2="55" y2="17" strokeWidth="5" />
-      <line x1="29" y1="113" x2="55" y2="113" strokeWidth="5" />
+      {/*
+        Paths, not type — glyph metrics shift with whichever serif loads, and
+        at sidebar size that drift clipped the C.
+
+        The C is a filled crescent rather than a stroked arc so it carries the
+        thick/thin contrast of the sheet's Didone: heavy through the left
+        flank, tapering to hairline terminals top and bottom.
+      */}
+      <path
+        d="M70 42
+           A30 34 0 1 0 70 88
+           L70 79
+           A22 26 0 1 1 70 51
+           Z"
+      />
+      {/* The I runs taller than the C and crosses its counter, with the slab
+          serifs that give the mark its weight. */}
+      <rect x="45.5" y="18" width="6" height="94" />
+      <rect x="34" y="18" width="29" height="5.5" />
+      <rect x="34" y="106.5" width="29" height="5.5" />
     </svg>
   );
 }
@@ -125,7 +134,7 @@ export function StampBadge({ className, ink = false }: { className?: string; ink
           y="88"
           textAnchor="middle"
           fill="currentColor"
-          fontFamily="'Cormorant Garamond', Georgia, serif"
+          fontFamily="'Bodoni Moda', Didot, Georgia, serif"
           fontSize="30"
           letterSpacing="5"
         >
