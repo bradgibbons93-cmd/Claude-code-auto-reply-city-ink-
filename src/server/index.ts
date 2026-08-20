@@ -9,6 +9,7 @@ import { startScheduler } from "./scheduler.js";
 import { ensureTables } from "./migrate.js";
 import { getFacebookConfig, getTimelyConfig } from "./db.js";
 import { getLastLlmError, llmProvider, llmModel, llmBaseUrl } from "./llm.js";
+import { symphonyConfigured, getLastSymphonyError } from "./symphony.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -60,6 +61,10 @@ app.get("/health", async (_req, res) => {
     // shows up here rather than only in the logs.
     lastLlmError: getLastLlmError(),
     calendarConnected: !!timely?.calendarIcsUrl,
+    // The booking alert's second channel — worth seeing here, because a
+    // Messenger alert that Facebook drops is silent everywhere else.
+    symphonyConnected: symphonyConfigured(),
+    lastSymphonyError: getLastSymphonyError(),
   });
 });
 

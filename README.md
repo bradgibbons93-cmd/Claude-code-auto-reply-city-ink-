@@ -42,6 +42,7 @@ Fill in `.env`:
 - `DATABASE_URL` — a MySQL 8 database
 - `LLM_API_KEY` — Anthropic by default; set `LLM_PROVIDER=openai` for anything
   OpenAI-compatible and point `LLM_BASE_URL` at it
+- `SYMPHONY_API_TOKEN` — optional, see [Symphony](#symphony) below
 
 **2. Create the tables**
 
@@ -72,6 +73,45 @@ In your Meta app → Messenger → Settings → Webhooks:
 
 `message_echoes` is what makes the human handoff work. Without it the agent will
 talk over the top of you.
+
+---
+
+## Symphony
+
+Booking alerts used to have one way out: a Messenger message to the studio's own
+Facebook account. That channel fails quietly. Facebook won't deliver to that
+thread if you haven't written to the Page in the last 24 hours, and before you've
+registered an owner there is nowhere for the alert to go at all — either way the
+customer has handed over their name, number and dates, and nobody finds out.
+
+Symphony is the second channel. Set `SYMPHONY_API_TOKEN` and any booking alert
+Messenger couldn't carry goes there instead.
+
+```
+SYMPHONY_API_TOKEN=       # from Symphony → Settings → Connections
+SYMPHONY_BASE_URL=        # optional, only if the agent API moves
+SYMPHONY_SESSION_ID=      # optional, the thread replies stay in
+```
+
+Test it from the dashboard → **Settings** → **Symphony**. The same panel has a
+box for sending Symphony a message directly.
+
+**Two things worth knowing before you set the token.**
+
+A message to Symphony arrives as though you sent it and carries your authority to
+act, so the alerts this app sends unprompted are written as reports and say so —
+"this is a notification only, take no action unless Brad asks you to". Only the
+booking alert is forwarded, and only when Messenger has already failed. The
+"a draft is waiting for your OK" ping is not, because that one fires on every
+message and would bury you.
+
+The dashboard has no login. That is already true of the Page token and app secret
+it holds, but a Symphony token raises the stakes — it reaches your whole business,
+not just this app. Keep the deployment private, or put an authenticating proxy in
+front of it before you set the token.
+
+If Symphony is slow to answer, the Send box gives up waiting after two minutes and
+says so; the message still went through, and the answer will be in Symphony.
 
 ---
 
@@ -113,6 +153,7 @@ src/server/
   agent.ts      the actual agent — memory, intent, handoff
   facebook.ts   Graph API, signature verification, publishing
   llm.ts        provider-agnostic model calls
+  symphony.ts   Brad's business agents — the booking alert's second channel
   db.ts         all queries
   scheduler.ts  publishes due posts every minute
   routes/       the webhook

@@ -19,6 +19,7 @@ import {
 import { invokeLLMJson, type ChatMessage } from "./llm.js";
 import { availabilityForPrompt } from "./calendar.js";
 import { sendMessengerMessage, sendTypingIndicator, getSenderProfile } from "./facebook.js";
+import { notifySymphony, symphonyConfigured } from "./symphony.js";
 
 const HANDOFF_HOURS = Number(process.env.HANDOFF_PAUSE_HOURS || 12);
 
@@ -162,7 +163,16 @@ Reply with JSON only, no prose, no code fence:
   return { ...result.data, ok: result.ok };
 }
 
-/** Pings the studio owner's own Messenger thread so they can enter it into Timely. */
+/**
+ * Pings the studio owner's own Messenger thread so they can enter it into Timely.
+ *
+ * Messenger is the first choice because it's where Brad already is, but it
+ * isn't reliable on its own: the 24-hour window applies to this thread too,
+ * so if he hasn't messaged the Page recently Facebook drops the alert, and
+ * before an owner has registered there was nowhere for it to go at all. A
+ * booking that never reaches him is a customer who never gets confirmed, so
+ * Symphony is the second channel — used whenever Messenger couldn't carry it.
+ */
 async function notifyOwner(details: {
   customerName?: string;
   name: string;
@@ -170,14 +180,6 @@ async function notifyOwner(details: {
   dates: string;
   photoUrls: string[];
 }) {
-  const config = await getFacebookConfig();
-  if (!config?.ownerPsid) {
-    console.warn(
-      '[Agent] A booking is ready but no owner is registered yet. Send "set owner <your webhook verify token>" from your own Messenger to the Page to register.'
-    );
-    return;
-  }
-
   const lines = [
     "New booking — enter this into Timely:",
     details.customerName ? `Messenger: ${details.customerName}` : undefined,
@@ -186,15 +188,37 @@ async function notifyOwner(details: {
     `Wants: ${details.dates}`,
     details.photoUrls.length ? `Reference photo(s): ${details.photoUrls.join(" ")}` : undefined,
   ].filter(Boolean);
+  const alert = lines.join("\n");
 
-  try {
-    await sendMessengerMessage(config.ownerPsid, lines.join("\n"));
-  } catch (error) {
-    // The 24-hour Messenger window applies to this thread too — if Brad
-    // hasn't messaged the Page recently, this can fail silently on
-    // Facebook's side. Logging it is the only fallback short of a second
-    // notification channel.
-    console.error("[Agent] Failed to alert the owner:", (error as Error).message);
+  // A database hiccup reading the config must not swallow the booking — fall
+  // through to Symphony rather than returning empty-handed.
+  const config = await getFacebookConfig().catch(() => undefined);
+
+  if (config?.ownerPsid) {
+    try {
+      await sendMessengerMessage(config.ownerPsid, alert);
+      return;
+    } catch (error) {
+      console.error("[Agent] Failed to alert the owner on Messenger:", (error as Error).message);
+    }
+  } else {
+    console.warn(
+      '[Agent] No owner is registered for Messenger alerts. Send "set owner <your webhook verify token>" from your own Messenger to the Page to register.'
+    );
+  }
+
+  if (!symphonyConfigured()) {
+    console.error(
+      "[Agent] A booking is ready and nothing could carry the alert. Register an owner, or set SYMPHONY_API_TOKEN so Symphony can pass it on."
+    );
+    return;
+  }
+
+  const result = await notifySymphony("A booking is ready to be entered into Timely.", alert);
+  if (result.ok) {
+    console.log("[Agent] Booking alert passed to Symphony.");
+  } else {
+    console.error("[Agent] Symphony couldn't take the booking alert either:", result.error);
   }
 }
 

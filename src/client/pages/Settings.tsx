@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { CheckCircle2, XCircle, Sparkles } from "lucide-react";
+import { CheckCircle2, XCircle, Sparkles, Radio } from "lucide-react";
 import KnowledgeList from "@/components/KnowledgeList";
 import { toast } from "sonner";
 
@@ -15,6 +15,7 @@ export default function Settings() {
   const { data: timely } = trpc.config.timely.useQuery();
   const { data: knowledge } = trpc.knowledge.list.useQuery();
   const { data: llm } = trpc.llm.status.useQuery();
+  const { data: symphony } = trpc.symphony.status.useQuery();
 
   const testLlm = trpc.llm.test.useMutation({
     onSuccess: (result) => {
@@ -25,6 +26,26 @@ export default function Settings() {
     onError: (error) => toast.error(error.message || "Couldn't run the test."),
   });
 
+  const testSymphony = trpc.symphony.test.useMutation({
+    onSuccess: (result) => {
+      if (result.ok) toast.success("Symphony connected");
+      else toast.error("Not connected");
+      utils.symphony.status.invalidate();
+    },
+    onError: (error) => toast.error(error.message || "Couldn't run the test."),
+  });
+
+  const askSymphony = trpc.symphony.ask.useMutation({
+    onSuccess: (result) => {
+      if (result.ok && result.reply) toast.success("Symphony answered");
+      else if (result.ok) toast.success("Sent — Symphony is still working on it");
+      else toast.error(result.error || "Symphony didn't answer.");
+      utils.symphony.status.invalidate();
+    },
+    onError: (error) => toast.error(error.message || "Couldn't reach Symphony."),
+  });
+
+  const [symphonyMessage, setSymphonyMessage] = useState("");
   const [pageId, setPageId] = useState("");
   const [pageName, setPageName] = useState("");
   const [pageAccessToken, setPageAccessToken] = useState("");
@@ -85,6 +106,8 @@ export default function Settings() {
   });
 
   const result = testLlm.data;
+  const symphonyTest = testSymphony.data;
+  const symphonyReply = askSymphony.data;
 
   return (
     <div className="space-y-6">
@@ -226,6 +249,99 @@ export default function Settings() {
                   set owner {verifyToken || "<your webhook verify token>"}
                 </code>
               </>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 font-display text-xl text-charcoal">
+            <Radio className="h-4 w-4 text-sepia" />
+            Symphony
+          </CardTitle>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Your own team of business agents, as a backstop for booking alerts. Facebook drops a
+            message to your own account if you haven't written to the Page in 24 hours, so when a
+            booking alert can't get through on Messenger it goes to Symphony instead. Set{" "}
+            <code className="rounded bg-surface px-1">SYMPHONY_API_TOKEN</code> in Railway.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1 text-sm">
+            <dt className="text-muted-foreground">Endpoint</dt>
+            <dd className="break-all text-charcoal">{symphony?.baseUrl ?? "…"}</dd>
+            <dt className="text-muted-foreground">Thread</dt>
+            <dd className="break-all text-charcoal">{symphony?.sessionId ?? "…"}</dd>
+            <dt className="text-muted-foreground">Token</dt>
+            <dd className={symphony?.configured ? "text-charcoal" : "text-destructive"}>
+              {symphony?.configured ? "set" : "not set"}
+            </dd>
+          </dl>
+
+          {symphonyTest && (
+            <div
+              className={`flex items-start gap-2 rounded-lg border p-3 text-sm ${
+                symphonyTest.ok
+                  ? "border-success/40 bg-success/10 text-success"
+                  : "border-destructive/40 bg-destructive/10 text-destructive"
+              }`}
+            >
+              {symphonyTest.ok ? (
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+              ) : (
+                <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              )}
+              <span>{symphonyTest.detail}</span>
+            </div>
+          )}
+
+          {!symphonyTest && symphony?.lastError && (
+            <div className="rounded-lg border border-border bg-beige/20 p-3 text-sm text-charcoal">
+              <p className="text-xs text-muted-foreground">Last failure</p>
+              <p className="mt-1">{symphony.lastError.message}</p>
+            </div>
+          )}
+
+          <Button onClick={() => testSymphony.mutate()} disabled={testSymphony.isPending}>
+            {testSymphony.isPending ? "Testing…" : "Test connection"}
+          </Button>
+
+          <div className="space-y-3 border-t border-border pt-4">
+            <p className="text-sm text-muted-foreground">
+              Send Symphony a message. It arrives as though you sent it yourself and it can act on
+              your business, so say what you actually want done — and remember an answer can take a
+              minute or two.
+            </p>
+            <Textarea
+              placeholder="e.g. Remind me on Friday to chase the deposits I'm still waiting on."
+              value={symphonyMessage}
+              onChange={(e) => setSymphonyMessage(e.target.value)}
+              className="min-h-20"
+            />
+            <Button
+              onClick={() => {
+                if (!symphonyMessage.trim()) {
+                  toast.error("Write a message first.");
+                  return;
+                }
+                askSymphony.mutate({ message: symphonyMessage.trim() });
+              }}
+              disabled={askSymphony.isPending || !symphony?.configured}
+            >
+              {askSymphony.isPending ? "Waiting on Symphony…" : "Send to Symphony"}
+            </Button>
+
+            {symphonyReply?.reply && (
+              <div className="whitespace-pre-wrap rounded-lg border border-border bg-beige/20 p-3 text-sm text-charcoal">
+                {symphonyReply.reply}
+              </div>
+            )}
+            {symphonyReply && !symphonyReply.reply && symphonyReply.ok && (
+              <p className="text-sm text-muted-foreground">
+                Sent. Symphony was still working when we stopped waiting — check Symphony for the
+                answer.
+              </p>
             )}
           </div>
         </CardContent>

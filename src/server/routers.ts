@@ -40,6 +40,14 @@ import {
 } from "./agent.js";
 import { getUpcomingBookings, findFreeSlots } from "./calendar.js";
 import { testLlm, llmProvider, llmModel, llmBaseUrl, getLastLlmError } from "./llm.js";
+import {
+  askSymphony,
+  testSymphony,
+  symphonyBaseUrl,
+  symphonyConfigured,
+  symphonySessionId,
+  getLastSymphonyError,
+} from "./symphony.js";
 
 const t = initTRPC.create();
 const publicProcedure = t.procedure;
@@ -64,6 +72,27 @@ export const appRouter = t.router({
     })),
     // A mutation so it only ever fires on a click, never on a page load.
     test: publicProcedure.mutation(() => testLlm()),
+  }),
+
+  /**
+   * Brad's own agents. Anything sent here is treated as coming from him, so
+   * nothing reaches Symphony on a page load: `status` only reads local
+   * config, and the two that do talk to it are mutations, so they can only
+   * fire on a click.
+   */
+  symphony: t.router({
+    status: publicProcedure.query(() => ({
+      configured: symphonyConfigured(),
+      baseUrl: symphonyBaseUrl(),
+      sessionId: symphonySessionId(),
+      lastError: getLastSymphonyError(),
+    })),
+    test: publicProcedure.mutation(() => testSymphony()),
+    // Symphony's turns can run past two minutes; the client is told it's
+    // still working rather than being handed a failure that isn't one.
+    ask: publicProcedure
+      .input(z.object({ message: z.string().min(1).max(4000) }))
+      .mutation(({ input }) => askSymphony(input.message)),
   }),
 
   conversations: t.router({
