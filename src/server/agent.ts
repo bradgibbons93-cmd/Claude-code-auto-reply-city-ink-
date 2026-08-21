@@ -270,10 +270,23 @@ export async function handleCustomerMessage(
   // The studio's own account messages the Page to register for alerts and to
   // test things. Drafting a customer reply back at them is noise, and it was
   // the reason the same line kept arriving.
+  //
+  // The exception is a "test:" prefix. Until App Review lands, the owner is
+  // often the only person who can reach the Page at all, so without this the
+  // only way to see a real draft is to borrow someone else's phone.
   const config = await getFacebookConfig().catch(() => undefined);
-  if (config?.ownerPsid && config.ownerPsid === senderId) {
+  const isOwner = !!config?.ownerPsid && config.ownerPsid === senderId;
+  const testCommand = text.trim().match(/^test:\s*(.+)$/i);
+
+  if (isOwner && !testCommand) {
     console.log("[Agent] Message from the studio's own account — not drafting a reply");
     return;
+  }
+
+  if (testCommand) {
+    // Draft against the question, not against the word "test:".
+    text = testCommand[1].trim();
+    console.log(`[Agent] Test message from the owner — drafting against: "${text}"`);
   }
 
   await sendTypingIndicator(senderId);
@@ -392,6 +405,15 @@ export async function approveDraft(id: number, editedText?: string): Promise<voi
   if (!resolved) return;
   await sendMessengerMessage(resolved.conversationId, resolved.text);
   await recordMessage(resolved.conversationId, `draft_${id}_sent`, "bot", resolved.text, resolved.text);
+
+  // Edits made while testing against your own account aren't real feedback,
+  // and corrections outweigh everything else the agent reads — so a throwaway
+  // test rewrite must not become house style.
+  const config = await getFacebookConfig().catch(() => undefined);
+  if (config?.ownerPsid && config.ownerPsid === resolved.conversationId) {
+    console.log("[Agent] Test thread — not recording that edit as a correction");
+    return;
+  }
 
   // If Brad rewrote it, that difference is the most direct feedback there
   // is on this agent's output — keep it and show it back to the model.
