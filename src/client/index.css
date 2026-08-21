@@ -3,59 +3,85 @@
 @tailwind utilities;
 
 @layer base {
-  /* Light — straight off the brand book, section 09. */
+  /*
+   * Light — the four colours off the logo sheet, exactly:
+   * #1A1A1A ink black, #C6A47D gold, #E7D9C3 cream, #FFFFFF paper.
+   */
   :root {
-    --c-background: 255 255 255;
-    --c-surface: 250 248 245;
-    --c-foreground: 26 26 26;
+    --c-background: 255 255 255; /* #FFFFFF */
+    --c-surface: 250 246 240;
+    --c-foreground: 26 26 26; /* #1A1A1A */
     --c-card: 255 255 255;
-    --c-input: 255 255 255;
-    --c-border: 237 231 222;
-    --c-muted: 138 129 120;
-    --c-accent: 208 195 168; /* warm beige */
-    --c-accent-strong: 163 139 122; /* faded sepia */
+    --c-input: 252 250 246;
+    --c-border: 231 217 195; /* #E7D9C3 */
+    --c-muted: 138 126 110;
+    --c-accent: 231 217 195; /* #E7D9C3 cream */
+    --c-accent-strong: 198 164 125; /* #C6A47D gold */
     --c-destructive: 180 84 74;
     --c-success: 90 122 94;
     --c-primary: 26 26 26;
     --c-primary-foreground: 255 255 255;
 
+    --c-accent-alt: 198 164 125; /* the gold carries the accent in light */
+    --c-elevated: 252 250 246;
+
     --shadow-soft: 0 1px 2px rgb(26 26 26 / 0.04), 0 8px 24px -12px rgb(26 26 26 / 0.1);
     --shadow-lift: 0 2px 4px rgb(26 26 26 / 0.05), 0 18px 40px -16px rgb(26 26 26 / 0.16);
-    --shadow-glow: 0 0 0 1px rgb(208 195 168 / 0.5), 0 0 28px -6px rgb(208 195 168 / 0.55);
+    --shadow-glow: 0 0 0 1px rgb(198 164 125 / 0.55), 0 0 28px -6px rgb(198 164 125 / 0.5);
+    --shadow-inset: inset 0 1px 2px rgb(26 26 26 / 0.05);
 
     --page-wash:
-      radial-gradient(60rem 40rem at 12% -10%, rgb(208 195 168 / 0.22), transparent 60%),
-      radial-gradient(50rem 34rem at 105% 8%, rgb(163 139 122 / 0.14), transparent 62%);
+      radial-gradient(60rem 40rem at 12% -10%, rgb(231 217 195 / 0.5), transparent 60%),
+      radial-gradient(50rem 34rem at 105% 8%, rgb(198 164 125 / 0.2), transparent 62%);
     --glass-bg: 255 255 255;
     --glass-alpha: 0.72;
+    --ink-a: 198 164 125;
+    --ink-b: 231 217 195;
+    --ink-opacity: 0.3;
   }
 
-  /* Dark — near-black with the glowing purple. */
+  /*
+   * Dark — ink black, lit by violet with the brand gold as counter-light so
+   * the palette has somewhere to travel instead of one flat purple, and the
+   * dark theme still reads as City Ink. Inputs and menus sit BELOW the page
+   * black: a dropdown should read as a hole cut in the surface, not a panel
+   * floating on it.
+   */
   :root[data-theme="dark"] {
-    --c-background: 10 8 16;
-    --c-surface: 22 18 33;
-    --c-foreground: 240 238 248;
-    --c-card: 19 15 29;
-    --c-input: 26 21 39;
-    --c-border: 51 41 74;
-    --c-muted: 155 146 176;
+    --c-background: 8 6 13;
+    --c-surface: 16 12 25;
+    --c-foreground: 242 240 250;
+    --c-card: 15 11 24;
+    --c-input: 5 4 9; /* darker than the page — a recess, not a raise */
+    --c-elevated: 11 8 18; /* dropdowns, popovers, menus */
+    --c-border: 47 37 70;
+    --c-muted: 158 148 180;
     --c-accent: 167 139 250; /* violet */
-    --c-accent-strong: 196 152 255; /* brighter violet for emphasis */
+    --c-accent-strong: 201 156 255; /* brighter violet for emphasis */
+    --c-accent-alt: 198 164 125; /* the brand gold, lighting against the violet */
     --c-destructive: 248 113 113;
     --c-success: 110 200 140;
     --c-primary: 167 139 250;
-    --c-primary-foreground: 12 9 20;
+    --c-primary-foreground: 10 7 17;
 
-    --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 24px -12px rgb(139 92 246 / 0.35);
-    --shadow-lift: 0 2px 6px rgb(0 0 0 / 0.55), 0 20px 46px -18px rgb(167 139 250 / 0.5);
-    --shadow-glow: 0 0 0 1px rgb(167 139 250 / 0.45), 0 0 34px -4px rgb(167 139 250 / 0.65);
+    --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.6), 0 8px 24px -12px rgb(139 92 246 / 0.4);
+    --shadow-lift:
+      0 2px 6px rgb(0 0 0 / 0.6), 0 20px 46px -18px rgb(167 139 250 / 0.55),
+      0 0 60px -30px rgb(198 164 125 / 0.35);
+    --shadow-glow:
+      0 0 0 1px rgb(167 139 250 / 0.5), 0 0 34px -4px rgb(167 139 250 / 0.7),
+      0 0 70px -20px rgb(198 164 125 / 0.3);
+    --shadow-inset: inset 0 1px 0 rgb(255 255 255 / 0.04), inset 0 0 20px rgb(0 0 0 / 0.6);
 
     --page-wash:
-      radial-gradient(60rem 40rem at 12% -10%, rgb(139 92 246 / 0.28), transparent 62%),
-      radial-gradient(50rem 34rem at 105% 8%, rgb(196 152 255 / 0.18), transparent 64%),
-      radial-gradient(40rem 30rem at 50% 120%, rgb(109 40 217 / 0.22), transparent 60%);
-    --glass-bg: 19 15 29;
-    --glass-alpha: 0.7;
+      radial-gradient(60rem 40rem at 12% -10%, rgb(139 92 246 / 0.3), transparent 62%),
+      radial-gradient(50rem 34rem at 105% 8%, rgb(198 164 125 / 0.14), transparent 64%),
+      radial-gradient(40rem 30rem at 50% 120%, rgb(109 40 217 / 0.26), transparent 60%);
+    --glass-bg: 15 11 24;
+    --glass-alpha: 0.68;
+    --ink-a: 139 92 246;
+    --ink-b: 198 164 125;
+    --ink-opacity: 0.22;
   }
 
   body {
@@ -68,10 +94,60 @@
       color 0.4s ease;
   }
 
+  /*
+   * Ink in water. Two large blurred blobs drifting on different periods, so
+   * the loop never lines up and the movement reads as organic rather than as
+   * a repeating animation. Fixed and behind everything, pointer-events off.
+   */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: -25%;
+    z-index: -1;
+    pointer-events: none;
+    opacity: var(--ink-opacity);
+    background:
+      radial-gradient(38% 44% at 28% 34%, rgb(var(--ink-a)) 0%, transparent 62%),
+      radial-gradient(34% 40% at 72% 66%, rgb(var(--ink-b)) 0%, transparent 62%);
+    filter: blur(72px);
+    animation: ink-drift 34s ease-in-out infinite alternate;
+  }
+
+  @keyframes ink-drift {
+    0% {
+      transform: translate3d(-3%, -2%, 0) scale(1);
+    }
+    50% {
+      transform: translate3d(4%, 3%, 0) scale(1.14) rotate(6deg);
+    }
+    100% {
+      transform: translate3d(-2%, 5%, 0) scale(1.05) rotate(-4deg);
+    }
+  }
+
+  /*
+   * Inputs, textareas and menus are recesses. In the dark theme they sit
+   * below the page black with an inner shadow, so a dropdown looks cut into
+   * the surface instead of stacked on top of it.
+   */
+  input,
+  textarea,
+  select {
+    background-color: rgb(var(--c-input));
+    box-shadow: var(--shadow-inset);
+  }
+
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    box-shadow: var(--shadow-inset), 0 0 0 3px rgb(var(--c-accent) / 0.22);
+  }
+
   *:focus-visible {
     outline: 2px solid rgb(var(--c-accent-strong));
     outline-offset: 2px;
   }
+
 }
 
 @layer components {
@@ -129,6 +205,125 @@
       rgb(var(--c-accent) / 0) 100%
     );
     background-size: 200% 100%;
+  }
+
+  /* Dropdowns, popovers and menus — the recessed surface, not the card. */
+  .menu-surface {
+    background: rgb(var(--c-elevated));
+    border: 1px solid rgb(var(--c-border));
+    box-shadow: var(--shadow-lift);
+    backdrop-filter: blur(18px) saturate(1.2);
+    -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  }
+
+  /*
+   * Ink bleeding outward from where the cursor enters. The gradient centre
+   * is set from JS via --mx/--my where a component wires it up; without that
+   * it falls back to the middle, so it still works uninstrumented.
+   */
+  .ink-hover {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+  }
+  .ink-hover::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    opacity: 0;
+    background: radial-gradient(
+      18rem 18rem at var(--mx, 50%) var(--my, 50%),
+      rgb(var(--c-accent) / 0.16),
+      transparent 70%
+    );
+    transition: opacity 0.5s ease;
+  }
+  .ink-hover:hover::after {
+    opacity: 1;
+  }
+
+  /* A hairline that breathes — for the live/active edge of a panel. */
+  .glow-edge {
+    position: relative;
+  }
+  .glow-edge::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      120deg,
+      rgb(var(--c-accent) / 0.7),
+      rgb(var(--c-accent-alt) / 0.55),
+      rgb(var(--c-accent) / 0.7)
+    );
+    background-size: 220% 220%;
+    animation: edge-travel 9s ease-in-out infinite;
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  @keyframes edge-travel {
+    0%,
+    100% {
+      background-position: 0% 50%;
+    }
+    50% {
+      background-position: 100% 50%;
+    }
+  }
+
+  /* The badge, breathing. Used on hero placements of the logo. */
+  .logo-glow {
+    filter: drop-shadow(0 0 10px rgb(var(--c-accent) / 0.45));
+    animation: logo-breathe 5.5s ease-in-out infinite;
+  }
+
+  @keyframes logo-breathe {
+    0%,
+    100% {
+      filter: drop-shadow(0 0 8px rgb(var(--c-accent) / 0.35));
+    }
+    50% {
+      filter: drop-shadow(0 0 22px rgb(var(--c-accent) / 0.75))
+        drop-shadow(0 0 40px rgb(var(--c-accent-alt) / 0.4));
+    }
+  }
+
+  /* The drip stroke draws itself, then holds. */
+  .ink-drip-path {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-dasharray: 240;
+    stroke-dashoffset: 240;
+    animation: ink-draw 6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+
+  @keyframes ink-draw {
+    0% {
+      stroke-dashoffset: 240;
+      opacity: 0;
+    }
+    25% {
+      opacity: 0.8;
+    }
+    60%,
+    85% {
+      stroke-dashoffset: 0;
+      opacity: 0.45;
+    }
+    100% {
+      stroke-dashoffset: 0;
+      opacity: 0;
+    }
   }
 }
 

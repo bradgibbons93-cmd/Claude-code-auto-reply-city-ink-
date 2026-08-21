@@ -4,7 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Trash2, CheckCircle2, XCircle, Sparkles } from "lucide-react";
+import { CheckCircle2, XCircle, Sparkles } from "lucide-react";
+import KnowledgeList from "@/components/KnowledgeList";
 import { toast } from "sonner";
 
 export default function Settings() {
@@ -305,28 +306,7 @@ export default function Settings() {
             </Button>
           </div>
 
-          <div className="space-y-2">
-            {knowledge?.map((k) => (
-              <div
-                key={k.id}
-                className="flex items-start justify-between gap-3 rounded-lg border border-border p-3"
-              >
-                <div>
-                  <p className="text-sm text-charcoal">{k.question}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">{k.answer}</p>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => removeKnowledge.mutate({ id: k.id })}
-                  aria-label="Remove"
-                  className="text-destructive"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            ))}
-          </div>
+          <KnowledgeList />
         </CardContent>
       </Card>
     </div>

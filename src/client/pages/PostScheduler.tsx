@@ -12,9 +12,10 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Calendar, Plus, Wand2, Trash2 } from "lucide-react";
+import { Calendar, Plus, Wand2, Trash2, Lightbulb, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
+import PostCalendar from "@/components/PostCalendar";
 
 const STATUS_STYLES: Record<string, string> = {
   published: "border-success/40 bg-success/10 text-success",
@@ -60,6 +61,23 @@ export default function PostScheduler() {
     },
     onError: () => toast.error("Couldn't delete that post."),
   });
+
+  const suggest = trpc.posts.suggest.useMutation({
+    onError: (error) =>
+      toast.error(error.message || "Couldn't get suggestions. Check the AI connection in Settings."),
+  });
+
+  /** Opens the composer prefilled — from a suggestion or a tapped date. */
+  const compose = (opts: { text?: string; date?: Date } = {}) => {
+    if (opts.text) setContent(opts.text);
+    if (opts.date) {
+      // 11am is when the studio is open and people are on their phones.
+      const at = new Date(opts.date);
+      at.setHours(11, 0, 0, 0);
+      setScheduledAt(format(at, "yyyy-MM-dd'T'HH:mm"));
+    }
+    setIsOpen(true);
+  };
 
   const handleCreate = () => {
     if (!content.trim() || !scheduledAt) {
@@ -153,6 +171,57 @@ export default function PostScheduler() {
           </DialogContent>
         </Dialog>
       </div>
+
+      <Card className="border-border">
+        <CardContent className="pt-6">
+          <PostCalendar posts={posts ?? []} onPickDate={(date) => compose({ date })} />
+          <p className="mt-3 text-xs text-muted-foreground">
+            Tap a day to schedule something for it.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border">
+        <CardContent className="space-y-3 pt-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="flex items-center gap-2 font-display text-lg text-charcoal">
+                <Lightbulb className="h-4 w-4 text-sepia" />
+                Ideas for the week
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Built from what's in Training, so it won't invent a price or a free slot.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => suggest.mutate()}
+              disabled={suggest.isPending}
+            >
+              {suggest.isPending ? "Thinking…" : "Suggest"}
+            </Button>
+          </div>
+
+          {suggest.data?.map((idea, i) => (
+            <div key={i} className="rounded-xl border border-border p-3">
+              <p className="text-sm text-charcoal">{idea.hook}</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
+                {idea.caption}
+              </p>
+              <div className="mt-2 flex items-center justify-between gap-3">
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Clock className="h-3 w-3" />
+                  {idea.bestTime}
+                </span>
+                <Button size="sm" variant="ghost" onClick={() => compose({ text: idea.caption })}>
+                  Use this
+                </Button>
+              </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4">
         {posts?.length ? (

@@ -658,3 +658,21 @@ export async function getRecentDraftEdits(limit = 5) {
   const db = await getDb();
   return db.select().from(draftEdits).orderBy(desc(draftEdits.createdAt)).limit(limit);
 }
+
+/**
+ * Fix a correction after the fact.
+ *
+ * A slip of the thumb while editing a draft — clipping a word off the front,
+ * say — gets stored as deliberate phrasing, and corrections outweigh
+ * everything else the agent reads. So a wrong one has to be repairable, not
+ * just visible.
+ */
+export async function updateDraftEdit(id: number, sentText: string) {
+  const db = await getDb();
+  await db.update(draftEdits).set({ sentText }).where(eq(draftEdits.id, id));
+}
+
+export async function deleteDraftEdit(id: number) {
+  const db = await getDb();
+  await db.delete(draftEdits).where(eq(draftEdits.id, id));
+}
