@@ -11,6 +11,19 @@ import { toast } from "sonner";
 export default function Settings() {
   const utils = trpc.useUtils();
 
+  // "Manage integrations" used to drop you at the top of this page, above
+  // the AI card, nowhere near the connections it promised. Land on them.
+  useEffect(() => {
+    const target = window.location.hash.slice(1);
+    if (!target) return;
+    // After the first paint, or the element isn't there to scroll to yet.
+    const id = window.setTimeout(
+      () => document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      100
+    );
+    return () => window.clearTimeout(id);
+  }, []);
+
   const { data: fb } = trpc.config.facebook.useQuery();
   const { data: timely } = trpc.config.timely.useQuery();
   const { data: knowledge } = trpc.knowledge.list.useQuery();
@@ -147,7 +160,7 @@ export default function Settings() {
         </CardContent>
       </Card>
 
-      <Card className="border-border">
+      <Card className="border-border" id="connections">
         <CardHeader>
           <CardTitle className="font-display text-xl text-charcoal">Facebook Page</CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">

@@ -45,7 +45,19 @@ export async function getOrCreateConversation(
     .where(eq(messengerConversations.conversationId, conversationId))
     .limit(1);
 
-  if (existing.length > 0) return existing[0];
+  if (existing.length > 0) {
+    // A conversation created before the name lookup worked would have stayed
+    // "Unknown customer" forever, because this returned early and nothing
+    // ever wrote the name again. Fill it in the moment one is available.
+    if (senderName && !existing[0].senderName) {
+      await db
+        .update(messengerConversations)
+        .set({ senderName })
+        .where(eq(messengerConversations.conversationId, conversationId));
+      return { ...existing[0], senderName };
+    }
+    return existing[0];
+  }
 
   await db
     .insert(messengerConversations)

@@ -488,9 +488,9 @@ export default function Dashboard() {
                   tint="bg-beige/40 text-sepia"
                 />
               </div>
-              <Link href="/settings">
+              <Link href="/settings#connections">
                 <Button variant="outline" className="mt-4 w-full">
-                  Manage integrations
+                  Manage connections
                   <ArrowRight className="ml-2 h-3.5 w-3.5" />
                 </Button>
               </Link>
