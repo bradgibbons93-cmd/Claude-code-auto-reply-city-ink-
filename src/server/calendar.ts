@@ -230,11 +230,52 @@ export async function findFreeSlots(options?: {
   return slots;
 }
 
-/** A line for the prompt, or empty when there's no calendar configured. */
+/**
+ * How long a sitting runs, and therefore how big a gap it actually needs.
+ *
+ * A full day means the studio day — 10:30 to 5 — so "full day free" can only
+ * be a day with nothing else in it at all. That's the point: a 90-minute hole
+ * between an 11am booking and a 3pm appointment is not a day.
+ */
+export const SESSION_LENGTHS = [
+  { key: "short", minutes: 90, label: "Short sitting — up to 1.5 hrs" },
+  { key: "half", minutes: 180, label: "Half day — 3 hrs straight" },
+  {
+    key: "full",
+    minutes: (OPENING.endHour * 60) - (OPENING.startHour * 60 + OPENING.startMinute),
+    label: "Full day — the whole day, nothing else booked",
+  },
+] as const;
+
+/**
+ * Availability for the prompt, broken down by how long the session needs.
+ *
+ * Previously this only ever asked for a 90-minute gap, so a customer wanting
+ * a big piece over several sessions was offered a slot that happened to have
+ * an hour and a half free between two other appointments. The agent has no
+ * way to tell a gap from a day unless it's told, so it gets all three and is
+ * told to pick the row that matches.
+ */
 export async function availabilityForPrompt(): Promise<string> {
-  const slots = await findFreeSlots();
-  if (!slots.length) return "";
-  return slots.map((s) => s.label).join(", ");
+  const rows = await Promise.all(
+    SESSION_LENGTHS.map(async (length) => {
+      const slots = await findFreeSlots({ slotMinutes: length.minutes, limit: 3 });
+      return { ...length, slots };
+    })
+  );
+
+  if (rows.every((row) => row.slots.length === 0)) return "";
+
+  return rows
+    .map(
+      (row) =>
+        `- ${row.label}: ${
+          row.slots.length
+            ? row.slots.map((s) => s.label).join(", ")
+            : "nothing free in the next fortnight"
+        }`
+    )
+    .join("\n");
 }
 
 export interface UpcomingBooking {
