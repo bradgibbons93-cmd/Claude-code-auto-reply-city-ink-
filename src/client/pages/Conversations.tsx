@@ -53,6 +53,7 @@ function PendingReplyCard({
     id: number;
     conversationId: string;
     customerMessageId: string;
+    photoUrls?: string[];
     draftText: string;
     isSensitive?: boolean | null;
     createdAt: string | Date | null;
@@ -76,17 +77,12 @@ function PendingReplyCard({
     (thread ?? []).find((m) => m.messageId === draft.customerMessageId) ??
     [...(thread ?? [])].reverse().find((m) => m.senderType === "customer");
 
-  // Reference photos usually arrive a message or two BEFORE the question —
-  // "(sent a photo)" then "a price on those two please". Showing only the
-  // answered message's attachments meant pricing a tattoo you couldn't see,
-  // so gather what the customer has sent recently across the thread.
-  const recentPhotos = [
-    ...new Set(
-      (thread ?? [])
-        .filter((m) => m.senderType === "customer")
-        .flatMap((m) => m.attachmentUrls ?? [])
-    ),
-  ].slice(-4);
+  // Reference photos come down with the draft, gathered across the thread —
+  // they usually arrive a message or two BEFORE the question ("(sent a
+  // photo)" then "a price on those two please"), so keying them to the
+  // answered message alone meant pricing a tattoo you couldn't see. Assembled
+  // server-side so this page and the dashboard can't disagree.
+  const recentPhotos = draft.photoUrls ?? [];
 
   const approve = trpc.pendingReplies.approve.useMutation({
     onSuccess: () => {

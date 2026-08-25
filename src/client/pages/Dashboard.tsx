@@ -318,6 +318,18 @@ export default function Dashboard() {
                             <>Draft to {nameFor(draft.conversationId)}</>
                           )}
                         </p>
+                        {!!draft.photoUrls?.length && (
+                          <div className="mb-2 flex flex-wrap gap-1.5">
+                            {draft.photoUrls.map((url) => (
+                              <img
+                                key={url}
+                                src={url}
+                                alt="Reference photo"
+                                className="h-14 w-14 rounded-lg border border-border object-cover"
+                              />
+                            ))}
+                          </div>
+                        )}
                         <p className="line-clamp-3 text-sm text-charcoal">{draft.draftText}</p>
                       </div>
                     ))}

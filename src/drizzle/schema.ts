@@ -9,6 +9,7 @@ import {
   mysqlEnum,
   uniqueIndex,
   index,
+  customType,
 } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
@@ -50,6 +51,32 @@ export const messengerConversations = mysqlTable(
   },
   (t) => ({
     convIdx: uniqueIndex("conv_id_idx").on(t.conversationId),
+  })
+);
+
+/**
+ * The reference photos themselves, not links to them.
+ *
+ * Facebook hands over a signed CDN URL that stops working after a while, so
+ * a photo stored as a URL is a blank box by the time anyone looks at it. A
+ * tattoo enquiry usually IS the picture — it has to still be there tomorrow.
+ */
+export const messageAttachments = mysqlTable(
+  "message_attachments",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    conversationId: varchar("conversation_id", { length: 191 }).notNull(),
+    messageId: varchar("message_id", { length: 191 }).notNull(),
+    contentType: varchar("content_type", { length: 128 }).notNull(),
+    bytes: customType<{ data: Buffer; driverData: Buffer }>({
+      dataType: () => "mediumblob",
+    })("bytes").notNull(),
+    sourceUrl: text("source_url"),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (t) => ({
+    convIdx: index("att_conv_idx").on(t.conversationId),
+    msgIdx: index("att_msg_idx").on(t.messageId),
   })
 );
 
