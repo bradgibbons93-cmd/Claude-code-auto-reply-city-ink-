@@ -524,6 +524,24 @@ export async function setFacebookConfig(input: {
   }
 }
 
+/**
+ * Correct the saved Page ID from what the token actually belongs to.
+ *
+ * A mistyped Page ID doesn't announce itself: sending replies goes through
+ * /me and works fine, while everything addressed to /{page-id} fails with
+ * "Object with ID '…' does not exist". The token is the source of truth, so
+ * once Facebook tells us who it is, write that down.
+ */
+export async function updatePageIdentity(pageId: string, pageName?: string) {
+  const db = await getDb();
+  const existing = await getFacebookConfig();
+  if (!existing) return;
+  await db
+    .update(facebookConfig)
+    .set({ pageId, ...(pageName ? { pageName } : {}) })
+    .where(eq(facebookConfig.id, existing.id));
+}
+
 export async function getTimelyConfig() {
   const db = await getDb();
   const result = await db.select().from(timelyConfig).limit(1);
