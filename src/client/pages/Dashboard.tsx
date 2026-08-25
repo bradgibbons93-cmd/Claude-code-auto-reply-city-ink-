@@ -16,6 +16,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import LiveFeed from "@/components/LiveFeed";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/Avatar";
@@ -345,6 +346,26 @@ export default function Dashboard() {
                     All caught up — nothing waiting to send.
                   </p>
                 )}
+              </CardContent>
+            </Card>
+
+            {/* The studio's own posts, running down the side like a feed. */}
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-baseline justify-between gap-2">
+                  <h2 className="font-display text-base tracking-[0.06em] text-charcoal">
+                    Live feed
+                  </h2>
+                  <Link
+                    href="/feed"
+                    className="text-xs text-sepia underline-offset-2 hover:underline"
+                  >
+                    See all
+                  </Link>
+                </div>
+                <div className="mt-4">
+                  <LiveFeed variant="rail" limit={3} />
+                </div>
               </CardContent>
             </Card>
           </div>

@@ -131,6 +131,31 @@ const STATEMENTS = [
     KEY att_msg_idx (message_id)
   )`,
 
+  `CREATE TABLE IF NOT EXISTS feed_posts (
+    id VARCHAR(191) PRIMARY KEY,
+    source ENUM('facebook','instagram') NOT NULL,
+    message TEXT,
+    permalink VARCHAR(1024),
+    image_path VARCHAR(512),
+    media_type VARCHAR(32),
+    like_count INT DEFAULT 0,
+    comment_count INT DEFAULT 0,
+    posted_at TIMESTAMP NOT NULL,
+    fetched_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY feed_posted_idx (posted_at)
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS artist_uploads (
+    id VARCHAR(64) PRIMARY KEY,
+    artist_name VARCHAR(191),
+    note TEXT,
+    content_type VARCHAR(128) NOT NULL,
+    bytes MEDIUMBLOB NOT NULL,
+    used_at TIMESTAMP NULL,
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY upload_created_idx (created_at)
+  )`,
+
   `CREATE TABLE IF NOT EXISTS example_exchanges (
     id INT AUTO_INCREMENT PRIMARY KEY,
     customer_message TEXT NOT NULL,
@@ -168,6 +193,7 @@ const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "timely_config", column: "calendar_ics_url", ddl: "VARCHAR(1024)" },
   { table: "pending_replies", column: "is_sensitive", ddl: "BOOLEAN DEFAULT FALSE" },
   { table: "messenger_messages", column: "attachment_urls", ddl: "JSON" },
+  { table: "pending_replies", column: "alternatives", ddl: "JSON" },
 ];
 
 async function ensureColumns(): Promise<void> {

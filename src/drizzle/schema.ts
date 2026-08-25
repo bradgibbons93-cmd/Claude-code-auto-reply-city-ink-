@@ -81,6 +81,66 @@ export const messageAttachments = mysqlTable(
 );
 
 /**
+ * The studio's own posts, pulled back out of Facebook and Instagram.
+ *
+ * Kept locally rather than fetched on every page load: the feed then still
+ * reads when the network is slow or a token is being renewed, and — the
+ * reason that matters — the images are stored as our own copies, because the
+ * CDN links Facebook hands over expire and a months-old feed of blank boxes
+ * is worse than no feed.
+ */
+export const feedPosts = mysqlTable(
+  "feed_posts",
+  {
+    id: varchar("id", { length: 191 }).primaryKey(),
+    source: mysqlEnum("source", ["facebook", "instagram"]).notNull(),
+    message: text("message"),
+    permalink: varchar("permalink", { length: 1024 }),
+    // Path to our stored copy of the image, not Facebook's expiring URL.
+    imagePath: varchar("image_path", { length: 512 }),
+    mediaType: varchar("media_type", { length: 32 }),
+    likeCount: int("like_count").default(0),
+    commentCount: int("comment_count").default(0),
+    postedAt: timestamp("posted_at").notNull(),
+    fetchedAt: timestamp("fetched_at").defaultNow(),
+  },
+  (t) => ({
+    postedIdx: index("feed_posted_idx").on(t.postedAt),
+  })
+);
+
+/**
+ * Work the artists photograph at the end of a session.
+ *
+ * Reached by a QR code stuck on the wall — no login, no app, no account. An
+ * artist points a phone at it, picks the photos, types their name, done. The
+ * studio comes back later and pulls what it wants for marketing.
+ *
+ * Bytes live here rather than on disk because a hosted deploy's filesystem
+ * doesn't survive a restart, and a month of work disappearing is not an
+ * acceptable way to find that out.
+ */
+export const artistUploads = mysqlTable(
+  "artist_uploads",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    artistName: varchar("artist_name", { length: 191 }),
+    note: text("note"),
+    contentType: varchar("content_type", { length: 128 }).notNull(),
+    bytes: customType<{ data: Buffer; driverData: Buffer }>({
+      dataType: () => "mediumblob",
+    })("bytes").notNull(),
+    // Set when the studio has taken this one for a post, so the grid can
+    // show what's already been used without deleting anything.
+    usedAt: timestamp("used_at"),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (t) => ({
+    createdIdx: index("upload_created_idx").on(t.createdAt),
+  })
+);
+
+/**
  * messageId carries a unique index. Facebook retries webhook deliveries,
  * so the insert is what stops us replying to the same message twice.
  */
@@ -184,6 +244,9 @@ export const pendingReplies = mysqlTable(
     // its own — illness, violence, grief, anything distressing. The draft is
     // only a holding line and the dashboard flags it for a person to read.
     isSensitive: boolean("is_sensitive").default(false),
+    // Other ways of answering the same message. The studio picks one instead
+    // of rewriting the only draft it was handed.
+    alternatives: json("alternatives").$type<{ label: string; text: string }[]>(),
     createdAt: timestamp("created_at").defaultNow(),
     resolvedAt: timestamp("resolved_at"),
   },

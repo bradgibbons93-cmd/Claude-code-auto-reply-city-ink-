@@ -40,6 +40,13 @@ import {
 } from "./agent.js";
 import { getUpcomingBookings, findFreeSlots } from "./calendar.js";
 import { getLastProfileError, backfillCustomerNames } from "./facebook.js";
+import { syncFeed, listFeed, countFeed } from "./feed.js";
+import {
+  listArtistUploads,
+  markUploadUsed,
+  deleteArtistUpload,
+  countUploadsToday,
+} from "./uploads.js";
 import { testLlm, llmProvider, llmModel, llmBaseUrl, getLastLlmError } from "./llm.js";
 
 const t = initTRPC.create();
@@ -65,6 +72,35 @@ export const appRouter = t.router({
     })),
     // A mutation so it only ever fires on a click, never on a page load.
     test: publicProcedure.mutation(() => testLlm()),
+  }),
+
+  /**
+   * The artists' end-of-day photos. Uploading is a plain POST so a phone can
+   * do it without the app's JavaScript; everything here is the studio side —
+   * looking through them, marking what's been used, clearing what hasn't.
+   */
+  /**
+   * The studio's own posts. Read from our copy; refreshing goes to Facebook.
+   */
+  feed: t.router({
+    list: publicProcedure.query(() => listFeed()),
+    count: publicProcedure.query(() => countFeed()),
+    refresh: publicProcedure
+      .input(z.object({ days: z.number().min(1).max(365).default(120) }).default({ days: 120 }))
+      .mutation(({ input }) => syncFeed(input.days)),
+  }),
+
+  uploads: t.router({
+    list: publicProcedure
+      .input(z.object({ unusedOnly: z.boolean().default(false) }).default({ unusedOnly: false }))
+      .query(({ input }) => listArtistUploads({ unusedOnly: input.unusedOnly })),
+    countToday: publicProcedure.query(() => countUploadsToday()),
+    markUsed: publicProcedure
+      .input(z.object({ id: z.string(), used: z.boolean() }))
+      .mutation(({ input }) => markUploadUsed(input.id, input.used)),
+    remove: publicProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(({ input }) => deleteArtistUpload(input.id)),
   }),
 
   conversations: t.router({

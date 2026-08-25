@@ -54,6 +54,7 @@ function PendingReplyCard({
     conversationId: string;
     customerMessageId: string;
     photoUrls?: string[];
+    alternatives?: { label: string; text: string }[] | null;
     draftText: string;
     isSensitive?: boolean | null;
     createdAt: string | Date | null;
@@ -83,6 +84,13 @@ function PendingReplyCard({
   // answered message alone meant pricing a tattoo you couldn't see. Assembled
   // server-side so this page and the dashboard can't disagree.
   const recentPhotos = draft.photoUrls ?? [];
+
+  // The agent's first answer plus the other angles it offered, as one list to
+  // choose between. The first is what it led with.
+  const options = [
+    { label: "Recommended", text: draft.draftText },
+    ...(draft.alternatives ?? []),
+  ];
 
   const approve = trpc.pendingReplies.approve.useMutation({
     onSuccess: () => {
@@ -169,6 +177,34 @@ function PendingReplyCard({
             className="min-h-24"
             aria-label={`Draft reply to ${senderName}`}
           />
+
+          {/* Other ways of answering the same message. Picking one loads it
+              above to edit — nothing sends until Approve is pressed. */}
+          {options.length > 1 && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <span className="text-[0.6rem] uppercase tracking-[0.18em] text-muted-foreground">
+                Or say it like
+              </span>
+              {options.map((option, index) => {
+                const chosen = text === option.text;
+                return (
+                  <button
+                    key={option.label + index}
+                    type="button"
+                    onClick={() => setText(option.text)}
+                    title={option.text}
+                    className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                      chosen
+                        ? "border-sepia bg-sepia/10 text-sepia"
+                        : "border-border text-muted-foreground hover:border-sepia/60 hover:text-charcoal"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-2">
