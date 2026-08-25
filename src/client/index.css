@@ -25,6 +25,14 @@
     --c-accent-alt: 198 164 125; /* the gold carries the accent in light */
     --c-elevated: 252 250 246;
 
+    /* The banner is its own small palette: an ink slab carrying the gold,
+       which is the studio's actual logo sheet. It stays dark in both themes
+       because a hero that flips to paper stops reading as a banner. */
+    --c-banner: 22 20 19;
+    --c-banner-deep: 8 7 7;
+    --c-banner-fg: 250 246 240;
+    --c-banner-accent: 198 164 125;
+
     --shadow-soft: 0 1px 2px rgb(26 26 26 / 0.04), 0 8px 24px -12px rgb(26 26 26 / 0.1);
     --shadow-lift: 0 2px 4px rgb(26 26 26 / 0.05), 0 18px 40px -16px rgb(26 26 26 / 0.16);
     --shadow-glow: 0 0 0 1px rgb(198 164 125 / 0.55), 0 0 28px -6px rgb(198 164 125 / 0.5);
@@ -63,6 +71,13 @@
     --c-success: 110 200 140;
     --c-primary: 167 139 250;
     --c-primary-foreground: 10 7 17;
+
+    /* Same slab, tuned to the violet ground so it sits with the dark theme
+       rather than looking like a cut-out from the light one. */
+    --c-banner: 20 15 33;
+    --c-banner-deep: 8 6 13;
+    --c-banner-fg: 242 240 250;
+    --c-banner-accent: 201 156 255;
 
     --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.6), 0 8px 24px -12px rgb(139 92 246 / 0.4);
     --shadow-lift:
