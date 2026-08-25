@@ -19,7 +19,7 @@ import {
 } from "./db.js";
 import { invokeLLMJson, type ChatMessage } from "./llm.js";
 import { availabilityForPrompt } from "./calendar.js";
-import { sendMessengerMessage, sendTypingIndicator, getSenderProfile } from "./facebook.js";
+import { sendMessengerMessage, sendTypingIndicator, resolveCustomerName } from "./facebook.js";
 
 const HANDOFF_HOURS = Number(process.env.HANDOFF_PAUSE_HOURS || 12);
 
@@ -232,10 +232,10 @@ export async function handleCustomerMessage(
   text: string,
   photoUrls: string[] = []
 ): Promise<void> {
-  const profile = await getSenderProfile(senderId);
-  const conversation = await getOrCreateConversation(senderId, profile?.name);
+  const senderName = await resolveCustomerName(senderId);
+  const conversation = await getOrCreateConversation(senderId, senderName);
   console.log(
-    `[Agent] Message from ${senderId} (${profile?.name || "name unavailable"}), conversation row ${
+    `[Agent] Message from ${senderId} (${senderName || "name unavailable"}), conversation row ${
       conversation?.id ?? "MISSING"
     }`
   );
@@ -385,7 +385,7 @@ export async function handleCustomerMessage(
 
     if (bookingComplete(merged) && !conversation?.bookingNotifiedAt) {
       await notifyOwner({
-        customerName: profile?.name,
+        customerName: senderName,
         name: merged.name,
         phone: merged.phone,
         dates: merged.dates,
