@@ -131,6 +131,17 @@ const STATEMENTS = [
     KEY att_msg_idx (message_id)
   )`,
 
+  `CREATE TABLE IF NOT EXISTS artist_uploads (
+    id VARCHAR(64) PRIMARY KEY,
+    artist_name VARCHAR(191),
+    note TEXT,
+    content_type VARCHAR(128) NOT NULL,
+    bytes MEDIUMBLOB NOT NULL,
+    used_at TIMESTAMP NULL,
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY upload_created_idx (created_at)
+  )`,
+
   `CREATE TABLE IF NOT EXISTS example_exchanges (
     id INT AUTO_INCREMENT PRIMARY KEY,
     customer_message TEXT NOT NULL,

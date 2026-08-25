@@ -81,6 +81,37 @@ export const messageAttachments = mysqlTable(
 );
 
 /**
+ * Work the artists photograph at the end of a session.
+ *
+ * Reached by a QR code stuck on the wall — no login, no app, no account. An
+ * artist points a phone at it, picks the photos, types their name, done. The
+ * studio comes back later and pulls what it wants for marketing.
+ *
+ * Bytes live here rather than on disk because a hosted deploy's filesystem
+ * doesn't survive a restart, and a month of work disappearing is not an
+ * acceptable way to find that out.
+ */
+export const artistUploads = mysqlTable(
+  "artist_uploads",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    artistName: varchar("artist_name", { length: 191 }),
+    note: text("note"),
+    contentType: varchar("content_type", { length: 128 }).notNull(),
+    bytes: customType<{ data: Buffer; driverData: Buffer }>({
+      dataType: () => "mediumblob",
+    })("bytes").notNull(),
+    // Set when the studio has taken this one for a post, so the grid can
+    // show what's already been used without deleting anything.
+    usedAt: timestamp("used_at"),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (t) => ({
+    createdIdx: index("upload_created_idx").on(t.createdAt),
+  })
+);
+
+/**
  * messageId carries a unique index. Facebook retries webhook deliveries,
  * so the insert is what stops us replying to the same message twice.
  */

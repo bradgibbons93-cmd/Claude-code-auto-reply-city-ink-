@@ -10,6 +10,8 @@ import { ensureTables } from "./migrate.js";
 import { getFacebookConfig, getTimelyConfig } from "./db.js";
 import { backfillCustomerNames } from "./facebook.js";
 import { readAttachment } from "./attachments.js";
+import { saveArtistUpload, readArtistUpload, UploadRejected } from "./uploads.js";
+import QRCode from "qrcode";
 import { getLastLlmError, llmProvider, llmModel, llmBaseUrl } from "./llm.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -35,6 +37,89 @@ app.use(
 app.use(express.urlencoded({ extended: true }));
 
 app.use("/api/webhook", webhookRouter);
+
+/**
+ * Artists' end-of-day photos.
+ *
+ * Deliberately open — the artists reach it by scanning a QR code on the wall,
+ * and putting a login in front of that guarantees it never gets used. It only
+ * ever accepts an image and only ever adds to the grid; nothing here can read
+ * a conversation, send a message, or change a setting.
+ *
+ * Its own body limit, because a phone photo is far bigger than a webhook and
+ * raising the global limit for one route would be the wrong trade.
+ */
+app.post("/api/uploads", express.json({ limit: "24mb" }), async (req, res) => {
+  try {
+    const { artistName, note, photos } = req.body ?? {};
+    if (!Array.isArray(photos) || photos.length === 0) {
+      return res.status(400).json({ error: "Pick at least one photo." });
+    }
+    if (photos.length > 20) {
+      return res.status(400).json({ error: "Twenty photos at a time, max." });
+    }
+
+    const saved: string[] = [];
+    const rejected: string[] = [];
+    for (const photo of photos) {
+      const base64 = String(photo?.dataUrl ?? "").split(",")[1] ?? "";
+      try {
+        const { id } = await saveArtistUpload({
+          artistName,
+          note,
+          contentType: String(photo?.contentType ?? ""),
+          bytes: Buffer.from(base64, "base64"),
+        });
+        saved.push(id);
+      } catch (error) {
+        if (error instanceof UploadRejected) rejected.push(error.message);
+        else throw error;
+      }
+    }
+
+    console.log(`[Uploads] ${saved.length} photo(s) from ${artistName || "an artist"}`);
+    return res.json({ saved: saved.length, rejected });
+  } catch (error) {
+    console.error("[Uploads] Save failed:", (error as Error).message);
+    return res.status(500).json({ error: "Couldn't save those — try again in a moment." });
+  }
+});
+
+app.get("/api/uploads/:id", async (req, res) => {
+  try {
+    const upload = await readArtistUpload(req.params.id);
+    if (!upload) return res.sendStatus(404);
+    res.setHeader("Content-Type", upload.contentType);
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    return res.end(upload.bytes);
+  } catch (error) {
+    console.error("[Uploads] Serve failed:", (error as Error).message);
+    return res.sendStatus(500);
+  }
+});
+
+/**
+ * The QR code the artists scan, as a PNG. Generated here rather than in the
+ * browser so it can be printed straight from the page, and so the URL it
+ * encodes is the one the server actually answers on.
+ */
+app.get("/api/upload-qr.png", async (req, res) => {
+  try {
+    const origin = `${req.protocol}://${req.get("host")}`;
+    const png = await QRCode.toBuffer(`${origin}/upload`, {
+      width: 720,
+      margin: 2,
+      errorCorrectionLevel: "M",
+      color: { dark: "#2B2622", light: "#FFFFFF" },
+    });
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    return res.end(png);
+  } catch (error) {
+    console.error("[Uploads] QR failed:", (error as Error).message);
+    return res.sendStatus(500);
+  }
+});
 
 // Reference photos, served from our own copy rather than Facebook's CDN —
 // their links expire, ours don't. Content-addressed, so it can be cached

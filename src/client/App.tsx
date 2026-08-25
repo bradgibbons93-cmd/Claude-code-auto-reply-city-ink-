@@ -16,6 +16,7 @@ import {
   Sun,
   Bell,
   Search,
+  Images,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
@@ -30,6 +31,8 @@ import AutoReplyRules from "./pages/AutoReplyRules";
 import PostScheduler from "./pages/PostScheduler";
 import Training from "./pages/Training";
 import Settings from "./pages/Settings";
+import Upload from "./pages/Upload";
+import StudioGallery from "./pages/StudioGallery";
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutGrid, badge: false },
@@ -38,6 +41,7 @@ const NAV = [
   { href: "/checkins", label: "Check-ins", icon: CheckCircle2, badge: false },
   { href: "/analytics", label: "Analytics", icon: BarChart3, badge: false },
   { href: "/posts", label: "Content", icon: ImageIcon, badge: false },
+  { href: "/gallery", label: "Studio gallery", icon: Images, badge: false },
   { href: "/training", label: "AI Training", icon: Sparkles, badge: false },
   { href: "/rules", label: "Auto-replies", icon: Zap, badge: false },
   { href: "/settings", label: "Settings", icon: SettingsIcon, badge: false },
@@ -138,6 +142,17 @@ export default function App() {
 
   useEffect(() => setMenuOpen(false), [location]);
 
+  // The artists reach /upload by scanning a QR code on the studio wall. They
+  // are not staff logging into a dashboard — no sidebar, no stats, no nav.
+  if (location === "/upload") {
+    return (
+      <div className="min-h-screen text-foreground">
+        <InkDefs />
+        <Upload />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen text-foreground">
       {/* The turbulence filter the inked logo references — declared once. */}
@@ -229,6 +244,7 @@ export default function App() {
             <Route path="/training" component={Training} />
             <Route path="/rules" component={AutoReplyRules} />
             <Route path="/posts" component={PostScheduler} />
+            <Route path="/gallery" component={StudioGallery} />
             <Route path="/settings" component={Settings} />
             <Route>
               <p className="text-muted-foreground">That page doesn't exist.</p>
