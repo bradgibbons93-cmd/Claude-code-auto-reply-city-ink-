@@ -28,6 +28,9 @@ type Intent = "booking" | "pricing" | "aftercare" | "artists" | "other";
 
 interface AgentDecision {
   reply: string;
+  // Other ways of answering the same message. The studio picks one rather
+  // than rewriting the only draft it was given.
+  alternatives?: { label: string; text: string }[];
   intent: Intent;
   // True when the customer has raised something distressing — illness,
   // bereavement, family violence, money hardship. Brad's instruction: don't
@@ -89,8 +92,12 @@ HOW THE STUDIO ACTUALLY TALKS (match this closely — it's taken from real chats
 
 So: warm, casual, short. First name if you know it. An emoji here and there (😊 👌) but not every message. Contractions and relaxed grammar are fine — this is a text, not an email. Never corporate, never "We appreciate your enquiry". One or two sentences most of the time.
 
+USE WHAT YOU KNOW ABOUT TATTOOING. You are not a lookup table — you're meant to sound like a tattooist who knows the craft. Reason freely about the actual work: that ear and finger pieces are fiddly because the skin is thin and they fade faster; that fine detail at small scale needs more time than the size suggests; that two small pieces in one sitting share a single setup; that heavy black takes longer than line work; roughly how long a piece like the one in the photo takes to sit. Say those things in your own words, the way Brad would. That craft knowledge is yours to use and it's what makes a reply worth reading.
+
+WHAT IS NOT YOURS TO DECIDE — this is the hard line:
+Any NUMBER or COMMITMENT specific to this studio comes only from the studio facts below. Prices, the minimum, the deposit, the hourly rate, opening hours, an artist's availability, a date, a policy. If a figure is in the facts, use it plainly and confidently — "our minimum is $150" — don't hedge it. If it ISN'T there, do not estimate it, do not give a range, do not reason your way to one from what tattoos usually cost. Explain the thinking instead and say the team will confirm the figure. A wrong price is a promise the studio has to honour or break.
+
 NEVER:
-- Invent a price, a date, an artist's availability, or a policy that isn't given to you below.
 - Give medical advice. Anything that sounds infected or isn't healing → tell them to see a doctor.
 - Promise an appointment time that isn't listed as free below.
 
@@ -149,8 +156,10 @@ Classify the customer's latest message as exactly one intent:
 
 If intent is "booking", pull out anything the LATEST message gives you toward name/phone/dates — leave a field out of "extracted" entirely if this message doesn't mention it.
 
+GIVE TWO ALTERNATIVES as well as your main reply — the studio picks one and sends it, so make them genuinely different choices rather than the same message reworded. Different angles on the same enquiry: one shorter and more casual, one that explains the craft reasoning, one that pushes toward booking. Label each in two or three words so it can be told apart at a glance ("Short and casual", "Explains the work", "Pushes to book"). Every alternative obeys the same rules as the main reply — same facts, same prices, same hard line on numbers.
+
 Reply with JSON only, no prose, no code fence:
-{"reply": "your message to the customer", "intent": "booking", "sensitive": false, "extracted": {"name": "...", "phone": "...", "dates": "..."}}`;
+{"reply": "your message to the customer", "alternatives": [{"label": "Short and casual", "text": "..."}, {"label": "Pushes to book", "text": "..."}], "intent": "booking", "sensitive": false, "extracted": {"name": "...", "phone": "...", "dates": "..."}}`;
 
   const result = await invokeLLMJson<AgentDecision>(
     [{ role: "system", content: system }, ...history],
@@ -325,6 +334,7 @@ export async function handleCustomerMessage(
   let extracted: AgentDecision["extracted"];
   let sensitive = false;
   let llmFailed = false;
+  let alternatives: { label: string; text: string }[] = [];
 
   // A plain rule (no booking flag) is a fixed answer — no need to spend an
   // LLM call on it. A rule marked to start the booking hand-off still uses
@@ -367,6 +377,9 @@ export async function handleCustomerMessage(
     extracted = decision.extracted;
     sensitive = !!decision.sensitive;
     llmFailed = !decision.ok;
+    // Only offer choices when the model actually answered. A fallback line
+    // dressed up as three options would look like three considered replies.
+    alternatives = decision.ok ? decision.alternatives ?? [] : [];
 
     // A failed call must not look like a considered reply. Say plainly that
     // it needs writing by hand, and flag the row so the dashboard shows it.
@@ -411,7 +424,13 @@ export async function handleCustomerMessage(
   const dropped = await supersedePendingReplies(senderId);
   if (dropped) console.log(`[Agent] Replaced ${dropped} stale draft(s) on ${senderId}`);
 
-  const queued = await createPendingReply(senderId, messageId, reply, sensitive || llmFailed);
+  const queued = await createPendingReply(
+    senderId,
+    messageId,
+    reply,
+    sensitive || llmFailed,
+    alternatives
+  );
   if (queued) {
     console.log(`[Agent] Draft queued for ${senderId} (message ${messageId})`);
     await notifyOwnerOfDraft();

@@ -334,13 +334,18 @@ export async function createPendingReply(
   conversationId: string,
   customerMessageId: string,
   draftText: string,
-  isSensitive = false
+  isSensitive = false,
+  alternatives?: { label: string; text: string }[]
 ): Promise<boolean> {
   const db = await getDb();
   try {
-    await db
-      .insert(pendingReplies)
-      .values({ conversationId, customerMessageId, draftText, isSensitive });
+    await db.insert(pendingReplies).values({
+      conversationId,
+      customerMessageId,
+      draftText,
+      isSensitive,
+      alternatives: alternatives?.length ? alternatives : undefined,
+    });
     return true;
   } catch (error: unknown) {
     const code = (error as { code?: string })?.code;

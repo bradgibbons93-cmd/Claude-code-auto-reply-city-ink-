@@ -184,6 +184,9 @@ export const pendingReplies = mysqlTable(
     // its own — illness, violence, grief, anything distressing. The draft is
     // only a holding line and the dashboard flags it for a person to read.
     isSensitive: boolean("is_sensitive").default(false),
+    // Other ways of answering the same message. The studio picks one instead
+    // of rewriting the only draft it was handed.
+    alternatives: json("alternatives").$type<{ label: string; text: string }[]>(),
     createdAt: timestamp("created_at").defaultNow(),
     resolvedAt: timestamp("resolved_at"),
   },
