@@ -367,7 +367,11 @@ export async function getPendingReplies() {
     .from(pendingReplies)
     .where(eq(pendingReplies.status, "pending"))
     .orderBy(asc(pendingReplies.createdAt));
-  if (!drafts.length) return drafts;
+
+  // Same shape on every path — an empty queue must still look like a queue,
+  // or the browser's inferred type loses the photos.
+  type QueuedDraft = (typeof drafts)[number] & { photoUrls: string[] };
+  if (!drafts.length) return [] as QueuedDraft[];
 
   // When the studio last said something in each of these conversations.
   const conversationIds = [...new Set(drafts.map((d) => d.conversationId))];
@@ -389,12 +393,65 @@ export async function getPendingReplies() {
     replies.map((r) => [r.conversationId, r.at ? new Date(r.at).getTime() : 0])
   );
 
-  return drafts.filter((draft) => {
+  const live = drafts.filter((draft) => {
     const lastReply = answeredAt.get(draft.conversationId);
     if (!lastReply || !draft.createdAt) return true;
     // Something answered this thread after the draft was written.
     return lastReply <= new Date(draft.createdAt).getTime();
   });
+
+  // One card per person, always the newest.
+  //
+  // createPendingReply supersedes the previous draft as a new message
+  // arrives, but that only governs drafts written since — anything already
+  // stacked up stays stacked. Collapsing here fixes the queue as it is, not
+  // just the queue from now on. Two cards for the same customer means
+  // answering the same person twice.
+  const newestPerConversation = new Map<string, (typeof live)[number]>();
+  for (const draft of live) {
+    const held = newestPerConversation.get(draft.conversationId);
+    const at = draft.createdAt ? new Date(draft.createdAt).getTime() : 0;
+    const heldAt = held?.createdAt ? new Date(held.createdAt).getTime() : -1;
+    // drafts arrive oldest-first, so >= keeps the last one on a tie.
+    if (!held || at >= heldAt) newestPerConversation.set(draft.conversationId, draft);
+  }
+
+  const queue = [...newestPerConversation.values()];
+
+  // The reference photos belong on the card, not two clicks away — you can't
+  // price a tattoo you can't see. They usually arrive a message or two before
+  // the question ("(sent a photo)" then "how much for those two?"), so this
+  // gathers what the customer has sent across the thread rather than only
+  // what's attached to the exact message being answered.
+  const photos = await db
+    .select({
+      conversationId: messengerMessages.conversationId,
+      attachmentUrls: messengerMessages.attachmentUrls,
+      createdAt: messengerMessages.createdAt,
+    })
+    .from(messengerMessages)
+    .where(
+      and(
+        inArray(
+          messengerMessages.conversationId,
+          queue.map((d) => d.conversationId)
+        ),
+        eq(messengerMessages.senderType, "customer")
+      )
+    )
+    .orderBy(asc(messengerMessages.createdAt));
+
+  const photosByConversation = new Map<string, string[]>();
+  for (const row of photos) {
+    if (!row.attachmentUrls?.length) continue;
+    const held = photosByConversation.get(row.conversationId) ?? [];
+    photosByConversation.set(row.conversationId, [...held, ...row.attachmentUrls]);
+  }
+
+  return queue.map((draft) => ({
+    ...draft,
+    photoUrls: [...new Set(photosByConversation.get(draft.conversationId) ?? [])].slice(-4),
+  }));
 }
 
 /** Approves (optionally with edited wording) and returns the text actually sent. */

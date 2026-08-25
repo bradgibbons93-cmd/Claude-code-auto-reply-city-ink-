@@ -119,6 +119,18 @@ const STATEMENTS = [
     KEY pending_conv_idx (conversation_id)
   )`,
 
+  `CREATE TABLE IF NOT EXISTS message_attachments (
+    id VARCHAR(64) PRIMARY KEY,
+    conversation_id VARCHAR(191) NOT NULL,
+    message_id VARCHAR(191) NOT NULL,
+    content_type VARCHAR(128) NOT NULL,
+    bytes MEDIUMBLOB NOT NULL,
+    source_url TEXT,
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY att_conv_idx (conversation_id),
+    KEY att_msg_idx (message_id)
+  )`,
+
   `CREATE TABLE IF NOT EXISTS example_exchanges (
     id INT AUTO_INCREMENT PRIMARY KEY,
     customer_message TEXT NOT NULL,

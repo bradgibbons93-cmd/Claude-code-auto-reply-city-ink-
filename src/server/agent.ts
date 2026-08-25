@@ -20,6 +20,7 @@ import {
 import { invokeLLMJson, type ChatMessage } from "./llm.js";
 import { availabilityForPrompt } from "./calendar.js";
 import { sendMessengerMessage, sendTypingIndicator, resolveCustomerName } from "./facebook.js";
+import { cacheAttachments } from "./attachments.js";
 
 const HANDOFF_HOURS = Number(process.env.HANDOFF_PAUSE_HOURS || 12);
 
@@ -240,6 +241,12 @@ export async function handleCustomerMessage(
     }`
   );
 
+  // Keep the photos themselves. Facebook's links expire, so storing them is
+  // the difference between seeing the reference and seeing a blank box.
+  const keptPhotos = photoUrls.length
+    ? await cacheAttachments(photoUrls, senderId, messageId)
+    : photoUrls;
+
   // BUG FIX #4 — Facebook retries deliveries. A duplicate mid stops here.
   const isNew = await recordMessage(
     senderId,
@@ -247,7 +254,7 @@ export async function handleCustomerMessage(
     "customer",
     text || "(sent a photo)",
     undefined,
-    photoUrls
+    keptPhotos
   );
   if (!isNew) {
     console.log(`[Agent] Duplicate delivery ignored: ${messageId}`);

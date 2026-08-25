@@ -9,6 +9,7 @@ import { startScheduler } from "./scheduler.js";
 import { ensureTables } from "./migrate.js";
 import { getFacebookConfig, getTimelyConfig } from "./db.js";
 import { backfillCustomerNames } from "./facebook.js";
+import { readAttachment } from "./attachments.js";
 import { getLastLlmError, llmProvider, llmModel, llmBaseUrl } from "./llm.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -34,6 +35,22 @@ app.use(
 app.use(express.urlencoded({ extended: true }));
 
 app.use("/api/webhook", webhookRouter);
+
+// Reference photos, served from our own copy rather than Facebook's CDN —
+// their links expire, ours don't. Content-addressed, so it can be cached
+// hard: the same path always means the same image.
+app.get("/api/attachments/:id", async (req, res) => {
+  try {
+    const attachment = await readAttachment(req.params.id);
+    if (!attachment) return res.sendStatus(404);
+    res.setHeader("Content-Type", attachment.contentType);
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    return res.end(attachment.bytes);
+  } catch (error) {
+    console.error("[Attachments] Serve failed:", (error as Error).message);
+    return res.sendStatus(500);
+  }
+});
 
 app.use(
   "/api/trpc",
