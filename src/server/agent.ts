@@ -462,6 +462,14 @@ export async function handleEcho(
   const isNew = await recordMessage(recipientId, messageId, "manual", text || "(attachment)");
   if (!isNew) return;
 
+  // Someone — another artist, or Facebook's own automated response — has
+  // answered this thread. Any draft waiting on it is now a second answer to
+  // a question already handled, so it goes.
+  const dropped = await supersedePendingReplies(recipientId);
+  if (dropped) {
+    console.log(`[Agent] ${recipientId} was answered elsewhere — dropped ${dropped} draft(s)`);
+  }
+
   const until = await pauseBot(recipientId, HANDOFF_HOURS);
   console.log(`[Agent] Human replied to ${recipientId} — paused until ${until.toISOString()}`);
 }

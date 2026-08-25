@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import {
@@ -314,13 +314,52 @@ export async function createPendingReply(
   }
 }
 
+/**
+ * Drafts genuinely still waiting on a decision.
+ *
+ * A draft is dead the moment anything else answers that thread — another
+ * artist typing a reply, or Facebook's own automated response, which fires
+ * on the Page without this app being involved. Approving one after the fact
+ * sends the customer a second answer to a question already handled.
+ *
+ * handleEcho() clears them as the reply arrives; this is the safety net for
+ * when an echo is missed or lands late, so a stale draft can never be shown.
+ */
 export async function getPendingReplies() {
   const db = await getDb();
-  return db
+  const drafts = await db
     .select()
     .from(pendingReplies)
     .where(eq(pendingReplies.status, "pending"))
     .orderBy(asc(pendingReplies.createdAt));
+  if (!drafts.length) return drafts;
+
+  // When the studio last said something in each of these conversations.
+  const conversationIds = [...new Set(drafts.map((d) => d.conversationId))];
+  const replies = await db
+    .select({
+      conversationId: messengerMessages.conversationId,
+      at: sql<string>`MAX(${messengerMessages.createdAt})`,
+    })
+    .from(messengerMessages)
+    .where(
+      and(
+        inArray(messengerMessages.conversationId, conversationIds),
+        inArray(messengerMessages.senderType, ["bot", "manual"])
+      )
+    )
+    .groupBy(messengerMessages.conversationId);
+
+  const answeredAt = new Map(
+    replies.map((r) => [r.conversationId, r.at ? new Date(r.at).getTime() : 0])
+  );
+
+  return drafts.filter((draft) => {
+    const lastReply = answeredAt.get(draft.conversationId);
+    if (!lastReply || !draft.createdAt) return true;
+    // Something answered this thread after the draft was written.
+    return lastReply <= new Date(draft.createdAt).getTime();
+  });
 }
 
 /** Approves (optionally with edited wording) and returns the text actually sent. */
