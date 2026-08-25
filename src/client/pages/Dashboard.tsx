@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import LiveFeed from "@/components/LiveFeed";
+import DashboardBanner from "@/components/DashboardBanner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/Avatar";
@@ -176,22 +177,12 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="font-display text-2xl tracking-[0.06em] text-charcoal">
-            {greeting()}, Brad 👋
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {pending?.length
-              ? `${pending.length} ${pending.length === 1 ? "reply is" : "replies are"} waiting on you.`
-              : "Nothing waiting on you right now."}
-          </p>
-        </div>
-        <span className="flex items-center gap-2 rounded-full border border-success/40 bg-success/10 px-4 py-1.5 text-xs text-success">
-          <span className="live-dot" />
-          Automation active
-        </span>
-      </div>
+      <DashboardBanner
+        greeting={greeting()}
+        pendingCount={pending?.length ?? 0}
+        messagesToday={dash?.todayMessages}
+        nextBooking={bookings?.[0] ? { title: bookings[0].title, label: bookings[0].label } : null}
+      />
 
       <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
         <div className="space-y-4">
