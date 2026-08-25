@@ -1,6 +1,10 @@
 import crypto from "node:crypto";
 import axios from "axios";
-import { getFacebookConfig } from "./db.js";
+import {
+  getFacebookConfig,
+  getConversationsMissingNames,
+  setConversationName,
+} from "./db.js";
 
 const GRAPH = "https://graph.facebook.com/v21.0";
 
@@ -108,6 +112,59 @@ export async function getSenderProfile(
   return null;
 }
 
+/**
+ * Go and get the names for threads that are already in the database.
+ *
+ * Filling a name in as the next message arrives fixes nothing for a thread
+ * whose last message was hours ago — it just sits there saying "a customer"
+ * forever. This walks the nameless ones and asks Facebook for each.
+ *
+ * Runs on boot and behind a button, and always reports back: how many were
+ * missing, how many were resolved, and — if none were — Facebook's own words
+ * for why, so the answer isn't "it's still not working".
+ */
+export async function backfillCustomerNames(limit = 50): Promise<{
+  checked: number;
+  named: number;
+  detail: string;
+}> {
+  const config = await getFacebookConfig();
+  if (!config?.pageAccessToken) {
+    return { checked: 0, named: 0, detail: "Facebook isn't connected yet." };
+  }
+
+  const missing = await getConversationsMissingNames(limit);
+  if (missing.length === 0) {
+    return { checked: 0, named: 0, detail: "Every thread already has a name." };
+  }
+
+  let named = 0;
+  for (const conversationId of missing) {
+    const profile = await getSenderProfile(conversationId);
+    if (profile?.name) {
+      await setConversationName(conversationId, profile.name);
+      named += 1;
+    }
+  }
+
+  if (named === missing.length) {
+    return { checked: missing.length, named, detail: `Named all ${named}.` };
+  }
+  if (named > 0) {
+    return {
+      checked: missing.length,
+      named,
+      detail: `Named ${named} of ${missing.length}. The rest: ${lastProfileError?.message ?? "no name available"}`,
+    };
+  }
+  return {
+    checked: missing.length,
+    named: 0,
+    detail: `Facebook wouldn't give a name for any of the ${missing.length}. It said: ${
+      lastProfileError?.message ?? "no name available"
+    }`,
+  };
+}
 
 export async function publishPagePost(
   content: string,

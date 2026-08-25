@@ -38,6 +38,18 @@ export default function Settings() {
     onError: (error) => toast.error(error.message || "Couldn't run the test."),
   });
 
+  const refreshNames = trpc.config.refreshNames.useMutation({
+    onSuccess: (result) => {
+      if (result.named > 0) toast.success(`Named ${result.named} customer${result.named === 1 ? "" : "s"}`);
+      else toast.error("No names came back");
+      utils.conversations.list.invalidate();
+      utils.pendingReplies.list.invalidate();
+      utils.dashboard.invalidate();
+      utils.config.facebook.invalidate();
+    },
+    onError: (error) => toast.error(error.message || "Couldn't fetch the names."),
+  });
+
   const [pageId, setPageId] = useState("");
   const [pageName, setPageName] = useState("");
   const [pageAccessToken, setPageAccessToken] = useState("");
@@ -168,17 +180,30 @@ export default function Settings() {
               ? `Connected to ${fb.pageName || fb.pageId}.`
               : "Not connected yet. Paste the credentials from your Meta app."}
           </p>
-          {fb?.lastProfileError && (
-            <div className="mt-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3">
-              <p className="text-xs text-destructive">
-                Customers are showing as "Unknown customer" because Facebook refused the name
-                lookup. This is exactly what it said:
+          <div className="mt-3 rounded-lg border border-border bg-beige/20 p-3">
+            <p className="text-xs text-muted-foreground">
+              Showing customers as "a customer"? Their names are looked up when they message
+              in — threads that arrived before the Page was connected never got one. This goes
+              back and fetches them.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              onClick={() => refreshNames.mutate()}
+              disabled={refreshNames.isPending}
+            >
+              {refreshNames.isPending ? "Fetching…" : "Fetch customer names"}
+            </Button>
+            {refreshNames.data && (
+              <p className="mt-2 break-words text-xs text-charcoal">{refreshNames.data.detail}</p>
+            )}
+            {!refreshNames.data && fb?.lastProfileError && (
+              <p className="mt-2 break-words font-mono text-xs text-destructive">
+                Last failure — {fb.lastProfileError.message}
               </p>
-              <p className="mt-2 break-words font-mono text-xs text-charcoal">
-                {fb.lastProfileError.message}
-              </p>
-            </div>
-          )}
+            )}
+          </div>
         </CardHeader>
         <CardContent className="space-y-3">
           <Input placeholder="Page ID" value={pageId} onChange={(e) => setPageId(e.target.value)} />
