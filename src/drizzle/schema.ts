@@ -65,6 +65,9 @@ export const messengerMessages = mysqlTable(
     messageId: varchar("message_id", { length: 191 }).notNull(),
     senderType: mysqlEnum("sender_type", ["customer", "bot", "manual"]).notNull(),
     content: text("content").notNull(),
+    // Reference photos. A tattoo enquiry usually IS the picture, so the
+    // dashboard has to show it — "(sent a photo)" is useless for quoting.
+    attachmentUrls: json("attachment_urls").$type<string[]>(),
     autoReplyGenerated: boolean("auto_reply_generated").default(false),
     autoReplyContent: text("auto_reply_content"),
     createdAt: timestamp("created_at").defaultNow(),

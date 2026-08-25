@@ -101,7 +101,8 @@ export async function recordMessage(
   messageId: string,
   senderType: "customer" | "bot" | "manual",
   content: string,
-  autoReplyContent?: string
+  autoReplyContent?: string,
+  attachmentUrls?: string[]
 ): Promise<boolean> {
   const db = await getDb();
   try {
@@ -112,6 +113,7 @@ export async function recordMessage(
       content,
       autoReplyGenerated: !!autoReplyContent,
       autoReplyContent,
+      attachmentUrls: attachmentUrls?.length ? attachmentUrls : undefined,
     });
   } catch (error: unknown) {
     const code = (error as { code?: string })?.code;
@@ -268,6 +270,31 @@ export async function deleteKnowledge(id: number) {
  * does on messenger_messages: Facebook retries deliveries, and without this
  * a retried webhook call would queue a second draft for the same message.
  */
+/**
+ * Drop any draft still waiting on this conversation.
+ *
+ * A customer sending three messages in a row produced three drafts, each
+ * answering one fragment, and the queue filled with stale ones. The newest
+ * draft is written against the whole thread, so it is strictly better than
+ * anything it replaces — the older ones are noise and were never seen.
+ */
+export async function supersedePendingReplies(conversationId: string): Promise<number> {
+  const db = await getDb();
+  const stale = await db
+    .select({ id: pendingReplies.id })
+    .from(pendingReplies)
+    .where(
+      and(eq(pendingReplies.conversationId, conversationId), eq(pendingReplies.status, "pending"))
+    );
+  if (!stale.length) return 0;
+  await db
+    .delete(pendingReplies)
+    .where(
+      and(eq(pendingReplies.conversationId, conversationId), eq(pendingReplies.status, "pending"))
+    );
+  return stale.length;
+}
+
 export async function createPendingReply(
   conversationId: string,
   customerMessageId: string,

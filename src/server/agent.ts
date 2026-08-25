@@ -9,6 +9,7 @@ import {
   markBookingNotified,
   setOwnerPsid,
   createPendingReply,
+  supersedePendingReplies,
   resolvePendingReply,
   findSimilarExchanges,
   getRecentDraftEdits,
@@ -240,7 +241,14 @@ export async function handleCustomerMessage(
   );
 
   // BUG FIX #4 — Facebook retries deliveries. A duplicate mid stops here.
-  const isNew = await recordMessage(senderId, messageId, "customer", text || "(sent a photo)");
+  const isNew = await recordMessage(
+    senderId,
+    messageId,
+    "customer",
+    text || "(sent a photo)",
+    undefined,
+    photoUrls
+  );
   if (!isNew) {
     console.log(`[Agent] Duplicate delivery ignored: ${messageId}`);
     return;
@@ -390,6 +398,12 @@ export async function handleCustomerMessage(
 
   // Nothing reaches a customer without Brad seeing it first — every reply,
   // including fixed Auto-reply text, waits in the dashboard for approval.
+  // Three messages in a row used to leave three drafts, each answering one
+  // fragment. This one was written against the full thread, so it replaces
+  // anything still waiting on this conversation.
+  const dropped = await supersedePendingReplies(senderId);
+  if (dropped) console.log(`[Agent] Replaced ${dropped} stale draft(s) on ${senderId}`);
+
   const queued = await createPendingReply(senderId, messageId, reply, sensitive || llmFailed);
   if (queued) {
     console.log(`[Agent] Draft queued for ${senderId} (message ${messageId})`);

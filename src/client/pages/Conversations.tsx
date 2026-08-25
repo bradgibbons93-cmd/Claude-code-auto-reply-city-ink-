@@ -52,6 +52,7 @@ function PendingReplyCard({
   draft: {
     id: number;
     conversationId: string;
+    customerMessageId: string;
     draftText: string;
     isSensitive?: boolean | null;
     createdAt: string | Date | null;
@@ -67,9 +68,13 @@ function PendingReplyCard({
   const { data: thread } = trpc.conversations.messages.useQuery({
     conversationId: draft.conversationId,
   });
-  const lastFromCustomer = [...(thread ?? [])]
-    .reverse()
-    .find((m) => m.senderType === "customer");
+  // The message this draft was actually written for. Showing the newest
+  // message in the thread instead made correct drafts look wrong — a reply to
+  // "where are you located" was labelled with a later "how much is this",
+  // so it read as though the agent had answered the wrong question.
+  const answering =
+    (thread ?? []).find((m) => m.messageId === draft.customerMessageId) ??
+    [...(thread ?? [])].reverse().find((m) => m.senderType === "customer");
 
   const approve = trpc.pendingReplies.approve.useMutation({
     onSuccess: () => {
@@ -122,14 +127,26 @@ function PendingReplyCard({
           )}
         </div>
 
-        {lastFromCustomer && (
+        {answering && (
           <div className="rounded-xl bg-surface px-3 py-2">
             <p className="text-[0.6rem] uppercase tracking-[0.18em] text-muted-foreground">
               They said
             </p>
-            <p className="mt-1 whitespace-pre-wrap text-sm text-charcoal">
-              {lastFromCustomer.content}
-            </p>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-charcoal">{answering.content}</p>
+            {!!answering.attachmentUrls?.length && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {answering.attachmentUrls.map((url) => (
+                  <a key={url} href={url} target="_blank" rel="noopener noreferrer">
+                    <img
+                      src={url}
+                      alt="Reference photo the customer sent"
+                      className="h-28 w-28 rounded-lg border border-border object-cover"
+                      loading="lazy"
+                    />
+                  </a>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -330,6 +347,20 @@ export default function Conversations() {
                     )}
                   >
                     <p className="whitespace-pre-wrap">{m.content}</p>
+                    {!!m.attachmentUrls?.length && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {m.attachmentUrls.map((url) => (
+                          <a key={url} href={url} target="_blank" rel="noopener noreferrer">
+                            <img
+                              src={url}
+                              alt="Reference photo"
+                              className="h-32 w-32 rounded-lg object-cover"
+                              loading="lazy"
+                            />
+                          </a>
+                        ))}
+                      </div>
+                    )}
                     <p
                       className={cn(
                         "mt-1 text-[0.65rem]",
