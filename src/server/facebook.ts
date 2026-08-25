@@ -73,7 +73,15 @@ export async function getSenderProfile(
     });
     const name = [data.first_name, data.last_name].filter(Boolean).join(" ");
     return { name: name || undefined };
-  } catch {
+  } catch (error) {
+    // Swallowing this silently is why every customer showed as "Unknown".
+    // Facebook refuses the profile lookup for its own reasons — usually a
+    // permission the app hasn't been granted — and we need to see which.
+    const err = error as { response?: { status?: number; data?: unknown } };
+    const detail = err.response
+      ? `HTTP ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 200)}`
+      : (error as Error).message;
+    console.error(`[Facebook] Couldn't read the profile for ${senderId} — ${detail}`);
     return null;
   }
 }

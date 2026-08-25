@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import {
@@ -101,7 +101,8 @@ export async function recordMessage(
   messageId: string,
   senderType: "customer" | "bot" | "manual",
   content: string,
-  autoReplyContent?: string
+  autoReplyContent?: string,
+  attachmentUrls?: string[]
 ): Promise<boolean> {
   const db = await getDb();
   try {
@@ -112,6 +113,7 @@ export async function recordMessage(
       content,
       autoReplyGenerated: !!autoReplyContent,
       autoReplyContent,
+      attachmentUrls: attachmentUrls?.length ? attachmentUrls : undefined,
     });
   } catch (error: unknown) {
     const code = (error as { code?: string })?.code;
@@ -268,6 +270,31 @@ export async function deleteKnowledge(id: number) {
  * does on messenger_messages: Facebook retries deliveries, and without this
  * a retried webhook call would queue a second draft for the same message.
  */
+/**
+ * Drop any draft still waiting on this conversation.
+ *
+ * A customer sending three messages in a row produced three drafts, each
+ * answering one fragment, and the queue filled with stale ones. The newest
+ * draft is written against the whole thread, so it is strictly better than
+ * anything it replaces — the older ones are noise and were never seen.
+ */
+export async function supersedePendingReplies(conversationId: string): Promise<number> {
+  const db = await getDb();
+  const stale = await db
+    .select({ id: pendingReplies.id })
+    .from(pendingReplies)
+    .where(
+      and(eq(pendingReplies.conversationId, conversationId), eq(pendingReplies.status, "pending"))
+    );
+  if (!stale.length) return 0;
+  await db
+    .delete(pendingReplies)
+    .where(
+      and(eq(pendingReplies.conversationId, conversationId), eq(pendingReplies.status, "pending"))
+    );
+  return stale.length;
+}
+
 export async function createPendingReply(
   conversationId: string,
   customerMessageId: string,
@@ -287,13 +314,52 @@ export async function createPendingReply(
   }
 }
 
+/**
+ * Drafts genuinely still waiting on a decision.
+ *
+ * A draft is dead the moment anything else answers that thread — another
+ * artist typing a reply, or Facebook's own automated response, which fires
+ * on the Page without this app being involved. Approving one after the fact
+ * sends the customer a second answer to a question already handled.
+ *
+ * handleEcho() clears them as the reply arrives; this is the safety net for
+ * when an echo is missed or lands late, so a stale draft can never be shown.
+ */
 export async function getPendingReplies() {
   const db = await getDb();
-  return db
+  const drafts = await db
     .select()
     .from(pendingReplies)
     .where(eq(pendingReplies.status, "pending"))
     .orderBy(asc(pendingReplies.createdAt));
+  if (!drafts.length) return drafts;
+
+  // When the studio last said something in each of these conversations.
+  const conversationIds = [...new Set(drafts.map((d) => d.conversationId))];
+  const replies = await db
+    .select({
+      conversationId: messengerMessages.conversationId,
+      at: sql<string>`MAX(${messengerMessages.createdAt})`,
+    })
+    .from(messengerMessages)
+    .where(
+      and(
+        inArray(messengerMessages.conversationId, conversationIds),
+        inArray(messengerMessages.senderType, ["bot", "manual"])
+      )
+    )
+    .groupBy(messengerMessages.conversationId);
+
+  const answeredAt = new Map(
+    replies.map((r) => [r.conversationId, r.at ? new Date(r.at).getTime() : 0])
+  );
+
+  return drafts.filter((draft) => {
+    const lastReply = answeredAt.get(draft.conversationId);
+    if (!lastReply || !draft.createdAt) return true;
+    // Something answered this thread after the draft was written.
+    return lastReply <= new Date(draft.createdAt).getTime();
+  });
 }
 
 /** Approves (optionally with edited wording) and returns the text actually sent. */

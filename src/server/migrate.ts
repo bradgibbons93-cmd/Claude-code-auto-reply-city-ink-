@@ -155,6 +155,7 @@ const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "facebook_config", column: "owner_psid", ddl: "VARCHAR(191)" },
   { table: "timely_config", column: "calendar_ics_url", ddl: "VARCHAR(1024)" },
   { table: "pending_replies", column: "is_sensitive", ddl: "BOOLEAN DEFAULT FALSE" },
+  { table: "messenger_messages", column: "attachment_urls", ddl: "JSON" },
 ];
 
 async function ensureColumns(): Promise<void> {
