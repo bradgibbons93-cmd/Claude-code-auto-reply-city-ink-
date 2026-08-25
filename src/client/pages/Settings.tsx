@@ -11,6 +11,19 @@ import { toast } from "sonner";
 export default function Settings() {
   const utils = trpc.useUtils();
 
+  // "Manage integrations" used to drop you at the top of this page, above
+  // the AI card, nowhere near the connections it promised. Land on them.
+  useEffect(() => {
+    const target = window.location.hash.slice(1);
+    if (!target) return;
+    // After the first paint, or the element isn't there to scroll to yet.
+    const id = window.setTimeout(
+      () => document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      100
+    );
+    return () => window.clearTimeout(id);
+  }, []);
+
   const { data: fb } = trpc.config.facebook.useQuery();
   const { data: timely } = trpc.config.timely.useQuery();
   const { data: knowledge } = trpc.knowledge.list.useQuery();
@@ -147,7 +160,7 @@ export default function Settings() {
         </CardContent>
       </Card>
 
-      <Card className="border-border">
+      <Card className="border-border" id="connections">
         <CardHeader>
           <CardTitle className="font-display text-xl text-charcoal">Facebook Page</CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -155,6 +168,17 @@ export default function Settings() {
               ? `Connected to ${fb.pageName || fb.pageId}.`
               : "Not connected yet. Paste the credentials from your Meta app."}
           </p>
+          {fb?.lastProfileError && (
+            <div className="mt-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+              <p className="text-xs text-destructive">
+                Customers are showing as "Unknown customer" because Facebook refused the name
+                lookup. This is exactly what it said:
+              </p>
+              <p className="mt-2 break-words font-mono text-xs text-charcoal">
+                {fb.lastProfileError.message}
+              </p>
+            </div>
+          )}
         </CardHeader>
         <CardContent className="space-y-3">
           <Input placeholder="Page ID" value={pageId} onChange={(e) => setPageId(e.target.value)} />

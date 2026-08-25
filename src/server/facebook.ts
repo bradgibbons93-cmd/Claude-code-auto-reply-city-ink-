@@ -61,30 +61,53 @@ export async function sendTypingIndicator(recipientId: string): Promise<void> {
   }
 }
 
+/**
+ * Why the last name lookup failed. Sending someone to hunt through hosting
+ * logs for this was a poor answer — the dashboard can just say it.
+ */
+let lastProfileError: { message: string; at: string } | null = null;
+export function getLastProfileError() {
+  return lastProfileError;
+}
+
 export async function getSenderProfile(
   senderId: string
 ): Promise<{ name?: string } | null> {
   const config = await getFacebookConfig();
   if (!config?.pageAccessToken) return null;
-  try {
-    const { data } = await axios.get(`${GRAPH}/${senderId}`, {
-      params: { fields: "first_name,last_name", access_token: config.pageAccessToken },
-      timeout: 8000,
-    });
-    const name = [data.first_name, data.last_name].filter(Boolean).join(" ");
-    return { name: name || undefined };
-  } catch (error) {
-    // Swallowing this silently is why every customer showed as "Unknown".
-    // Facebook refuses the profile lookup for its own reasons — usually a
-    // permission the app hasn't been granted — and we need to see which.
-    const err = error as { response?: { status?: number; data?: unknown } };
-    const detail = err.response
-      ? `HTTP ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 200)}`
-      : (error as Error).message;
-    console.error(`[Facebook] Couldn't read the profile for ${senderId} — ${detail}`);
-    return null;
+
+  // Facebook is inconsistent about which name fields a Page token may read,
+  // and it varies with how the app was reviewed. Try the split fields, then
+  // the combined one, before concluding there's no name to be had.
+  const attempts = ["first_name,last_name", "name"];
+  let lastDetail = "";
+
+  for (const fields of attempts) {
+    try {
+      const { data } = await axios.get(`${GRAPH}/${senderId}`, {
+        params: { fields, access_token: config.pageAccessToken },
+        timeout: 8000,
+      });
+      const name =
+        [data.first_name, data.last_name].filter(Boolean).join(" ") || data.name || "";
+      if (name) {
+        lastProfileError = null;
+        return { name };
+      }
+      lastDetail = `${fields}: reachable but returned no name`;
+    } catch (error) {
+      const err = error as { response?: { status?: number; data?: unknown } };
+      lastDetail = err.response
+        ? `${fields} → HTTP ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 200)}`
+        : `${fields} → ${(error as Error).message}`;
+    }
   }
+
+  lastProfileError = { message: lastDetail, at: new Date().toISOString() };
+  console.error(`[Facebook] No name for ${senderId} — ${lastDetail}`);
+  return null;
 }
+
 
 export async function publishPagePost(
   content: string,

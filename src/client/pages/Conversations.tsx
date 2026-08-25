@@ -76,6 +76,18 @@ function PendingReplyCard({
     (thread ?? []).find((m) => m.messageId === draft.customerMessageId) ??
     [...(thread ?? [])].reverse().find((m) => m.senderType === "customer");
 
+  // Reference photos usually arrive a message or two BEFORE the question —
+  // "(sent a photo)" then "a price on those two please". Showing only the
+  // answered message's attachments meant pricing a tattoo you couldn't see,
+  // so gather what the customer has sent recently across the thread.
+  const recentPhotos = [
+    ...new Set(
+      (thread ?? [])
+        .filter((m) => m.senderType === "customer")
+        .flatMap((m) => m.attachmentUrls ?? [])
+    ),
+  ].slice(-4);
+
   const approve = trpc.pendingReplies.approve.useMutation({
     onSuccess: () => {
       toast.success("Sent");
@@ -133,9 +145,9 @@ function PendingReplyCard({
               They said
             </p>
             <p className="mt-1 whitespace-pre-wrap text-sm text-charcoal">{answering.content}</p>
-            {!!answering.attachmentUrls?.length && (
+            {!!recentPhotos.length && (
               <div className="mt-2 flex flex-wrap gap-2">
-                {answering.attachmentUrls.map((url) => (
+                {recentPhotos.map((url) => (
                   <a key={url} href={url} target="_blank" rel="noopener noreferrer">
                     <img
                       src={url}
