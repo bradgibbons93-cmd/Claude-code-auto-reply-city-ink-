@@ -8,6 +8,7 @@ import webhookRouter from "./routes/webhook.js";
 import { startScheduler } from "./scheduler.js";
 import { ensureTables } from "./migrate.js";
 import { getFacebookConfig, getTimelyConfig } from "./db.js";
+import { backfillCustomerNames } from "./facebook.js";
 import { getLastLlmError, llmProvider, llmModel, llmBaseUrl } from "./llm.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -84,6 +85,15 @@ app.listen(port, async () => {
   } catch (error) {
     console.error("[DB] Could not prepare schema:", (error as Error).message);
   }
+
+  // Threads that arrived before the name lookup worked never get revisited
+  // by a webhook — nothing new is coming in on them. Repair them on the way
+  // up so the dashboard isn't a wall of "a customer".
+  backfillCustomerNames()
+    .then(({ checked, named, detail }) => {
+      if (checked > 0) console.log(`[Facebook] Name backfill: ${named}/${checked} — ${detail}`);
+    })
+    .catch((error) => console.error("[Facebook] Name backfill failed:", (error as Error).message));
 
   startScheduler();
 });

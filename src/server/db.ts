@@ -73,6 +73,29 @@ export async function getOrCreateConversation(
   return result[0];
 }
 
+/**
+ * Threads still showing as "a customer". Backfilling a name only when the
+ * next message arrives is no use to a thread that went quiet 13 hours ago —
+ * these are the ones that need looking up on purpose.
+ */
+export async function getConversationsMissingNames(limit = 50) {
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(messengerConversations)
+    .orderBy(desc(messengerConversations.lastMessageAt))
+    .limit(limit);
+  return rows.filter((row) => !row.senderName?.trim()).map((row) => row.conversationId);
+}
+
+export async function setConversationName(conversationId: string, senderName: string) {
+  const db = await getDb();
+  await db
+    .update(messengerConversations)
+    .set({ senderName })
+    .where(eq(messengerConversations.conversationId, conversationId));
+}
+
 export async function getRecentConversations(limit = 30) {
   const db = await getDb();
   return db

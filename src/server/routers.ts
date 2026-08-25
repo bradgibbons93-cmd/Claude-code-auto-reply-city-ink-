@@ -39,7 +39,7 @@ import {
   suggestPosts,
 } from "./agent.js";
 import { getUpcomingBookings, findFreeSlots } from "./calendar.js";
-import { getLastProfileError } from "./facebook.js";
+import { getLastProfileError, backfillCustomerNames } from "./facebook.js";
 import { testLlm, llmProvider, llmModel, llmBaseUrl, getLastLlmError } from "./llm.js";
 
 const t = initTRPC.create();
@@ -260,6 +260,9 @@ export const appRouter = t.router({
         })
       )
       .mutation(({ input }) => setFacebookConfig(input)),
+    // Go and fetch names for the threads already sitting there as
+    // "a customer" — a webhook is never coming to fix those on its own.
+    refreshNames: publicProcedure.mutation(() => backfillCustomerNames()),
     timely: publicProcedure.query(() => getTimelyConfig().catch(() => null)),
     saveTimely: publicProcedure
       .input(
