@@ -61,6 +61,15 @@ export async function sendTypingIndicator(recipientId: string): Promise<void> {
   }
 }
 
+/**
+ * Why the last name lookup failed. Sending someone to hunt through hosting
+ * logs for this was a poor answer — the dashboard can just say it.
+ */
+let lastProfileError: { message: string; at: string } | null = null;
+export function getLastProfileError() {
+  return lastProfileError;
+}
+
 export async function getSenderProfile(
   senderId: string
 ): Promise<{ name?: string } | null> {
@@ -72,6 +81,7 @@ export async function getSenderProfile(
       timeout: 8000,
     });
     const name = [data.first_name, data.last_name].filter(Boolean).join(" ");
+    if (name) lastProfileError = null;
     return { name: name || undefined };
   } catch (error) {
     // Swallowing this silently is why every customer showed as "Unknown".
@@ -81,6 +91,7 @@ export async function getSenderProfile(
     const detail = err.response
       ? `HTTP ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 200)}`
       : (error as Error).message;
+    lastProfileError = { message: detail, at: new Date().toISOString() };
     console.error(`[Facebook] Couldn't read the profile for ${senderId} — ${detail}`);
     return null;
   }

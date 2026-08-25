@@ -155,6 +155,17 @@ export default function Settings() {
               ? `Connected to ${fb.pageName || fb.pageId}.`
               : "Not connected yet. Paste the credentials from your Meta app."}
           </p>
+          {fb?.lastProfileError && (
+            <div className="mt-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+              <p className="text-xs text-destructive">
+                Customers are showing as "Unknown customer" because Facebook refused the name
+                lookup. This is exactly what it said:
+              </p>
+              <p className="mt-2 break-words font-mono text-xs text-charcoal">
+                {fb.lastProfileError.message}
+              </p>
+            </div>
+          )}
         </CardHeader>
         <CardContent className="space-y-3">
           <Input placeholder="Page ID" value={pageId} onChange={(e) => setPageId(e.target.value)} />

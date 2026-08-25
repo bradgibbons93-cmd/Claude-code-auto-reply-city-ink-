@@ -39,6 +39,7 @@ import {
   suggestPosts,
 } from "./agent.js";
 import { getUpcomingBookings, findFreeSlots } from "./calendar.js";
+import { getLastProfileError } from "./facebook.js";
 import { testLlm, llmProvider, llmModel, llmBaseUrl, getLastLlmError } from "./llm.js";
 
 const t = initTRPC.create();
@@ -241,6 +242,8 @@ export const appRouter = t.router({
         isConfigured: config.isConfigured,
         hasToken: !!config.pageAccessToken,
         hasOwner: !!config.ownerPsid,
+        // Why customers show as "Unknown customer", if they do.
+        lastProfileError: getLastProfileError(),
       };
     }),
     saveFacebook: publicProcedure
