@@ -4,6 +4,7 @@ import {
   getFacebookConfig,
   getConversationsMissingNames,
   setConversationName,
+  updatePageIdentity,
 } from "./db.js";
 
 // Overridable so the whole thing can be run end to end against a stand-in
@@ -131,12 +132,19 @@ export async function fetchInboxParticipants(
   maxPages = 5
 ): Promise<{ names: Map<string, string>; error?: string }> {
   const config = await getFacebookConfig();
-  if (!config?.pageAccessToken || !config.pageId) {
+  if (!config?.pageAccessToken) {
     return { names: new Map(), error: "Facebook isn't connected yet." };
   }
 
+  // Addressed to /me, never to the saved Page ID. A token knows which Page
+  // it belongs to; a hand-typed ID in a settings box is one fat finger away
+  // from "Object with ID '…' does not exist", which is what was happening —
+  // replies sent fine because sending already went through /me, while every
+  // read addressed to /{page-id} failed.
+  const identity = await getPageIdentity();
+
   const names = new Map<string, string>();
-  let url: string | undefined = `${GRAPH}/${config.pageId}/conversations`;
+  let url: string | undefined = `${GRAPH}/me/conversations`;
   let params: Record<string, string> | undefined = {
     platform: "messenger",
     fields: "participants",
@@ -151,7 +159,7 @@ export async function fetchInboxParticipants(
       for (const thread of data.data ?? []) {
         for (const person of thread.participants?.data ?? []) {
           // The Page itself is a participant in every thread. Skip it.
-          if (!person.id || person.id === config.pageId) continue;
+          if (!person.id || person.id === identity?.id) continue;
           if (person.name?.trim()) names.set(person.id, person.name.trim());
         }
       }
@@ -170,6 +178,48 @@ export async function fetchInboxParticipants(
   }
 
   return { names };
+}
+
+/**
+ * Who the saved token actually belongs to.
+ *
+ * Also repairs the saved Page ID when it disagrees, because a wrong one
+ * silently breaks posting to the Page feed in the same way it broke reading
+ * the inbox — and nothing else would ever notice.
+ */
+// Keyed by the token, so pasting a new one in Settings re-identifies the
+// Page instead of serving a stale answer for the life of the process.
+let pageIdentity: { forToken: string; id: string; name?: string } | null = null;
+
+export async function getPageIdentity(): Promise<{ id: string; name?: string } | null> {
+  const config = await getFacebookConfig();
+  if (!config?.pageAccessToken) return null;
+  if (pageIdentity?.forToken === config.pageAccessToken) return pageIdentity;
+
+  try {
+    const { data } = await axios.get(`${GRAPH}/me`, {
+      params: { fields: "id,name", access_token: config.pageAccessToken },
+      timeout: 8000,
+    });
+    if (!data?.id) return null;
+
+    pageIdentity = { forToken: config.pageAccessToken, id: String(data.id), name: data.name };
+    if (config.pageId !== pageIdentity.id) {
+      console.log(
+        `[Facebook] Saved Page ID was ${config.pageId} but the token belongs to ${pageIdentity.id} — corrected`
+      );
+      await updatePageIdentity(pageIdentity.id, pageIdentity.name);
+    }
+    return pageIdentity;
+  } catch (error) {
+    const err = error as { response?: { status?: number; data?: unknown } };
+    console.error(
+      `[Facebook] Couldn't identify the Page from the token — ${
+        err.response ? `HTTP ${err.response.status}` : (error as Error).message
+      }`
+    );
+    return null;
+  }
 }
 
 interface InboxPage {
@@ -282,13 +332,13 @@ export async function publishPagePost(
   imageUrl?: string
 ): Promise<string> {
   const config = await getFacebookConfig();
-  if (!config?.pageAccessToken || !config.pageId) {
+  if (!config?.pageAccessToken) {
     throw new Error("Facebook is not connected yet");
   }
 
-  const endpoint = imageUrl
-    ? `${GRAPH}/${config.pageId}/photos`
-    : `${GRAPH}/${config.pageId}/feed`;
+  // /me, not the saved Page ID — same reason as the inbox read. A wrong ID
+  // here would have failed every scheduled post with an object-not-found.
+  const endpoint = imageUrl ? `${GRAPH}/me/photos` : `${GRAPH}/me/feed`;
 
   const payload = imageUrl
     ? { url: imageUrl, caption: content, access_token: config.pageAccessToken }
