@@ -81,6 +81,35 @@ export const messageAttachments = mysqlTable(
 );
 
 /**
+ * The studio's own posts, pulled back out of Facebook and Instagram.
+ *
+ * Kept locally rather than fetched on every page load: the feed then still
+ * reads when the network is slow or a token is being renewed, and — the
+ * reason that matters — the images are stored as our own copies, because the
+ * CDN links Facebook hands over expire and a months-old feed of blank boxes
+ * is worse than no feed.
+ */
+export const feedPosts = mysqlTable(
+  "feed_posts",
+  {
+    id: varchar("id", { length: 191 }).primaryKey(),
+    source: mysqlEnum("source", ["facebook", "instagram"]).notNull(),
+    message: text("message"),
+    permalink: varchar("permalink", { length: 1024 }),
+    // Path to our stored copy of the image, not Facebook's expiring URL.
+    imagePath: varchar("image_path", { length: 512 }),
+    mediaType: varchar("media_type", { length: 32 }),
+    likeCount: int("like_count").default(0),
+    commentCount: int("comment_count").default(0),
+    postedAt: timestamp("posted_at").notNull(),
+    fetchedAt: timestamp("fetched_at").defaultNow(),
+  },
+  (t) => ({
+    postedIdx: index("feed_posted_idx").on(t.postedAt),
+  })
+);
+
+/**
  * Work the artists photograph at the end of a session.
  *
  * Reached by a QR code stuck on the wall — no login, no app, no account. An

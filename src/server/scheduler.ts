@@ -1,12 +1,23 @@
 import cron from "node-cron";
 import { getDuePosts, updatePostStatus } from "./db.js";
 import { publishPagePost } from "./facebook.js";
+import { syncFeed } from "./feed.js";
 
 /**
  * Runs every minute. Each post is flipped to "draft" before publishing so a
  * second worker (or a restart mid-run) can't post the same thing twice.
  */
 export function startScheduler() {
+  // Keep the feed current. Hourly is plenty — a studio posts a few times a
+  // week, and this costs a Graph call, not a page load.
+  cron.schedule("7 * * * *", async () => {
+    try {
+      await syncFeed(14);
+    } catch (error) {
+      console.error("[Feed] Hourly refresh failed:", (error as Error).message);
+    }
+  });
+
   cron.schedule("* * * * *", async () => {
     let due: Awaited<ReturnType<typeof getDuePosts>> = [];
     try {

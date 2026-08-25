@@ -11,6 +11,7 @@ import { getFacebookConfig, getTimelyConfig } from "./db.js";
 import { backfillCustomerNames } from "./facebook.js";
 import { readAttachment } from "./attachments.js";
 import { saveArtistUpload, readArtistUpload, UploadRejected } from "./uploads.js";
+import { syncFeed, countFeed } from "./feed.js";
 import QRCode from "qrcode";
 import { getLastLlmError, llmProvider, llmModel, llmBaseUrl } from "./llm.js";
 
@@ -196,6 +197,13 @@ app.listen(port, async () => {
       if (checked > 0) console.log(`[Facebook] Name backfill: ${named}/${checked} — ${detail}`);
     })
     .catch((error) => console.error("[Facebook] Name backfill failed:", (error as Error).message));
+
+  // Fill the feed in on the way up if it's empty — the first thing anyone
+  // wants to see is the last few months, not an empty panel that fills in
+  // slowly over the coming weeks.
+  countFeed()
+    .then((count) => (count === 0 ? syncFeed() : undefined))
+    .catch((error) => console.error("[Feed] Backfill failed:", (error as Error).message));
 
   startScheduler();
 });

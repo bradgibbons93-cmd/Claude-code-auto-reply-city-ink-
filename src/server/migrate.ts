@@ -131,6 +131,20 @@ const STATEMENTS = [
     KEY att_msg_idx (message_id)
   )`,
 
+  `CREATE TABLE IF NOT EXISTS feed_posts (
+    id VARCHAR(191) PRIMARY KEY,
+    source ENUM('facebook','instagram') NOT NULL,
+    message TEXT,
+    permalink VARCHAR(1024),
+    image_path VARCHAR(512),
+    media_type VARCHAR(32),
+    like_count INT DEFAULT 0,
+    comment_count INT DEFAULT 0,
+    posted_at TIMESTAMP NOT NULL,
+    fetched_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY feed_posted_idx (posted_at)
+  )`,
+
   `CREATE TABLE IF NOT EXISTS artist_uploads (
     id VARCHAR(64) PRIMARY KEY,
     artist_name VARCHAR(191),

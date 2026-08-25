@@ -40,6 +40,7 @@ import {
 } from "./agent.js";
 import { getUpcomingBookings, findFreeSlots } from "./calendar.js";
 import { getLastProfileError, backfillCustomerNames } from "./facebook.js";
+import { syncFeed, listFeed, countFeed } from "./feed.js";
 import {
   listArtistUploads,
   markUploadUsed,
@@ -78,6 +79,17 @@ export const appRouter = t.router({
    * do it without the app's JavaScript; everything here is the studio side —
    * looking through them, marking what's been used, clearing what hasn't.
    */
+  /**
+   * The studio's own posts. Read from our copy; refreshing goes to Facebook.
+   */
+  feed: t.router({
+    list: publicProcedure.query(() => listFeed()),
+    count: publicProcedure.query(() => countFeed()),
+    refresh: publicProcedure
+      .input(z.object({ days: z.number().min(1).max(365).default(120) }).default({ days: 120 }))
+      .mutation(({ input }) => syncFeed(input.days)),
+  }),
+
   uploads: t.router({
     list: publicProcedure
       .input(z.object({ unusedOnly: z.boolean().default(false) }).default({ unusedOnly: false }))

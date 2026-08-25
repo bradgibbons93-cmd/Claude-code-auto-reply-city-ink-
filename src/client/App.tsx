@@ -17,6 +17,7 @@ import {
   Bell,
   Search,
   Images,
+  Rss,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
@@ -33,6 +34,7 @@ import Training from "./pages/Training";
 import Settings from "./pages/Settings";
 import Upload from "./pages/Upload";
 import StudioGallery from "./pages/StudioGallery";
+import Feed from "./pages/Feed";
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutGrid, badge: false },
@@ -41,6 +43,7 @@ const NAV = [
   { href: "/checkins", label: "Check-ins", icon: CheckCircle2, badge: false },
   { href: "/analytics", label: "Analytics", icon: BarChart3, badge: false },
   { href: "/posts", label: "Content", icon: ImageIcon, badge: false },
+  { href: "/feed", label: "Live feed", icon: Rss, badge: false },
   { href: "/gallery", label: "Studio gallery", icon: Images, badge: false },
   { href: "/training", label: "AI Training", icon: Sparkles, badge: false },
   { href: "/rules", label: "Auto-replies", icon: Zap, badge: false },
@@ -244,6 +247,7 @@ export default function App() {
             <Route path="/training" component={Training} />
             <Route path="/rules" component={AutoReplyRules} />
             <Route path="/posts" component={PostScheduler} />
+            <Route path="/feed" component={Feed} />
             <Route path="/gallery" component={StudioGallery} />
             <Route path="/settings" component={Settings} />
             <Route>
