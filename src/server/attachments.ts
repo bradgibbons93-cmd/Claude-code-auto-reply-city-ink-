@@ -85,6 +85,40 @@ export async function cacheAttachments(
   return kept;
 }
 
+/**
+ * Store an image the studio supplied directly, rather than one fetched from
+ * Facebook — a photo picked off a phone for a scheduled post.
+ *
+ * Same store, same content-addressing, same /api/attachments path, so a post
+ * image behaves exactly like a customer's reference photo once it's in: it
+ * survives restarts and the same picture twice is stored once.
+ */
+export async function saveImageBytes(
+  contentType: string,
+  bytes: Buffer,
+  label = "upload"
+): Promise<{ id: string; url: string }> {
+  const type = contentType.split(";")[0].trim().toLowerCase();
+  if (!ALLOWED.has(type)) {
+    throw new UnsupportedImage(`${type || "That file"} isn't an image we can use.`);
+  }
+  if (!bytes.length) throw new UnsupportedImage("That file came through empty.");
+  if (bytes.length > MAX_BYTES) {
+    throw new UnsupportedImage("That photo is over 8MB — try one straight from the camera roll.");
+  }
+
+  const id = crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 40);
+  const db = await getDb();
+  await db
+    .insert(messageAttachments)
+    .values({ id, conversationId: label, messageId: `${label}_${id}`, contentType: type, bytes })
+    .onDuplicateKeyUpdate({ set: { contentType: type } });
+
+  return { id, url: `/api/attachments/${id}` };
+}
+
+export class UnsupportedImage extends Error {}
+
 export async function readAttachment(id: string) {
   const db = await getDb();
   const rows = await db

@@ -65,7 +65,19 @@ router.post("/facebook", async (req: RawBodyRequest, res: Response) => {
 
   lastDelivery = { at: new Date().toISOString(), kind: req.body?.object ?? "unknown" };
 
-  if (req.body?.object !== "page") return;
+  /**
+   * "page" is Messenger. "instagram" is Instagram DMs — a separate webhook
+   * object with an identical messaging payload, which is why only half the
+   * studio's enquiries were arriving: every Messenger thread came through
+   * and every Instagram one was dropped on this line.
+   */
+  const platform: "facebook" | "instagram" | null =
+    req.body?.object === "page"
+      ? "facebook"
+      : req.body?.object === "instagram"
+        ? "instagram"
+        : null;
+  if (!platform) return;
 
   for (const entry of req.body.entry ?? []) {
     for (const event of entry.messaging ?? []) {
@@ -95,7 +107,8 @@ router.post("/facebook", async (req: RawBodyRequest, res: Response) => {
             event.sender.id,
             message.mid ?? `msg_${Date.now()}`,
             message.text ?? "",
-            photoUrls
+            photoUrls,
+            platform
           );
         } catch (error) {
           console.error("[Webhook] Processing failed:", (error as Error).message);

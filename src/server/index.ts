@@ -9,7 +9,7 @@ import { startScheduler } from "./scheduler.js";
 import { ensureTables } from "./migrate.js";
 import { getFacebookConfig, getTimelyConfig } from "./db.js";
 import { backfillCustomerNames, ensureMessengerSubscription } from "./facebook.js";
-import { readAttachment } from "./attachments.js";
+import { readAttachment, saveImageBytes, UnsupportedImage } from "./attachments.js";
 import { saveArtistUpload, readArtistUpload, UploadRejected } from "./uploads.js";
 import { syncFeed, countFeed } from "./feed.js";
 import QRCode from "qrcode";
@@ -119,6 +119,32 @@ app.get("/api/upload-qr.png", async (req, res) => {
   } catch (error) {
     console.error("[Uploads] QR failed:", (error as Error).message);
     return res.sendStatus(500);
+  }
+});
+
+/**
+ * A photo for a scheduled post, straight off the studio's phone.
+ *
+ * Asking for an image URL meant the picture had to already be on the
+ * internet somewhere, which for a photo just taken on a phone it never is.
+ * Its own generous body limit for the same reason as the artist uploads.
+ */
+app.post("/api/post-image", express.json({ limit: "24mb" }), async (req, res) => {
+  try {
+    const { contentType, dataUrl } = req.body ?? {};
+    const base64 = String(dataUrl ?? "").split(",")[1] ?? "";
+    const { url } = await saveImageBytes(
+      String(contentType ?? ""),
+      Buffer.from(base64, "base64"),
+      "post"
+    );
+    return res.json({ url });
+  } catch (error) {
+    if (error instanceof UnsupportedImage) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error("[Posts] Image upload failed:", (error as Error).message);
+    return res.status(500).json({ error: "Couldn't save that photo — try again in a moment." });
   }
 });
 

@@ -158,7 +158,16 @@ export const appRouter = t.router({
         z.object({
           content: z.string().min(1),
           scheduledAt: z.coerce.date(),
-          imageUrl: z.string().url().optional(),
+          // Either a link to somewhere on the internet, or the path to a
+          // photo uploaded here. Requiring a URL is what forced the studio
+          // to have the picture online already — which for one just taken
+          // on a phone it never is.
+          imageUrl: z
+            .string()
+            .refine((v) => /^https?:\/\//.test(v) || v.startsWith("/api/attachments/"), {
+              message: "Needs to be a link, or a photo uploaded here.",
+            })
+            .optional(),
           aiGenerated: z.boolean().default(false),
         })
       )

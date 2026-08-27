@@ -13,6 +13,26 @@ import {
 const GRAPH = process.env.FACEBOOK_GRAPH_URL || "https://graph.facebook.com/v21.0";
 
 /**
+ * This app's own address on the internet, for the times something outside
+ * has to come and fetch a file from us — publishing a post with a photo
+ * that was uploaded here rather than linked from elsewhere.
+ *
+ * Railway sets RAILWAY_PUBLIC_DOMAIN for us; PUBLIC_URL overrides it for
+ * anywhere else. Returns undefined rather than guessing, so a missing
+ * setting fails with a sentence instead of a broken image.
+ */
+export function publicUrl(path: string): string | undefined {
+  if (/^https?:\/\//.test(path)) return path;
+
+  const origin =
+    process.env.PUBLIC_URL?.replace(/\/$/, "") ||
+    (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "");
+  if (!origin) return undefined;
+
+  return `${origin}${path.startsWith("/") ? "" : "/"}${path}`;
+}
+
+/**
  * BUG FIX #1 — the original hashed JSON.stringify(req.body), which is a
  * re-serialisation, not the bytes Facebook signed. Key order and whitespace
  * drift, so the check failed at random. This takes the raw Buffer.
@@ -79,7 +99,8 @@ export function getLastProfileError() {
 }
 
 export async function getSenderProfile(
-  senderId: string
+  senderId: string,
+  platform: "facebook" | "instagram" = "facebook"
 ): Promise<{ name?: string } | null> {
   const config = await getFacebookConfig();
   if (!config?.pageAccessToken) return null;
@@ -87,7 +108,12 @@ export async function getSenderProfile(
   // Facebook is inconsistent about which name fields a Page token may read,
   // and it varies with how the app was reviewed. Try the split fields, then
   // the combined one, before concluding there's no name to be had.
-  const attempts = ["first_name,last_name", "name"];
+  // Instagram has no first/last name — it has a username, which is what the
+  // studio would recognise anyway.
+  const attempts =
+    platform === "instagram"
+      ? ["name,username", "username", "name"]
+      : ["first_name,last_name", "name"];
   let lastDetail = "";
 
   for (const fields of attempts) {
@@ -97,7 +123,9 @@ export async function getSenderProfile(
         timeout: 8000,
       });
       const name =
-        [data.first_name, data.last_name].filter(Boolean).join(" ") || data.name || "";
+        [data.first_name, data.last_name].filter(Boolean).join(" ") ||
+        data.name ||
+        (data.username ? `@${data.username}` : "");
       if (name) {
         lastProfileError = null;
         return { name };
@@ -281,9 +309,13 @@ export async function fetchInboxParticipants(
   const identity = await getPageIdentity();
 
   const names = new Map<string, string>();
+
+  // Both inboxes. Instagram threads live on the same edge under a different
+  // platform, and missing them is why Instagram customers had no name.
+  for (const inbox of ["messenger", "instagram"] as const) {
   let url: string | undefined = `${GRAPH}/me/conversations`;
   let params: Record<string, string> | undefined = {
-    platform: "messenger",
+    platform: inbox,
     fields: "participants",
     limit: "100",
     access_token: config.pageAccessToken,
@@ -309,9 +341,13 @@ export async function fetchInboxParticipants(
       const detail = err.response
         ? `conversations → HTTP ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 240)}`
         : `conversations → ${(error as Error).message}`;
-      console.error(`[Facebook] Inbox list failed — ${detail}`);
-      return { names, error: detail };
+      // One inbox failing (commonly Instagram, when it isn't linked) must
+      // not throw away the names the other one gave us.
+      console.error(`[Facebook] ${inbox} inbox list failed — ${detail}`);
+      if (inbox === "messenger" && names.size === 0) return { names, error: detail };
+      break;
     }
+  }
   }
 
   return { names };
@@ -375,8 +411,11 @@ interface InboxPage {
 let inboxCache: { at: number; names: Map<string, string> } | null = null;
 const INBOX_CACHE_MS = 5 * 60 * 1000;
 
-export async function resolveCustomerName(psid: string): Promise<string | undefined> {
-  const profile = await getSenderProfile(psid);
+export async function resolveCustomerName(
+  psid: string,
+  platform: "facebook" | "instagram" = "facebook"
+): Promise<string | undefined> {
+  const profile = await getSenderProfile(psid, platform);
   if (profile?.name) return profile.name;
 
   const fresh = inboxCache && Date.now() - inboxCache.at < INBOX_CACHE_MS;
@@ -475,10 +514,21 @@ export async function publishPagePost(
 
   // /me, not the saved Page ID — same reason as the inbox read. A wrong ID
   // here would have failed every scheduled post with an object-not-found.
-  const endpoint = imageUrl ? `${GRAPH}/me/photos` : `${GRAPH}/me/feed`;
+  // Facebook fetches the picture from the URL we hand it, so a path to a
+  // photo stored here has to be made absolute first — Facebook's servers
+  // have no idea what "/api/attachments/…" means.
+  const absoluteImage = imageUrl ? publicUrl(imageUrl) : undefined;
+  if (imageUrl && !absoluteImage) {
+    throw new Error(
+      "This post has an uploaded photo, but the app doesn't know its own public address. " +
+        "Set PUBLIC_URL in the hosting environment to the dashboard's URL and try again."
+    );
+  }
 
-  const payload = imageUrl
-    ? { url: imageUrl, caption: content, access_token: config.pageAccessToken }
+  const endpoint = absoluteImage ? `${GRAPH}/me/photos` : `${GRAPH}/me/feed`;
+
+  const payload = absoluteImage
+    ? { url: absoluteImage, caption: content, access_token: config.pageAccessToken }
     : { message: content, access_token: config.pageAccessToken };
 
   const { data } = await axios.post(endpoint, payload, { timeout: 30000 });

@@ -16,6 +16,7 @@ import { Calendar, Plus, Wand2, Trash2, Lightbulb, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import PostPreview from "@/components/PostPreview";
+import PostImagePicker from "@/components/PostImagePicker";
 import PostCalendar from "@/components/PostCalendar";
 
 const STATUS_STYLES: Record<string, string> = {
@@ -154,15 +155,7 @@ export default function PostScheduler() {
                     className="mt-2 border-border"
                   />
                 </div>
-                <div>
-                  <label className="text-sm">Image URL (optional)</label>
-                  <Input
-                    placeholder="https://…"
-                    value={imageUrl}
-                    onChange={(e) => setImageUrl(e.target.value)}
-                    className="mt-2 border-border"
-                  />
-                </div>
+                <PostImagePicker value={imageUrl} onChange={setImageUrl} />
               </div>
 
               {/* Live, while you type. Seeing where the caption breaks and
