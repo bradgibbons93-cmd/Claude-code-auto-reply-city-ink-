@@ -194,6 +194,7 @@ const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "pending_replies", column: "is_sensitive", ddl: "BOOLEAN DEFAULT FALSE" },
   { table: "messenger_messages", column: "attachment_urls", ddl: "JSON" },
   { table: "pending_replies", column: "alternatives", ddl: "JSON" },
+  { table: "pending_replies", column: "llm_failed", ddl: "BOOLEAN DEFAULT FALSE" },
   {
     table: "messenger_conversations",
     column: "platform",
@@ -217,11 +218,33 @@ async function ensureColumns(): Promise<void> {
   }
 }
 
+/**
+ * Drafts written while the AI was unreachable were stored with is_sensitive
+ * set, because one flag stood for both "this customer needs care" and "we
+ * couldn't reach the model". So an ordinary question about wait times came up
+ * on the board under "They've raised something personal". The flags are
+ * separate now, but the rows already waiting still carry the old meaning —
+ * this moves them across, once, by the placeholder text they were given.
+ */
+async function repairFailedDrafts(): Promise<void> {
+  const db = await getDb();
+  const [result] = (await db.execute(
+    sql.raw(
+      `UPDATE pending_replies
+          SET llm_failed = TRUE, is_sensitive = FALSE, draft_text = ''
+        WHERE draft_text LIKE '[The AI couldn%'`
+    )
+  )) as unknown as [{ affectedRows?: number }];
+  const moved = Number(result?.affectedRows ?? 0);
+  if (moved) console.log(`[DB] Re-flagged ${moved} draft(s) the AI never wrote`);
+}
+
 export async function ensureTables(): Promise<void> {
   const db = await getDb();
   for (const statement of STATEMENTS) {
     await db.execute(sql.raw(statement));
   }
   await ensureColumns();
+  await repairFailedDrafts();
   console.log(`[DB] Schema ready (${STATEMENTS.length} tables checked)`);
 }

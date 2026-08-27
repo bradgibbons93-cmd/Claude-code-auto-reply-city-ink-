@@ -392,12 +392,11 @@ export async function handleCustomerMessage(
     // dressed up as three options would look like three considered replies.
     alternatives = decision.ok ? decision.alternatives ?? [] : [];
 
-    // A failed call must not look like a considered reply. Say plainly that
-    // it needs writing by hand, and flag the row so the dashboard shows it.
-    if (llmFailed) {
-      reply =
-        "[The AI couldn't generate a reply — check LLM_API_KEY in Railway. Write this one yourself.]";
-    }
+    // A failed call must not look like a considered reply — and the old
+    // placeholder ("check LLM_API_KEY in Railway") was both sendable to a
+    // customer and meaningless to the person reading it. Leave the box empty
+    // and let the card say why; the flag below is what the dashboard reads.
+    if (llmFailed) reply = "";
   }
 
   if (intent === "booking" || photoUrls.length > 0) {
@@ -439,8 +438,9 @@ export async function handleCustomerMessage(
     senderId,
     messageId,
     reply,
-    sensitive || llmFailed,
-    alternatives
+    sensitive,
+    alternatives,
+    llmFailed
   );
   if (queued) {
     console.log(`[Agent] Draft queued for ${senderId} (message ${messageId})`);
@@ -452,6 +452,8 @@ export async function handleCustomerMessage(
 
 /** Sends an approved draft (optionally with edited wording) and logs it as sent. */
 export async function approveDraft(id: number, editedText?: string): Promise<void> {
+  // resolvePendingReply refuses an empty approval, so the draft stays on the
+  // board rather than vanishing unsent.
   const resolved = await resolvePendingReply(id, "approved", editedText);
   if (!resolved) return;
   await sendMessengerMessage(resolved.conversationId, resolved.text);
