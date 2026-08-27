@@ -26,6 +26,7 @@ import {
   recordDraftEdit,
   updateDraftEdit,
   deleteDraftEdit,
+  getConversationsMissingNames,
   getStats,
   getDashboardStats,
   pauseBot,
@@ -284,8 +285,14 @@ export const appRouter = t.router({
         isConfigured: config.isConfigured,
         hasToken: !!config.pageAccessToken,
         hasOwner: !!config.ownerPsid,
-        // Why customers show as "Unknown customer", if they do.
-        lastProfileError: getLastProfileError(),
+        // Why customers show as "a customer" — but ONLY when any actually
+        // do. The per-person profile lookup fails for this app and always
+        // will; names come from the Page inbox instead. Reporting that
+        // failure while every name on screen is correct is crying wolf,
+        // and it sent Brad chasing a problem that wasn't there.
+        lastProfileError:
+          (await getConversationsMissingNames(1)).length > 0 ? getLastProfileError() : null,
+        unnamedConversations: (await getConversationsMissingNames(200)).length,
       };
     }),
     saveFacebook: publicProcedure

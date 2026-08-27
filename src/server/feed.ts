@@ -192,11 +192,45 @@ export async function syncFeed(days = BACKFILL_DAYS): Promise<FeedSyncResult> {
 
   const total = facebook + instagram;
   const detail = problems.length
-    ? `${total} post${total === 1 ? "" : "s"} in. ${problems.join(" · ")}`
+    ? `${total} post${total === 1 ? "" : "s"} in. ${explain(problems)}`
     : `${facebook} from Facebook, ${instagram} from Instagram.`;
 
   console.log(`[Feed] Sync: ${detail}`);
   return { facebook, instagram, detail };
+}
+
+/**
+ * Say what to do about it, not what the API said.
+ *
+ * A raw Graph error dumped on screen reads as a broken app. Nearly every
+ * failure here is one of a handful of known causes with a known fix, so name
+ * the fix. The raw text is still logged for anything genuinely unexpected.
+ */
+function explain(problems: string[]): string {
+  const all = problems.join(" ");
+
+  if (/pages_read_engagement|Page Public Content Access/i.test(all)) {
+    return (
+      "Facebook won't hand over the Page's posts until the connection includes the " +
+      "pages_read_engagement permission. It isn't on the saved token. Regenerate the " +
+      "Page access token in the Meta app dashboard with pages_read_engagement ticked, " +
+      "paste it into the Facebook Page box above, and refresh. Messages are unaffected — " +
+      "they use a different permission and keep working either way."
+    );
+  }
+
+  if (/Session has expired|Error validating access token|OAuthException/i.test(all)) {
+    return (
+      "The saved Page access token has expired. Generate a fresh one in the Meta app " +
+      "dashboard and paste it into the Facebook Page box above."
+    );
+  }
+
+  if (/instagram/i.test(all) && problems.length === 1) {
+    return "No Instagram business account is linked to this Page, so there's nothing to pull from Instagram.";
+  }
+
+  return problems.join(" · ");
 }
 
 export async function listFeed(limit = 60) {
