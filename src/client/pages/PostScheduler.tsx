@@ -15,6 +15,7 @@ import {
 import { Calendar, Plus, Wand2, Trash2, Lightbulb, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
+import PostPreview from "@/components/PostPreview";
 import PostCalendar from "@/components/PostCalendar";
 
 const STATUS_STYLES: Record<string, string> = {
@@ -164,6 +165,20 @@ export default function PostScheduler() {
                 </div>
               </div>
 
+              {/* Live, while you type. Seeing where the caption breaks and
+                  whether the picture is the wrong shape is the whole point —
+                  after it's posted is too late to find out. */}
+              <div>
+                <p className="mb-2 text-[0.6rem] uppercase tracking-[0.18em] text-sepia">
+                  How it will look
+                </p>
+                <PostPreview
+                  content={content}
+                  imageUrl={imageUrl || null}
+                  scheduledAt={scheduledAt || null}
+                />
+              </div>
+
               <Button onClick={handleCreate} disabled={createPost.isPending} className="w-full">
                 {createPost.isPending ? "Scheduling…" : "Schedule post"}
               </Button>
@@ -249,17 +264,14 @@ export default function PostScheduler() {
                   </Button>
                 </div>
 
-                <p className="mb-3 whitespace-pre-wrap">{post.content}</p>
+                {/* The post as it will actually land, not a text blob. */}
+                <PostPreview
+                  content={post.content}
+                  imageUrl={post.imageUrl}
+                  scheduledAt={post.scheduledAt}
+                />
 
-                {post.imageUrl && (
-                  <img
-                    src={post.imageUrl}
-                    alt=""
-                    className="mb-3 max-h-32 rounded border border-border"
-                  />
-                )}
-
-                <p className="text-sm text-muted-foreground">
+                <p className="mt-3 text-sm text-muted-foreground">
                   {post.status === "published" ? "Published" : "Publishing"}{" "}
                   <span className="text-charcoal">
                     {format(new Date(post.scheduledAt), "d MMM yyyy, HH:mm")}
