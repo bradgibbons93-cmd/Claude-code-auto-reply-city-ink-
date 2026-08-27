@@ -143,7 +143,71 @@ function diagnose(error: unknown, model: string, baseUrl: string): string {
     return `The provider doesn't recognise the model "${model}". Copy the exact name from its model list into LLM_MODEL.`;
   }
   if (status) return `The provider returned HTTP ${status}: ${body.slice(0, 200)}`;
+  // A JSON syntax error means the provider answered fine and we couldn't read
+  // it — nothing to do with keys, credit or model names. Saying so stops the
+  // next person tearing apart the Railway variables over a token limit.
+  if (error instanceof SyntaxError) {
+    return /cut off/i.test(err.message || "")
+      ? `The model ran out of room before finishing its answer, and too little arrived to salvage. Raise the token limit for drafting. (${err.message})`
+      : `The model answered, but not in readable JSON. Nothing to do with the key — it's the wording of the reply. (${err.message})`;
+  }
   return err.message || String(error);
+}
+
+/**
+ * Closes a JSON object that stopped mid-sentence because the model ran out of
+ * tokens. The reply itself is usually finished by then and only the extra
+ * wordings are half-written, so throwing the whole thing away loses a good
+ * draft over a missing bracket. Anything still open is shut in the right
+ * order; a trailing half-written element is dropped rather than guessed at.
+ */
+function closeTruncatedJson(text: string): string | undefined {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  // Where the last complete element ended, so a half-written one can be cut.
+  let lastSafe = -1;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inString) {
+      if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{" || ch === "[") stack.push(ch === "{" ? "}" : "]");
+    else if (ch === "}" || ch === "]") {
+      stack.pop();
+      lastSafe = i;
+    } else if (ch === ",") lastSafe = i - 1;
+  }
+
+  if (!stack.length && !inString) return undefined; // Not truncated — a real syntax error.
+  // Cut back to the last thing that finished, then close what's still open.
+  const body = lastSafe >= 0 ? text.slice(0, lastSafe + 1) : text;
+  const reclosed: string[] = [];
+  let depth = 0;
+  let str = false;
+  let esc = false;
+  for (const ch of body) {
+    if (esc) { esc = false; continue; }
+    if (str) {
+      if (ch === "\\") esc = true;
+      else if (ch === '"') str = false;
+      continue;
+    }
+    if (ch === '"') str = true;
+    else if (ch === "{") { reclosed[depth++] = "}"; }
+    else if (ch === "[") { reclosed[depth++] = "]"; }
+    else if (ch === "}" || ch === "]") depth--;
+  }
+  if (depth <= 0) return undefined;
+  return body + reclosed.slice(0, depth).reverse().join("");
 }
 
 /**
@@ -160,19 +224,32 @@ export async function testLlm(): Promise<LlmTestResult> {
     return { ...base, ok: false, detail: "No LLM_API_KEY is set in Railway yet." };
   }
 
-  try {
-    const reply = await invokeLLM([{ role: "user", content: "Reply with just the word: ok" }], {
-      maxTokens: 16,
-      temperature: 0,
-    });
-    lastError = null;
-    return { ...base, ok: true, detail: "Working — the agent can draft replies.", sample: reply.trim() };
-  } catch (error) {
-    const detail = diagnose(error, model, baseUrl);
-    lastError = { message: detail, at: new Date().toISOString() };
+  // Down the same road a real draft takes — a reply plus alternatives, read
+  // back the same way, salvaged the same way. A 16-token "say ok" ping passed
+  // happily while every actual draft was failing on a truncated answer, so
+  // the one button meant to catch that reported everything fine.
+  const { data, ok, error } = await invokeLLMJson<{ reply?: string }>(
+    [
+      {
+        role: "user",
+        content:
+          'A customer asks "how much for a small forearm piece?". Reply with JSON only: {"reply": "...", "alternatives": [{"label": "...", "text": "..."}, {"label": "...", "text": "..."}], "intent": "pricing"}',
+      },
+    ],
+    {}
+  );
+
+  if (!ok) {
+    const detail = error || "The agent couldn't get a usable draft back.";
     console.error(`[LLM] Test failed — ${detail}`);
     return { ...base, ok: false, detail };
   }
+  return {
+    ...base,
+    ok: true,
+    detail: "Working — the agent can draft replies.",
+    sample: (data.reply || "").trim().slice(0, 300),
+  };
 }
 
 /** The last thing that went wrong, so /health can report it without logs. */
@@ -198,7 +275,8 @@ export interface LlmResult<T> {
  */
 export async function invokeLLMJson<T>(
   messages: ChatMessage[],
-  fallback: T
+  fallback: T,
+  opts: { maxTokens?: number } = {}
 ): Promise<LlmResult<T>> {
   if (!process.env.LLM_API_KEY) {
     const message = "LLM_API_KEY is not set — no reply can be generated.";
@@ -208,18 +286,47 @@ export async function invokeLLMJson<T>(
   }
 
   try {
-    const raw = await invokeLLM(messages, { temperature: 0.3 });
+    // Room to actually finish. A draft plus two alternatives plus the
+    // extracted booking fields does not fit in the 400 the plain call
+    // defaults to — the answer came back cut off mid-array, failed to parse,
+    // and every enquiry landed on the board with no draft at all.
+    const raw = await invokeLLM(messages, { temperature: 0.3, maxTokens: opts.maxTokens ?? 1500 });
     const cleaned = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
     const start = cleaned.indexOf("{");
-    const end = cleaned.lastIndexOf("}");
-    if (start === -1 || end === -1) {
+    if (start === -1) {
       const message = "Model replied without JSON.";
       lastError = { message, at: new Date().toISOString() };
       console.error(`[LLM] ${message} Raw: ${raw.slice(0, 200)}`);
       return { data: fallback, ok: false, error: message };
     }
-    lastError = null;
-    return { data: JSON.parse(cleaned.slice(start, end + 1)) as T, ok: true };
+    const end = cleaned.lastIndexOf("}");
+    const body = cleaned.slice(start, end > start ? end + 1 : undefined);
+
+    try {
+      lastError = null;
+      return { data: JSON.parse(body) as T, ok: true };
+    } catch (parseError) {
+      // Cut off rather than malformed: keep what did arrive. The reply is
+      // written before the alternatives, so a truncated answer still holds
+      // the draft that matters.
+      const repaired = closeTruncatedJson(body);
+      if (repaired) {
+        try {
+          const data = JSON.parse(repaired) as T;
+          console.warn("[LLM] Answer was cut short — salvaged the part that arrived");
+          lastError = null;
+          return { data, ok: true };
+        } catch {
+          /* fall through to the normal failure below */
+        }
+      }
+      // `repaired` being undefined means nothing was left open — the answer
+      // arrived whole and is genuinely malformed, which is a different fault
+      // from running out of room, and worth not guessing about.
+      throw new SyntaxError(
+        `${repaired ? "cut off mid-answer" : "malformed"} — ${(parseError as Error).message}`
+      );
+    }
   } catch (error) {
     // Same diagnosis the Settings test uses, so a failure mid-conversation
     // and a failure on the test button read identically.
