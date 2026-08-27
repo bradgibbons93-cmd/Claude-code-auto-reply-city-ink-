@@ -38,6 +38,19 @@ export default function Settings() {
     onError: (error) => toast.error(error.message || "Couldn't run the test."),
   });
 
+  const { data: delivery } = trpc.config.messengerDelivery.useQuery(undefined, {
+    refetchInterval: 30000,
+  });
+
+  const subscribeMessenger = trpc.config.subscribeMessenger.useMutation({
+    onSuccess: (result) => {
+      if (result.ok) toast.success("Page subscribed — messages will start arriving");
+      else toast.error("Facebook wouldn't subscribe it");
+      utils.config.messengerDelivery.invalidate();
+    },
+    onError: (error) => toast.error(error.message || "Couldn't reach Facebook."),
+  });
+
   const refreshNames = trpc.config.refreshNames.useMutation({
     onSuccess: (result) => {
       if (result.named > 0) toast.success(`Named ${result.named} customer${result.named === 1 ? "" : "s"}`);
@@ -169,6 +182,58 @@ export default function Settings() {
           <Button onClick={() => testLlm.mutate()} disabled={testLlm.isPending}>
             {testLlm.isPending ? "Testing…" : "Test connection"}
           </Button>
+        </CardContent>
+      </Card>
+
+      {/* Whether Facebook is sending anything at all. Verifying the webhook
+          URL is only half of it — the Page has to be subscribed to the app,
+          and until it is Facebook delivers nothing and reports nothing. */}
+      <Card className="border-border" id="delivery">
+        <CardHeader>
+          <CardTitle className="font-display text-xl text-charcoal">
+            Messenger delivery
+          </CardTitle>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Whether Facebook is actually handing this Page's messages to the app. If nothing is
+            reaching the queue, the answer is almost always here.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div
+            className={`rounded-lg border p-3 text-sm ${
+              delivery?.subscribed && !delivery?.missing?.length
+                ? "border-success/40 bg-success/10 text-success"
+                : "border-destructive/40 bg-destructive/5 text-destructive"
+            }`}
+          >
+            {delivery?.detail ?? "Checking…"}
+          </div>
+
+          <dl className="grid grid-cols-[9rem_1fr] gap-x-3 gap-y-1 text-sm">
+            <dt className="text-muted-foreground">Page subscribed</dt>
+            <dd className="text-charcoal">{delivery ? (delivery.subscribed ? "yes" : "no") : "…"}</dd>
+            <dt className="text-muted-foreground">Events</dt>
+            <dd className="break-all text-charcoal">
+              {delivery?.fields?.length ? delivery.fields.join(", ") : "none"}
+            </dd>
+            <dt className="text-muted-foreground">Last delivery</dt>
+            <dd className="text-charcoal">
+              {delivery?.lastDelivery
+                ? `${new Date(delivery.lastDelivery.at).toLocaleString()} (${delivery.lastDelivery.kind})`
+                : "nothing has ever arrived"}
+            </dd>
+          </dl>
+
+          <Button
+            onClick={() => subscribeMessenger.mutate()}
+            disabled={subscribeMessenger.isPending}
+          >
+            {subscribeMessenger.isPending ? "Subscribing…" : "Subscribe this Page"}
+          </Button>
+
+          {subscribeMessenger.data && (
+            <p className="break-words text-xs text-charcoal">{subscribeMessenger.data.detail}</p>
+          )}
         </CardContent>
       </Card>
 

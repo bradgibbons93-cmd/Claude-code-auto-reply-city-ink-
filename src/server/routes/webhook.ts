@@ -5,6 +5,19 @@ import { getFacebookConfig } from "../db.js";
 
 const router = Router();
 
+/**
+ * When Facebook last sent us anything at all.
+ *
+ * "It isn't pulling messages in" has two very different causes — Facebook
+ * never delivering, or us mishandling what arrives — and they need opposite
+ * fixes. Nothing in the app could tell them apart, so this records the last
+ * delivery and the dashboard reports it.
+ */
+let lastDelivery: { at: string; kind: string } | null = null;
+export function getLastWebhookDelivery() {
+  return lastDelivery;
+}
+
 interface RawBodyRequest extends Request {
   rawBody?: Buffer;
 }
@@ -18,6 +31,7 @@ router.get("/facebook", async (req: Request, res: Response) => {
   const expected = config?.webhookVerifyToken || process.env.VERIFY_TOKEN;
 
   if (mode === "subscribe" && token && token === expected && challenge) {
+    lastDelivery = { at: new Date().toISOString(), kind: "verification" };
     console.log("[Webhook] Verified by Facebook");
     return res.status(200).send(challenge);
   }
@@ -48,6 +62,8 @@ router.post("/facebook", async (req: RawBodyRequest, res: Response) => {
    * work afterwards.
    */
   res.sendStatus(200);
+
+  lastDelivery = { at: new Date().toISOString(), kind: req.body?.object ?? "unknown" };
 
   if (req.body?.object !== "page") return;
 
