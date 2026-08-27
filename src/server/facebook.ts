@@ -13,6 +13,26 @@ import {
 const GRAPH = process.env.FACEBOOK_GRAPH_URL || "https://graph.facebook.com/v21.0";
 
 /**
+ * This app's own address on the internet, for the times something outside
+ * has to come and fetch a file from us — publishing a post with a photo
+ * that was uploaded here rather than linked from elsewhere.
+ *
+ * Railway sets RAILWAY_PUBLIC_DOMAIN for us; PUBLIC_URL overrides it for
+ * anywhere else. Returns undefined rather than guessing, so a missing
+ * setting fails with a sentence instead of a broken image.
+ */
+export function publicUrl(path: string): string | undefined {
+  if (/^https?:\/\//.test(path)) return path;
+
+  const origin =
+    process.env.PUBLIC_URL?.replace(/\/$/, "") ||
+    (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "");
+  if (!origin) return undefined;
+
+  return `${origin}${path.startsWith("/") ? "" : "/"}${path}`;
+}
+
+/**
  * BUG FIX #1 — the original hashed JSON.stringify(req.body), which is a
  * re-serialisation, not the bytes Facebook signed. Key order and whitespace
  * drift, so the check failed at random. This takes the raw Buffer.
@@ -475,10 +495,21 @@ export async function publishPagePost(
 
   // /me, not the saved Page ID — same reason as the inbox read. A wrong ID
   // here would have failed every scheduled post with an object-not-found.
-  const endpoint = imageUrl ? `${GRAPH}/me/photos` : `${GRAPH}/me/feed`;
+  // Facebook fetches the picture from the URL we hand it, so a path to a
+  // photo stored here has to be made absolute first — Facebook's servers
+  // have no idea what "/api/attachments/…" means.
+  const absoluteImage = imageUrl ? publicUrl(imageUrl) : undefined;
+  if (imageUrl && !absoluteImage) {
+    throw new Error(
+      "This post has an uploaded photo, but the app doesn't know its own public address. " +
+        "Set PUBLIC_URL in the hosting environment to the dashboard's URL and try again."
+    );
+  }
 
-  const payload = imageUrl
-    ? { url: imageUrl, caption: content, access_token: config.pageAccessToken }
+  const endpoint = absoluteImage ? `${GRAPH}/me/photos` : `${GRAPH}/me/feed`;
+
+  const payload = absoluteImage
+    ? { url: absoluteImage, caption: content, access_token: config.pageAccessToken }
     : { message: content, access_token: config.pageAccessToken };
 
   const { data } = await axios.post(endpoint, payload, { timeout: 30000 });
