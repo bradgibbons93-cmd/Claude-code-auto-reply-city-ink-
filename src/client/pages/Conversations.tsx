@@ -143,8 +143,9 @@ function PendingReplyCard({
           <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
             <p className="text-xs text-destructive">
-              Nothing wrong with this message — the AI couldn't be reached, so there's no draft to
-              approve. Write the reply yourself, and check the AI connection in Settings.
+              Nothing wrong with this message — the AI didn't finish a draft for it, so there's
+              nothing to approve. Write the reply yourself. Settings → AI has a Test button that
+              says why.
             </p>
           </div>
         )}
