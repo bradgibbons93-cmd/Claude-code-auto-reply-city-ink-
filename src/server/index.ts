@@ -8,7 +8,7 @@ import webhookRouter from "./routes/webhook.js";
 import { startScheduler } from "./scheduler.js";
 import { ensureTables } from "./migrate.js";
 import { getFacebookConfig, getTimelyConfig } from "./db.js";
-import { backfillCustomerNames } from "./facebook.js";
+import { backfillCustomerNames, ensureMessengerSubscription } from "./facebook.js";
 import { readAttachment } from "./attachments.js";
 import { saveArtistUpload, readArtistUpload, UploadRejected } from "./uploads.js";
 import { syncFeed, countFeed } from "./feed.js";
@@ -197,6 +197,18 @@ app.listen(port, async () => {
       if (checked > 0) console.log(`[Facebook] Name backfill: ${named}/${checked} — ${detail}`);
     })
     .catch((error) => console.error("[Facebook] Name backfill failed:", (error as Error).message));
+
+  // Put the Messenger subscription back if an outage cost us it. This is
+  // exactly what happened: the service was down for a day, Facebook gave up
+  // delivering, and coming back online didn't restore the subscription — the
+  // app looked healthy and received nothing.
+  ensureMessengerSubscription()
+    .then(({ action, detail }) => {
+      if (action !== "none") console.log(`[Facebook] Messenger subscription ${action} — ${detail}`);
+    })
+    .catch((error) =>
+      console.error("[Facebook] Subscription check failed:", (error as Error).message)
+    );
 
   // Fill the feed in on the way up if it's empty — the first thing anyone
   // wants to see is the last few months, not an empty panel that fills in

@@ -219,6 +219,41 @@ export async function subscribePageToApp(): Promise<{ ok: boolean; detail: strin
 }
 
 /**
+ * Put the subscription back if it has lapsed.
+ *
+ * This is what actually broke the studio's inbox. The service was down for
+ * about 25 hours; Facebook kept posting webhooks into a dead host, got
+ * nothing back, and eventually dropped the Page's subscription — which is
+ * documented behaviour after sustained delivery failures. Paying the bill
+ * brought the app back but not the subscription, so the app looked healthy
+ * and silently received nothing.
+ *
+ * Nobody should have to know that. On boot, and periodically after, the app
+ * checks whether it is still subscribed and re-subscribes if it isn't. The
+ * call is idempotent, so when everything is fine this is one cheap read.
+ */
+export async function ensureMessengerSubscription(): Promise<{
+  action: "none" | "resubscribed" | "failed" | "skipped";
+  detail: string;
+}> {
+  const config = await getFacebookConfig().catch(() => undefined);
+  if (!config?.pageAccessToken) {
+    return { action: "skipped", detail: "Facebook isn't connected yet." };
+  }
+
+  const current = await getMessengerSubscription();
+  if (current.subscribed && current.missing.length === 0) {
+    return { action: "none", detail: current.detail };
+  }
+
+  console.warn(`[Facebook] Messenger subscription has lapsed — ${current.detail}`);
+  const repaired = await subscribePageToApp();
+  return repaired.ok
+    ? { action: "resubscribed", detail: repaired.detail }
+    : { action: "failed", detail: repaired.detail };
+}
+
+/**
  * Names for everyone in the Page's inbox, keyed by their PSID.
  *
  * Asking for one person at a time — GET /{psid} — is the Messenger User

@@ -2,12 +2,25 @@ import cron from "node-cron";
 import { getDuePosts, updatePostStatus } from "./db.js";
 import { publishPagePost } from "./facebook.js";
 import { syncFeed } from "./feed.js";
+import { ensureMessengerSubscription } from "./facebook.js";
 
 /**
  * Runs every minute. Each post is flipped to "draft" before publishing so a
  * second worker (or a restart mid-run) can't post the same thing twice.
  */
 export function startScheduler() {
+  // A subscription can lapse mid-life, not just across a restart — an outage
+  // long enough for Facebook to give up doesn't need a redeploy to happen.
+  // Every six hours, cheap when nothing is wrong.
+  cron.schedule("21 */6 * * *", async () => {
+    try {
+      const { action, detail } = await ensureMessengerSubscription();
+      if (action !== "none") console.log(`[Facebook] Messenger subscription ${action} — ${detail}`);
+    } catch (error) {
+      console.error("[Facebook] Subscription check failed:", (error as Error).message);
+    }
+  });
+
   // Keep the feed current. Hourly is plenty — a studio posts a few times a
   // week, and this costs a Graph call, not a page load.
   cron.schedule("7 * * * *", async () => {
