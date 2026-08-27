@@ -10,7 +10,14 @@ import { cn } from "@/lib/utils";
 import { useReveal } from "@/lib/useReveal";
 import { Avatar } from "@/components/Avatar";
 import { StampBadge } from "@/components/Logo";
-import { AlertTriangle, Send, Trash2, Sparkles } from "lucide-react";
+import {
+  AlertTriangle,
+  Send,
+  Trash2,
+  Sparkles,
+  Instagram,
+  Facebook,
+} from "lucide-react";
 
 function isPaused(until: string | Date | null | undefined) {
   return !!until && new Date(until) > new Date();
@@ -314,8 +321,18 @@ export default function Conversations() {
                 <Avatar name={c.senderName || "?"} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm text-charcoal">
-                      {c.senderName || "Unknown customer"}
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      {/* Which inbox this is really in. Half the studio's
+                          enquiries come through Instagram, and the reply
+                          goes back to wherever it came from. */}
+                      {c.platform === "instagram" ? (
+                        <Instagram className="h-3 w-3 shrink-0 text-sepia" aria-label="Instagram" />
+                      ) : (
+                        <Facebook className="h-3 w-3 shrink-0 text-sepia" aria-label="Messenger" />
+                      )}
+                      <span className="truncate text-sm text-charcoal">
+                        {c.senderName || "Unknown customer"}
+                      </span>
                     </span>
                     {isPaused(c.botPausedUntil) && (
                       <Badge className="border-sepia/40 bg-beige/30 text-[0.6rem] text-sepia">

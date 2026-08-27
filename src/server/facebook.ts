@@ -99,7 +99,8 @@ export function getLastProfileError() {
 }
 
 export async function getSenderProfile(
-  senderId: string
+  senderId: string,
+  platform: "facebook" | "instagram" = "facebook"
 ): Promise<{ name?: string } | null> {
   const config = await getFacebookConfig();
   if (!config?.pageAccessToken) return null;
@@ -107,7 +108,12 @@ export async function getSenderProfile(
   // Facebook is inconsistent about which name fields a Page token may read,
   // and it varies with how the app was reviewed. Try the split fields, then
   // the combined one, before concluding there's no name to be had.
-  const attempts = ["first_name,last_name", "name"];
+  // Instagram has no first/last name — it has a username, which is what the
+  // studio would recognise anyway.
+  const attempts =
+    platform === "instagram"
+      ? ["name,username", "username", "name"]
+      : ["first_name,last_name", "name"];
   let lastDetail = "";
 
   for (const fields of attempts) {
@@ -117,7 +123,9 @@ export async function getSenderProfile(
         timeout: 8000,
       });
       const name =
-        [data.first_name, data.last_name].filter(Boolean).join(" ") || data.name || "";
+        [data.first_name, data.last_name].filter(Boolean).join(" ") ||
+        data.name ||
+        (data.username ? `@${data.username}` : "");
       if (name) {
         lastProfileError = null;
         return { name };
@@ -301,9 +309,13 @@ export async function fetchInboxParticipants(
   const identity = await getPageIdentity();
 
   const names = new Map<string, string>();
+
+  // Both inboxes. Instagram threads live on the same edge under a different
+  // platform, and missing them is why Instagram customers had no name.
+  for (const inbox of ["messenger", "instagram"] as const) {
   let url: string | undefined = `${GRAPH}/me/conversations`;
   let params: Record<string, string> | undefined = {
-    platform: "messenger",
+    platform: inbox,
     fields: "participants",
     limit: "100",
     access_token: config.pageAccessToken,
@@ -329,9 +341,13 @@ export async function fetchInboxParticipants(
       const detail = err.response
         ? `conversations → HTTP ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 240)}`
         : `conversations → ${(error as Error).message}`;
-      console.error(`[Facebook] Inbox list failed — ${detail}`);
-      return { names, error: detail };
+      // One inbox failing (commonly Instagram, when it isn't linked) must
+      // not throw away the names the other one gave us.
+      console.error(`[Facebook] ${inbox} inbox list failed — ${detail}`);
+      if (inbox === "messenger" && names.size === 0) return { names, error: detail };
+      break;
     }
+  }
   }
 
   return { names };
@@ -395,8 +411,11 @@ interface InboxPage {
 let inboxCache: { at: number; names: Map<string, string> } | null = null;
 const INBOX_CACHE_MS = 5 * 60 * 1000;
 
-export async function resolveCustomerName(psid: string): Promise<string | undefined> {
-  const profile = await getSenderProfile(psid);
+export async function resolveCustomerName(
+  psid: string,
+  platform: "facebook" | "instagram" = "facebook"
+): Promise<string | undefined> {
+  const profile = await getSenderProfile(psid, platform);
   if (profile?.name) return profile.name;
 
   const fresh = inboxCache && Date.now() - inboxCache.at < INBOX_CACHE_MS;

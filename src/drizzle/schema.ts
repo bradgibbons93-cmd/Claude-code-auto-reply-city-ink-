@@ -37,6 +37,10 @@ export const messengerConversations = mysqlTable(
     conversationId: varchar("conversation_id", { length: 191 }).notNull(),
     senderName: varchar("sender_name", { length: 255 }),
     senderEmail: varchar("sender_email", { length: 255 }),
+    // Messenger or Instagram DMs. Both arrive on the same webhook shape but
+    // as different webhook objects, and the studio needs to know which
+    // inbox a thread is really in.
+    platform: mysqlEnum("platform", ["facebook", "instagram"]).default("facebook"),
     botPausedUntil: timestamp("bot_paused_until"),
     lastCustomerMessageAt: timestamp("last_customer_message_at"),
     lastMessageAt: timestamp("last_message_at").defaultNow(),

@@ -194,6 +194,11 @@ const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "pending_replies", column: "is_sensitive", ddl: "BOOLEAN DEFAULT FALSE" },
   { table: "messenger_messages", column: "attachment_urls", ddl: "JSON" },
   { table: "pending_replies", column: "alternatives", ddl: "JSON" },
+  {
+    table: "messenger_conversations",
+    column: "platform",
+    ddl: "ENUM('facebook','instagram') DEFAULT 'facebook'",
+  },
 ];
 
 async function ensureColumns(): Promise<void> {

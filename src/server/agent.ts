@@ -250,10 +250,11 @@ export async function handleCustomerMessage(
   senderId: string,
   messageId: string,
   text: string,
-  photoUrls: string[] = []
+  photoUrls: string[] = [],
+  platform: "facebook" | "instagram" = "facebook"
 ): Promise<void> {
-  const senderName = await resolveCustomerName(senderId);
-  const conversation = await getOrCreateConversation(senderId, senderName);
+  const senderName = await resolveCustomerName(senderId, platform);
+  const conversation = await getOrCreateConversation(senderId, senderName, platform);
   console.log(
     `[Agent] Message from ${senderId} (${senderName || "name unavailable"}), conversation row ${
       conversation?.id ?? "MISSING"

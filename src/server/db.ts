@@ -35,7 +35,8 @@ export async function getDb() {
 
 export async function getOrCreateConversation(
   conversationId: string,
-  senderName?: string
+  senderName?: string,
+  platform: "facebook" | "instagram" = "facebook"
 ) {
   const db = await getDb();
 
@@ -49,19 +50,26 @@ export async function getOrCreateConversation(
     // A conversation created before the name lookup worked would have stayed
     // "Unknown customer" forever, because this returned early and nothing
     // ever wrote the name again. Fill it in the moment one is available.
-    if (senderName && !existing[0].senderName) {
+    // Backfill a name, and correct the platform on a thread stored before
+    // Instagram was wired up — those were all recorded as "facebook".
+    const patch: { senderName?: string; platform?: "facebook" | "instagram" } = {};
+    if (senderName && !existing[0].senderName) patch.senderName = senderName;
+    if (platform === "instagram" && existing[0].platform !== "instagram") {
+      patch.platform = "instagram";
+    }
+    if (Object.keys(patch).length) {
       await db
         .update(messengerConversations)
-        .set({ senderName })
+        .set(patch)
         .where(eq(messengerConversations.conversationId, conversationId));
-      return { ...existing[0], senderName };
+      return { ...existing[0], ...patch };
     }
     return existing[0];
   }
 
   await db
     .insert(messengerConversations)
-    .values({ conversationId, senderName })
+    .values({ conversationId, senderName, platform })
     .onDuplicateKeyUpdate({ set: { lastMessageAt: new Date() } });
 
   const result = await db
