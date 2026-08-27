@@ -64,6 +64,7 @@ function PendingReplyCard({
     alternatives?: { label: string; text: string }[] | null;
     draftText: string;
     isSensitive?: boolean | null;
+    llmFailed?: boolean | null;
     createdAt: string | Date | null;
   };
   senderName: string;
@@ -104,7 +105,7 @@ function PendingReplyCard({
       toast.success("Sent");
       utils.pendingReplies.list.invalidate();
     },
-    onError: () => toast.error("Couldn't send that reply."),
+    onError: (error) => toast.error(error.message || "Couldn't send that reply."),
   });
   const reject = trpc.pendingReplies.reject.useMutation({
     onSuccess: () => {
@@ -119,16 +120,31 @@ function PendingReplyCard({
     <Card
       className={cn(
         "animate-fade-up",
-        draft.isSensitive ? "border-destructive/40 bg-destructive/[0.03]" : "border-sepia/25"
+        draft.isSensitive || draft.llmFailed
+          ? "border-destructive/40 bg-destructive/[0.03]"
+          : "border-sepia/25"
       )}
     >
       <CardContent className="space-y-3 pt-6">
+        {/* Two different reasons a person is needed, and conflating them told
+            Brad a perfectly ordinary enquiry about wait times was "something
+            personal". One is about the customer; the other is our own outage. */}
         {draft.isSensitive && (
           <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
             <p className="text-xs text-destructive">
               They've raised something personal. This draft is only a holding line — read the
               thread and reply yourself.
+            </p>
+          </div>
+        )}
+
+        {!draft.isSensitive && draft.llmFailed && (
+          <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <p className="text-xs text-destructive">
+              Nothing wrong with this message — the AI couldn't be reached, so there's no draft to
+              approve. Write the reply yourself, and check the AI connection in Settings.
             </p>
           </div>
         )}
@@ -182,6 +198,7 @@ function PendingReplyCard({
             value={text}
             onChange={(e) => setText(e.target.value)}
             className="min-h-24"
+            placeholder={draft.llmFailed ? `Write your reply to ${senderName}…` : undefined}
             aria-label={`Draft reply to ${senderName}`}
           />
 
@@ -217,7 +234,7 @@ function PendingReplyCard({
         <div className="flex flex-wrap gap-2">
           <Button
             onClick={() => approve.mutate({ id: draft.id, editedText: text })}
-            disabled={busy}
+            disabled={busy || !text.trim()}
           >
             <Send className="mr-2 h-3.5 w-3.5" />
             {approve.isPending ? "Sending…" : "Approve & send"}
@@ -267,6 +284,7 @@ export default function Conversations() {
 
   const waiting = pendingReplies?.length ?? 0;
   const sensitiveCount = pendingReplies?.filter((d) => d.isSensitive).length ?? 0;
+  const failedCount = pendingReplies?.filter((d) => d.llmFailed && !d.isSensitive).length ?? 0;
 
   return (
     <div className="space-y-8">
@@ -276,7 +294,14 @@ export default function Conversations() {
         <StatTile
           label="Awaiting your OK"
           value={pendingReplies?.length}
-          hint={sensitiveCount ? `${sensitiveCount} needs a person` : undefined}
+          hint={
+            [
+              sensitiveCount ? `${sensitiveCount} needs a person` : "",
+              failedCount ? `${failedCount} the AI couldn't write` : "",
+            ]
+              .filter(Boolean)
+              .join(" · ") || undefined
+          }
           emphasise
         />
         <StatTile label="Posts queued" value={stats?.pendingPosts} />

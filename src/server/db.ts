@@ -343,7 +343,8 @@ export async function createPendingReply(
   customerMessageId: string,
   draftText: string,
   isSensitive = false,
-  alternatives?: { label: string; text: string }[]
+  alternatives?: { label: string; text: string }[],
+  llmFailed = false
 ): Promise<boolean> {
   const db = await getDb();
   try {
@@ -352,6 +353,7 @@ export async function createPendingReply(
       customerMessageId,
       draftText,
       isSensitive,
+      llmFailed,
       alternatives: alternatives?.length ? alternatives : undefined,
     });
     return true;
@@ -476,6 +478,13 @@ export async function resolvePendingReply(
   const db = await getDb();
   const [row] = await db.select().from(pendingReplies).where(eq(pendingReplies.id, id)).limit(1);
   if (!row || row.status !== "pending") return undefined;
+
+  // A draft the AI couldn't write is stored empty on purpose. Approving one
+  // untouched would send the customer a blank message — and marking it
+  // resolved first would lose the card as well. Refuse before either.
+  if (decision === "approved" && !(editedText || row.draftText).trim()) {
+    throw new Error("There's nothing written in that reply yet.");
+  }
 
   await db
     .update(pendingReplies)
