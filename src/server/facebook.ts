@@ -117,6 +117,108 @@ export async function getSenderProfile(
 }
 
 /**
+ * Whether the Page is actually handing its messages to this app.
+ *
+ * Verifying the webhook URL in the Meta dashboard is only half of it. The
+ * Page itself has to be subscribed to the app, and until it is, Facebook
+ * delivers nothing at all — no error, no retry, no clue. Which is exactly
+ * what the hosting logs showed: not one POST from Facebook, ever.
+ */
+export const MESSENGER_FIELDS = [
+  "messages",
+  "messaging_postbacks",
+  "message_echoes",
+  "messaging_optins",
+] as const;
+
+export async function getMessengerSubscription(): Promise<{
+  subscribed: boolean;
+  fields: string[];
+  missing: string[];
+  detail: string;
+}> {
+  const config = await getFacebookConfig();
+  if (!config?.pageAccessToken) {
+    return { subscribed: false, fields: [], missing: [], detail: "Facebook isn't connected yet." };
+  }
+
+  try {
+    const { data } = await axios.get(`${GRAPH}/me/subscribed_apps`, {
+      params: { access_token: config.pageAccessToken },
+      timeout: 10000,
+    });
+
+    const apps: { subscribed_fields?: string[] }[] = data?.data ?? [];
+    if (apps.length === 0) {
+      return {
+        subscribed: false,
+        fields: [],
+        missing: [...MESSENGER_FIELDS],
+        detail: "This Page is NOT subscribed to the app, so Facebook sends it nothing.",
+      };
+    }
+
+    const fields = apps.flatMap((app) => app.subscribed_fields ?? []);
+    const missing = MESSENGER_FIELDS.filter((f) => !fields.includes(f));
+    return {
+      subscribed: true,
+      fields,
+      missing,
+      detail: missing.length
+        ? `Subscribed, but not for: ${missing.join(", ")}.`
+        : "Subscribed, and receiving every message event.",
+    };
+  } catch (error) {
+    const err = error as { response?: { status?: number; data?: unknown } };
+    return {
+      subscribed: false,
+      fields: [],
+      missing: [],
+      detail: err.response
+        ? `Couldn't check — HTTP ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 200)}`
+        : `Couldn't check — ${(error as Error).message}`,
+    };
+  }
+}
+
+/** Subscribe the Page to this app so message events start arriving. */
+export async function subscribePageToApp(): Promise<{ ok: boolean; detail: string }> {
+  const config = await getFacebookConfig();
+  if (!config?.pageAccessToken) {
+    return { ok: false, detail: "Connect the Facebook Page first." };
+  }
+
+  try {
+    await axios.post(
+      `${GRAPH}/me/subscribed_apps`,
+      {},
+      {
+        params: {
+          subscribed_fields: MESSENGER_FIELDS.join(","),
+          access_token: config.pageAccessToken,
+        },
+        timeout: 12000,
+      }
+    );
+
+    // Don't take the POST's word for it — read it back.
+    const after = await getMessengerSubscription();
+    return {
+      ok: after.subscribed && after.missing.length === 0,
+      detail: after.detail,
+    };
+  } catch (error) {
+    const err = error as { response?: { status?: number; data?: unknown } };
+    return {
+      ok: false,
+      detail: err.response
+        ? `Facebook refused — HTTP ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 260)}`
+        : `Facebook refused — ${(error as Error).message}`,
+    };
+  }
+}
+
+/**
  * Names for everyone in the Page's inbox, keyed by their PSID.
  *
  * Asking for one person at a time — GET /{psid} — is the Messenger User

@@ -39,7 +39,13 @@ import {
   suggestPosts,
 } from "./agent.js";
 import { getUpcomingBookings, findFreeSlots } from "./calendar.js";
-import { getLastProfileError, backfillCustomerNames } from "./facebook.js";
+import {
+  getLastProfileError,
+  backfillCustomerNames,
+  getMessengerSubscription,
+  subscribePageToApp,
+} from "./facebook.js";
+import { getLastWebhookDelivery } from "./routes/webhook.js";
 import { syncFeed, listFeed, countFeed } from "./feed.js";
 import {
   listArtistUploads,
@@ -75,11 +81,6 @@ export const appRouter = t.router({
   }),
 
   /**
-   * The artists' end-of-day photos. Uploading is a plain POST so a phone can
-   * do it without the app's JavaScript; everything here is the studio side —
-   * looking through them, marking what's been used, clearing what hasn't.
-   */
-  /**
    * The studio's own posts. Read from our copy; refreshing goes to Facebook.
    */
   feed: t.router({
@@ -90,6 +91,11 @@ export const appRouter = t.router({
       .mutation(({ input }) => syncFeed(input.days)),
   }),
 
+  /**
+   * The artists' end-of-day photos. Uploading is a plain POST so a phone can
+   * do it without the app's JavaScript; everything here is the studio side —
+   * looking through them, marking what's been used, clearing what hasn't.
+   */
   uploads: t.router({
     list: publicProcedure
       .input(z.object({ unusedOnly: z.boolean().default(false) }).default({ unusedOnly: false }))
@@ -299,6 +305,17 @@ export const appRouter = t.router({
     // Go and fetch names for the threads already sitting there as
     // "a customer" — a webhook is never coming to fix those on its own.
     refreshNames: publicProcedure.mutation(() => backfillCustomerNames()),
+
+    /**
+     * Is Facebook actually delivering? Verifying the webhook URL is only half
+     * of it — the Page must also be subscribed to the app, and until it is,
+     * Facebook sends nothing and says nothing.
+     */
+    messengerDelivery: publicProcedure.query(async () => ({
+      ...(await getMessengerSubscription()),
+      lastDelivery: getLastWebhookDelivery(),
+    })),
+    subscribeMessenger: publicProcedure.mutation(() => subscribePageToApp()),
     timely: publicProcedure.query(() => getTimelyConfig().catch(() => null)),
     saveTimely: publicProcedure
       .input(
