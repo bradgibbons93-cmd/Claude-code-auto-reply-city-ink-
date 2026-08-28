@@ -33,6 +33,7 @@ import PostScheduler from "./pages/PostScheduler";
 import Training from "./pages/Training";
 import Settings from "./pages/Settings";
 import Upload from "./pages/Upload";
+import { SignIn } from "./components/SignIn";
 import StudioGallery from "./pages/StudioGallery";
 import Feed from "./pages/Feed";
 
@@ -139,8 +140,31 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const { theme, toggle } = useTheme();
   const [location] = useLocation();
+
+  // Whether there's a password on the door, and whether we're through it.
+  // Undefined while we're still asking — showing the app and then yanking it
+  // away, or flashing a password box at someone already signed in, both look
+  // like a fault.
+  const [session, setSession] = useState<{ required: boolean; signedIn: boolean } | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetch("/api/session")
+      .then((r) => r.json())
+      .then((s) => live && setSession(s))
+      // If even this won't answer, don't hold the whole app hostage to it.
+      .catch(() => live && setSession({ required: false, signedIn: true }));
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const locked = !!session && session.required && !session.signedIn;
+
   const { data: pending } = trpc.pendingReplies.list.useQuery(undefined, {
     refetchInterval: 10000,
+    // Nothing to ask for behind a locked door, and asking would only pile up
+    // 401s underneath the password box.
+    enabled: !!session && !locked && location !== "/upload",
   });
 
   useEffect(() => setMenuOpen(false), [location]);
@@ -152,6 +176,18 @@ export default function App() {
       <div className="min-h-screen text-foreground">
         <InkDefs />
         <Upload />
+      </div>
+    );
+  }
+
+  // Still asking. A blank ground beats a flash of either screen.
+  if (!session) return <div className="min-h-screen bg-background" />;
+
+  if (locked) {
+    return (
+      <div className="min-h-screen text-foreground">
+        <InkDefs />
+        <SignIn onSignedIn={() => setSession({ required: true, signedIn: true })} />
       </div>
     );
   }
