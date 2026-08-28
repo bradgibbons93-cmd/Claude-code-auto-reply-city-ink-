@@ -44,6 +44,7 @@ import { getUpcomingBookings, findFreeSlots } from "./calendar.js";
 import {
   getLastProfileError,
   backfillCustomerNames,
+  importExistingConversations,
   getMessengerSubscription,
   subscribePageToApp,
 } from "./facebook.js";
@@ -299,6 +300,9 @@ export const appRouter = t.router({
         webhookVerifyToken: config.webhookVerifyToken,
         isConfigured: config.isConfigured,
         hasToken: !!config.pageAccessToken,
+        // The value never leaves the server; the browser only needs to know
+        // whether one is saved so the field can say so.
+        hasInstagramToken: !!config.instagramAccessToken,
         hasOwner: !!config.ownerPsid,
         // Why customers show as "a customer" — but ONLY when any actually
         // do. The per-person profile lookup fails for this app and always
@@ -317,6 +321,8 @@ export const appRouter = t.router({
           // Blank is allowed on an update — it means "keep the saved one".
           // setFacebookConfig() only accepts that when a row already exists.
           pageAccessToken: z.string(),
+          // Blank means "keep whatever's saved", same as the Page token.
+          instagramAccessToken: z.string().optional(),
           appId: z.string().min(1),
           appSecret: z.string(),
           webhookVerifyToken: z.string().min(1),
@@ -327,6 +333,10 @@ export const appRouter = t.router({
     // Go and fetch names for the threads already sitting there as
     // "a customer" — a webhook is never coming to fix those on its own.
     refreshNames: publicProcedure.mutation(() => backfillCustomerNames()),
+    // Everyone who wrote in before the app was watching. A webhook only ever
+    // carries what happens next, so without this they stay invisible until
+    // they happen to message again.
+    importThreads: publicProcedure.mutation(() => importExistingConversations()),
 
     /**
      * Is Facebook actually delivering? Verifying the webhook URL is only half

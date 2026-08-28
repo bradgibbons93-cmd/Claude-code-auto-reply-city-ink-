@@ -199,6 +199,12 @@ export const facebookConfig = mysqlTable("facebook_config", {
   pageId: varchar("page_id", { length: 191 }).notNull(),
   pageName: varchar("page_name", { length: 255 }),
   pageAccessToken: text("page_access_token").notNull(),
+  // Meta's newer Instagram flow issues a different kind of token from the
+  // Page one, against a different host, and the two are not interchangeable.
+  // Kept in its own column so pasting one can't wipe out the other and take
+  // Messenger down with it. Optional: a Page token carrying the Instagram
+  // permissions does the job on its own, and then this stays empty.
+  instagramAccessToken: text("instagram_access_token"),
   appId: varchar("app_id", { length: 191 }).notNull(),
   appSecret: varchar("app_secret", { length: 255 }).notNull(),
   webhookVerifyToken: varchar("webhook_verify_token", { length: 255 }).notNull(),
