@@ -14,6 +14,7 @@ import { saveArtistUpload, readArtistUpload, UploadRejected } from "./uploads.js
 import { syncFeed, countFeed } from "./feed.js";
 import QRCode from "qrcode";
 import { getLastLlmError, llmProvider, llmModel, llmBaseUrl } from "./llm.js";
+import { mountAuth, requireStudio } from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -37,7 +38,10 @@ app.use(
 );
 app.use(express.urlencoded({ extended: true }));
 
+// Before the guard: Meta has to be able to reach the webhook, and the
+// browser has to be able to ask whether a password is even set.
 app.use("/api/webhook", webhookRouter);
+mountAuth(app);
 
 /**
  * Artists' end-of-day photos.
@@ -86,7 +90,7 @@ app.post("/api/uploads", express.json({ limit: "24mb" }), async (req, res) => {
   }
 });
 
-app.get("/api/uploads/:id", async (req, res) => {
+app.get<{ id: string }>("/api/uploads/:id", requireStudio, async (req, res) => {
   try {
     const upload = await readArtistUpload(req.params.id);
     if (!upload) return res.sendStatus(404);
@@ -104,7 +108,7 @@ app.get("/api/uploads/:id", async (req, res) => {
  * browser so it can be printed straight from the page, and so the URL it
  * encodes is the one the server actually answers on.
  */
-app.get("/api/upload-qr.png", async (req, res) => {
+app.get("/api/upload-qr.png", requireStudio, async (req, res) => {
   try {
     const origin = `${req.protocol}://${req.get("host")}`;
     const png = await QRCode.toBuffer(`${origin}/upload`, {
@@ -129,7 +133,7 @@ app.get("/api/upload-qr.png", async (req, res) => {
  * internet somewhere, which for a photo just taken on a phone it never is.
  * Its own generous body limit for the same reason as the artist uploads.
  */
-app.post("/api/post-image", express.json({ limit: "24mb" }), async (req, res) => {
+app.post("/api/post-image", requireStudio, express.json({ limit: "24mb" }), async (req, res) => {
   try {
     const { contentType, dataUrl } = req.body ?? {};
     const base64 = String(dataUrl ?? "").split(",")[1] ?? "";
@@ -151,7 +155,8 @@ app.post("/api/post-image", express.json({ limit: "24mb" }), async (req, res) =>
 // Reference photos, served from our own copy rather than Facebook's CDN —
 // their links expire, ours don't. Content-addressed, so it can be cached
 // hard: the same path always means the same image.
-app.get("/api/attachments/:id", async (req, res) => {
+// Customers' own reference photos. Studio-only.
+app.get<{ id: string }>("/api/attachments/:id", requireStudio, async (req, res) => {
   try {
     const attachment = await readAttachment(req.params.id);
     if (!attachment) return res.sendStatus(404);
@@ -166,6 +171,8 @@ app.get("/api/attachments/:id", async (req, res) => {
 
 app.use(
   "/api/trpc",
+  // Everything the studio can read or change goes through here.
+  requireStudio,
   createExpressMiddleware({
     router: appRouter,
     onError({ error, path: procPath }) {
