@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
@@ -17,6 +17,7 @@ import {
   Sparkles,
   Instagram,
   Facebook,
+  RefreshCw,
 } from "lucide-react";
 
 function isPaused(until: string | Date | null | undefined) {
@@ -73,6 +74,12 @@ function PendingReplyCard({
   const utils = trpc.useUtils();
   const [text, setText] = useState(draft.draftText);
 
+  // A retry rewrites the draft underneath this box. Without this the new
+  // wording arrives on the server and the studio keeps staring at the empty
+  // box it replaced. Keyed on the text itself, so the twenty-second poll
+  // can't wipe out something half-typed.
+  useEffect(() => setText(draft.draftText), [draft.draftText]);
+
   // What the customer actually said, so the draft can be judged without
   // having to go hunting for the thread first.
   const { data: thread } = trpc.conversations.messages.useQuery({
@@ -107,6 +114,19 @@ function PendingReplyCard({
     },
     onError: (error) => toast.error(error.message || "Couldn't send that reply."),
   });
+  // The model fell over on this one. Asking it again is nearly always faster
+  // than typing the reply out, so offer that before the blank box.
+  const redraft = trpc.pendingReplies.redraft.useMutation({
+    onSuccess: (result) => {
+      if (result.ok) {
+        toast.success("Drafted — have a read before it goes");
+        utils.pendingReplies.list.invalidate();
+      } else {
+        toast.error(result.reason || "Still couldn't write that one.");
+      }
+    },
+    onError: (error) => toast.error(error.message || "Couldn't reach the AI."),
+  });
   const reject = trpc.pendingReplies.reject.useMutation({
     onSuccess: () => {
       toast("Discarded — nothing was sent");
@@ -114,7 +134,7 @@ function PendingReplyCard({
     },
   });
 
-  const busy = approve.isPending || reject.isPending;
+  const busy = approve.isPending || reject.isPending || redraft.isPending;
 
   return (
     <Card
@@ -240,6 +260,18 @@ function PendingReplyCard({
             <Send className="mr-2 h-3.5 w-3.5" />
             {approve.isPending ? "Sending…" : "Approve & send"}
           </Button>
+          {draft.llmFailed && (
+            <Button
+              variant="outline"
+              onClick={() => redraft.mutate({ id: draft.id })}
+              disabled={busy}
+            >
+              <RefreshCw
+                className={cn("mr-2 h-3.5 w-3.5", redraft.isPending && "animate-spin")}
+              />
+              {redraft.isPending ? "Asking the AI…" : "Try the AI again"}
+            </Button>
+          )}
           <Button variant="outline" onClick={() => reject.mutate({ id: draft.id })} disabled={busy}>
             <Trash2 className="mr-2 h-3.5 w-3.5" />
             Discard

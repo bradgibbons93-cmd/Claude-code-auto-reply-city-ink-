@@ -16,8 +16,11 @@ import {
   recordDraftEdit,
   getConversationMessages,
   pauseBot,
+  getConversation,
+  getPendingReply,
+  replacePendingReplyDraft,
 } from "./db.js";
-import { invokeLLMJson, type ChatMessage } from "./llm.js";
+import { invokeLLMJson, getLastLlmError, type ChatMessage } from "./llm.js";
 import { availabilityForPrompt } from "./calendar.js";
 import { sendMessengerMessage, sendTypingIndicator, resolveCustomerName } from "./facebook.js";
 import { cacheAttachments } from "./attachments.js";
@@ -242,6 +245,143 @@ async function matchRule(text: string) {
   );
 }
 
+interface ComposedDraft {
+  reply: string;
+  intent: Intent;
+  extracted: AgentDecision["extracted"];
+  sensitive: boolean;
+  llmFailed: boolean;
+  alternatives: { label: string; text: string }[];
+}
+
+/**
+ * Writes one draft against the whole thread. Split out from the message
+ * handler so a draft the model failed to write can simply be asked for again
+ * — the customer's message is already recorded by then, so re-running the
+ * handler would only trip its own duplicate check and do nothing.
+ */
+async function composeDraft(
+  senderId: string,
+  text: string,
+  hasPhoto: boolean,
+  known: BookingState
+): Promise<ComposedDraft> {
+  const rule = await matchRule(text);
+  // Read once per message so both branches below see the same free slots.
+  const availability = await availabilityForPrompt().catch(() => "");
+  // How the studio answered messages like this before, plus anything Brad
+  // has rewritten recently. Both fail soft — a lookup problem must not stop
+  // a customer getting a reply.
+  const examples = text ? await findSimilarExchanges(text).catch(() => []) : [];
+  const corrections = await getRecentDraftEdits().catch(() => []);
+
+  const turns = await getRecentTurns(senderId, 10);
+  const history: ChatMessage[] = turns.map((t) => ({
+    role: t.senderType === "customer" ? "user" : "assistant",
+    content: t.content,
+  }));
+
+  // A plain rule (no booking flag) is a fixed answer — no need to spend an
+  // LLM call on it. A rule marked to start the booking hand-off still uses
+  // its own wording, but also runs extraction so the flow below can start
+  // collecting name/phone/dates on the same turn.
+  if (rule && !rule.sendBookingLink) {
+    return {
+      reply: rule.responseText,
+      intent: "other",
+      extracted: undefined,
+      sensitive: false,
+      llmFailed: false,
+      alternatives: [],
+    };
+  }
+
+  if (rule && rule.sendBookingLink) {
+    const decision = await decide(history, "", known, hasPhoto, availability, examples, corrections);
+    return {
+      reply: rule.responseText,
+      intent: "booking",
+      extracted: decision.extracted,
+      sensitive: false,
+      llmFailed: !decision.ok,
+      alternatives: [],
+    };
+  }
+
+  const knowledge = await getStudioKnowledge().catch(() => []);
+  const studioFacts = knowledge.map((k) => `Q: ${k.question}\nA: ${k.answer}`).join("\n\n");
+
+  const decision = await decide(
+    history,
+    studioFacts,
+    known,
+    hasPhoto,
+    availability,
+    examples,
+    corrections
+  );
+
+  return {
+    // A failed call must not look like a considered reply — and the old
+    // placeholder ("check LLM_API_KEY in Railway") was both sendable to a
+    // customer and meaningless to the person reading it. Leave the box empty
+    // and let the card say why; the flag is what the dashboard reads.
+    reply: decision.ok ? decision.reply : "",
+    intent: decision.intent,
+    extracted: decision.extracted,
+    sensitive: !!decision.sensitive,
+    llmFailed: !decision.ok,
+    // Only offer choices when the model actually answered. A fallback line
+    // dressed up as three options would look like three considered replies.
+    alternatives: decision.ok ? decision.alternatives ?? [] : [],
+  };
+}
+
+/**
+ * Asks for a draft again on a card the model failed to write. The customer is
+ * still waiting and the message is still there, so the studio shouldn't have
+ * to write from scratch just because the model fell over the first time.
+ */
+export async function redraftPendingReply(id: number): Promise<{ ok: boolean; reason?: string }> {
+  const draft = await getPendingReply(id);
+  if (!draft) return { ok: false, reason: "That draft isn't waiting any more." };
+
+  const conversation = await getConversation(draft.conversationId);
+  const known: BookingState = {
+    name: conversation?.bookingName ?? null,
+    phone: conversation?.bookingPhone ?? null,
+    dates: conversation?.bookingDates ?? null,
+  };
+
+  // Answer the message this card was written for; if that's gone, the newest
+  // thing the customer said.
+  const turns = await getRecentTurns(draft.conversationId, 20);
+  const answering =
+    turns.find((t) => t.messageId === draft.customerMessageId) ??
+    [...turns].reverse().find((t) => t.senderType === "customer");
+  if (!answering) return { ok: false, reason: "There's no customer message to answer here." };
+
+  const composed = await composeDraft(
+    draft.conversationId,
+    answering.content,
+    !!answering.attachmentUrls?.length,
+    known
+  );
+
+  if (composed.llmFailed) {
+    const { message } = getLastLlmError() ?? {};
+    return { ok: false, reason: message || "The AI still couldn't write this one." };
+  }
+
+  await replacePendingReplyDraft(id, {
+    draftText: composed.reply,
+    alternatives: composed.alternatives,
+    isSensitive: composed.sensitive,
+  });
+  console.log(`[Agent] Redrafted pending reply ${id}`);
+  return { ok: true };
+}
+
 /**
  * BUG FIX #6 — the original sent one message with no history, so every reply
  * forgot the last. This loads the recent turns first.
@@ -326,78 +466,18 @@ export async function handleCustomerMessage(
 
   await sendTypingIndicator(senderId);
 
-  const rule = await matchRule(text);
-  // Read once per message so both branches below see the same free slots.
-  const availability = await availabilityForPrompt().catch(() => "");
-  // How the studio answered messages like this before, plus anything Brad
-  // has rewritten recently. Both fail soft — a lookup problem must not stop
-  // a customer getting a reply.
-  const examples = text ? await findSimilarExchanges(text).catch(() => []) : [];
-  const corrections = await getRecentDraftEdits().catch(() => []);
   const known: BookingState = {
     name: conversation?.bookingName ?? null,
     phone: conversation?.bookingPhone ?? null,
     dates: conversation?.bookingDates ?? null,
   };
 
-  let reply: string;
-  let intent: Intent = "other";
-  let extracted: AgentDecision["extracted"];
-  let sensitive = false;
-  let llmFailed = false;
-  let alternatives: { label: string; text: string }[] = [];
-
-  // A plain rule (no booking flag) is a fixed answer — no need to spend an
-  // LLM call on it. A rule marked to start the booking hand-off still uses
-  // its own wording, but also runs extraction so the flow below can start
-  // collecting name/phone/dates on the same turn.
-  if (rule && !rule.sendBookingLink) {
-    reply = rule.responseText;
-  } else if (rule && rule.sendBookingLink) {
-    const turns = await getRecentTurns(senderId, 10);
-    const history: ChatMessage[] = turns.map((t) => ({
-      role: t.senderType === "customer" ? "user" : "assistant",
-      content: t.content,
-    }));
-    const decision = await decide(history, "", known, photoUrls.length > 0, availability, examples, corrections);
-    reply = rule.responseText;
-    intent = "booking";
-    extracted = decision.extracted;
-    llmFailed = !decision.ok;
-  } else {
-    const knowledge = await getStudioKnowledge().catch(() => []);
-    const studioFacts = knowledge.map((k) => `Q: ${k.question}\nA: ${k.answer}`).join("\n\n");
-
-    const turns = await getRecentTurns(senderId, 10);
-    const history: ChatMessage[] = turns.map((t) => ({
-      role: t.senderType === "customer" ? "user" : "assistant",
-      content: t.content,
-    }));
-
-    const decision = await decide(
-      history,
-      studioFacts,
-      known,
-      photoUrls.length > 0,
-      availability,
-      examples,
-      corrections
-    );
-    reply = decision.reply;
-    intent = decision.intent;
-    extracted = decision.extracted;
-    sensitive = !!decision.sensitive;
-    llmFailed = !decision.ok;
-    // Only offer choices when the model actually answered. A fallback line
-    // dressed up as three options would look like three considered replies.
-    alternatives = decision.ok ? decision.alternatives ?? [] : [];
-
-    // A failed call must not look like a considered reply — and the old
-    // placeholder ("check LLM_API_KEY in Railway") was both sendable to a
-    // customer and meaningless to the person reading it. Leave the box empty
-    // and let the card say why; the flag below is what the dashboard reads.
-    if (llmFailed) reply = "";
-  }
+  let { reply, intent, extracted, sensitive, llmFailed, alternatives } = await composeDraft(
+    senderId,
+    text,
+    photoUrls.length > 0,
+    known
+  );
 
   if (intent === "booking" || photoUrls.length > 0) {
     await updateBookingDetails(senderId, {

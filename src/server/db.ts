@@ -96,6 +96,17 @@ export async function getConversationsMissingNames(limit = 50) {
   return rows.filter((row) => !row.senderName?.trim()).map((row) => row.conversationId);
 }
 
+/** One thread as it stands, without creating it if it isn't there. */
+export async function getConversation(conversationId: string) {
+  const db = await getDb();
+  const [row] = await db
+    .select()
+    .from(messengerConversations)
+    .where(eq(messengerConversations.conversationId, conversationId))
+    .limit(1);
+  return row;
+}
+
 export async function setConversationName(conversationId: string, senderName: string) {
   const db = await getDb();
   await db
@@ -470,6 +481,42 @@ export async function getPendingReplies() {
 }
 
 /** Approves (optionally with edited wording) and returns the text actually sent. */
+/** One waiting draft, for asking the model to write it again. */
+export async function getPendingReply(id: number) {
+  const db = await getDb();
+  const [row] = await db
+    .select()
+    .from(pendingReplies)
+    .where(and(eq(pendingReplies.id, id), eq(pendingReplies.status, "pending")))
+    .limit(1);
+  return row;
+}
+
+/**
+ * Puts a freshly written draft into a card that's already on the board, so a
+ * retry lands where the studio is already looking rather than as a second
+ * card for the same person. Clearing llm_failed is the point of the exercise.
+ */
+export async function replacePendingReplyDraft(
+  id: number,
+  draft: {
+    draftText: string;
+    alternatives?: { label: string; text: string }[];
+    isSensitive?: boolean;
+  }
+): Promise<void> {
+  const db = await getDb();
+  await db
+    .update(pendingReplies)
+    .set({
+      draftText: draft.draftText,
+      alternatives: draft.alternatives?.length ? draft.alternatives : null,
+      isSensitive: !!draft.isSensitive,
+      llmFailed: false,
+    })
+    .where(and(eq(pendingReplies.id, id), eq(pendingReplies.status, "pending")));
+}
+
 export async function resolvePendingReply(
   id: number,
   decision: "approved" | "rejected",

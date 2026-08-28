@@ -36,6 +36,7 @@ import {
   generateCaption,
   approveDraft,
   rejectDraft,
+  redraftPendingReply,
   practiceReply,
   suggestPosts,
 } from "./agent.js";
@@ -131,6 +132,11 @@ export const appRouter = t.router({
     reject: publicProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => rejectDraft(input.id)),
+    // Ask the model again on a card it failed to write, rather than making
+    // the studio start from a blank box.
+    redraft: publicProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(({ input }) => redraftPendingReply(input.id)),
   }),
 
   autoReply: t.router({
