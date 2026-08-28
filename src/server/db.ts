@@ -130,7 +130,7 @@ export async function getConversationMessages(conversationId: string, limit = 50
     .select()
     .from(messengerMessages)
     .where(eq(messengerMessages.conversationId, conversationId))
-    .orderBy(asc(messengerMessages.createdAt))
+    .orderBy(asc(messengerMessages.createdAt), asc(messengerMessages.id))
     .limit(limit);
 }
 
@@ -141,7 +141,10 @@ export async function getRecentTurns(conversationId: string, limit = 10) {
     .select()
     .from(messengerMessages)
     .where(eq(messengerMessages.conversationId, conversationId))
-    .orderBy(desc(messengerMessages.createdAt))
+    // id breaks a same-second tie: several messages can share a timestamp,
+    // and without this the order within that second is whatever MySQL feels
+    // like returning.
+    .orderBy(desc(messengerMessages.createdAt), desc(messengerMessages.id))
     .limit(limit);
   return rows.reverse();
 }
@@ -156,7 +159,12 @@ export async function recordMessage(
   senderType: "customer" | "bot" | "manual",
   content: string,
   autoReplyContent?: string,
-  attachmentUrls?: string[]
+  attachmentUrls?: string[],
+  // When this was actually said, for messages that didn't arrive live.
+  // Importing a thread stamped everything "now", so a conversation pulled in
+  // from the Meta inbox had no real order — and these turns are exactly what
+  // the agent reads back as history, so it would see the chat inside out.
+  createdAt?: Date
 ): Promise<boolean> {
   const db = await getDb();
   try {
@@ -168,6 +176,7 @@ export async function recordMessage(
       autoReplyGenerated: !!autoReplyContent,
       autoReplyContent,
       attachmentUrls: attachmentUrls?.length ? attachmentUrls : undefined,
+      ...(createdAt ? { createdAt } : {}),
     });
   } catch (error: unknown) {
     const code = (error as { code?: string })?.code;
@@ -626,6 +635,7 @@ export async function getFacebookConfig() {
 export async function setFacebookConfig(input: {
   pageId: string;
   pageAccessToken: string;
+  instagramAccessToken?: string;
   appId: string;
   appSecret: string;
   webhookVerifyToken: string;
@@ -641,6 +651,7 @@ export async function setFacebookConfig(input: {
       .set({
         ...input,
         pageAccessToken: input.pageAccessToken || existing.pageAccessToken,
+        instagramAccessToken: input.instagramAccessToken || existing.instagramAccessToken,
         appSecret: input.appSecret || existing.appSecret,
         isConfigured: true,
       })

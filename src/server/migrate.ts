@@ -195,6 +195,7 @@ const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "messenger_messages", column: "attachment_urls", ddl: "JSON" },
   { table: "pending_replies", column: "alternatives", ddl: "JSON" },
   { table: "pending_replies", column: "llm_failed", ddl: "BOOLEAN DEFAULT FALSE" },
+  { table: "facebook_config", column: "instagram_access_token", ddl: "TEXT" },
   {
     table: "messenger_conversations",
     column: "platform",

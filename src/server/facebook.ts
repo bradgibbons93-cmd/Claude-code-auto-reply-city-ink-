@@ -12,6 +12,44 @@ import {
 // watch a real page render a real name without messaging the studio.
 const GRAPH = process.env.FACEBOOK_GRAPH_URL || "https://graph.facebook.com/v21.0";
 
+// Meta's newer Instagram flow answers on its own host, not graph.facebook.com.
+// Falls back to the Facebook override first so one stand-in server can serve
+// both platforms in a test run.
+const IG_GRAPH =
+  process.env.INSTAGRAM_GRAPH_URL ||
+  process.env.FACEBOOK_GRAPH_URL ||
+  "https://graph.instagram.com/v21.0";
+
+export type Platform = "facebook" | "instagram";
+
+/**
+ * Which host and which token to use for a given inbox.
+ *
+ * There are two ways to reach Instagram and they are not interchangeable. A
+ * Page token carrying the Instagram permissions talks to graph.facebook.com
+ * exactly like Messenger does; a token from Meta's Instagram-login flow talks
+ * to graph.instagram.com and a Page endpoint will refuse it. Which one Brad
+ * ends up holding depends on which product Meta walked him through, so rather
+ * than guess: use the Instagram token against the Instagram host when one has
+ * been saved, and otherwise carry on with the Page token, which is what has
+ * been working all along.
+ *
+ * Messenger never takes the Instagram path, so an Instagram token can't take
+ * down the inbox that already works.
+ */
+async function endpointFor(
+  platform: Platform
+): Promise<{ base: string; token: string } | null> {
+  const config = await getFacebookConfig().catch(() => undefined);
+  if (!config) return null;
+
+  if (platform === "instagram" && config.instagramAccessToken) {
+    return { base: IG_GRAPH, token: config.instagramAccessToken };
+  }
+  if (!config.pageAccessToken) return null;
+  return { base: GRAPH, token: config.pageAccessToken };
+}
+
 /**
  * This app's own address on the internet, for the times something outside
  * has to come and fetch a file from us — publishing a post with a photo
@@ -59,30 +97,34 @@ export function verifyWebhookSignature(
 
 export async function sendMessengerMessage(
   recipientId: string,
-  messageText: string
+  messageText: string,
+  platform: Platform = "facebook"
 ): Promise<void> {
-  const config = await getFacebookConfig();
-  if (!config?.pageAccessToken) throw new Error("Facebook is not connected yet");
+  const endpoint = await endpointFor(platform);
+  if (!endpoint) throw new Error("Facebook is not connected yet");
 
   await axios.post(
-    `${GRAPH}/me/messages`,
+    `${endpoint.base}/me/messages`,
     {
       recipient: { id: recipientId },
       messaging_type: "RESPONSE",
       message: { text: messageText },
     },
-    { params: { access_token: config.pageAccessToken }, timeout: 15000 }
+    { params: { access_token: endpoint.token }, timeout: 15000 }
   );
 }
 
-export async function sendTypingIndicator(recipientId: string): Promise<void> {
-  const config = await getFacebookConfig();
-  if (!config?.pageAccessToken) return;
+export async function sendTypingIndicator(
+  recipientId: string,
+  platform: Platform = "facebook"
+): Promise<void> {
+  const endpoint = await endpointFor(platform);
+  if (!endpoint) return;
   try {
     await axios.post(
-      `${GRAPH}/me/messages`,
+      `${endpoint.base}/me/messages`,
       { recipient: { id: recipientId }, sender_action: "typing_on" },
-      { params: { access_token: config.pageAccessToken }, timeout: 8000 }
+      { params: { access_token: endpoint.token }, timeout: 8000 }
     );
   } catch {
     /* cosmetic only — never block a reply on this */
@@ -100,10 +142,10 @@ export function getLastProfileError() {
 
 export async function getSenderProfile(
   senderId: string,
-  platform: "facebook" | "instagram" = "facebook"
+  platform: Platform = "facebook"
 ): Promise<{ name?: string } | null> {
-  const config = await getFacebookConfig();
-  if (!config?.pageAccessToken) return null;
+  const endpoint = await endpointFor(platform);
+  if (!endpoint) return null;
 
   // Facebook is inconsistent about which name fields a Page token may read,
   // and it varies with how the app was reviewed. Try the split fields, then
@@ -118,8 +160,8 @@ export async function getSenderProfile(
 
   for (const fields of attempts) {
     try {
-      const { data } = await axios.get(`${GRAPH}/${senderId}`, {
-        params: { fields, access_token: config.pageAccessToken },
+      const { data } = await axios.get(`${endpoint.base}/${senderId}`, {
+        params: { fields, access_token: endpoint.token },
         timeout: 8000,
       });
       const name =
@@ -296,8 +338,7 @@ export async function ensureMessengerSubscription(): Promise<{
 export async function fetchInboxParticipants(
   maxPages = 5
 ): Promise<{ names: Map<string, string>; error?: string }> {
-  const config = await getFacebookConfig();
-  if (!config?.pageAccessToken) {
+  if (!(await endpointFor("facebook"))) {
     return { names: new Map(), error: "Facebook isn't connected yet." };
   }
 
@@ -312,45 +353,60 @@ export async function fetchInboxParticipants(
 
   // Both inboxes. Instagram threads live on the same edge under a different
   // platform, and missing them is why Instagram customers had no name.
-  for (const inbox of ["messenger", "instagram"] as const) {
-  let url: string | undefined = `${GRAPH}/me/conversations`;
-  let params: Record<string, string> | undefined = {
-    platform: inbox,
-    fields: "participants",
-    limit: "100",
-    access_token: config.pageAccessToken,
-  };
+  for (const platform of ["facebook", "instagram"] as const) {
+    const endpoint = await endpointFor(platform);
+    if (!endpoint) continue;
 
-  for (let page = 0; page < maxPages && url; page += 1) {
-    try {
-      const { data }: { data: InboxPage } = await axios.get(url, { params, timeout: 12000 });
+    let url: string | undefined = `${endpoint.base}/me/conversations`;
+    let params: Record<string, string> | undefined = {
+      // Only graph.facebook.com splits one edge by platform. On Instagram's
+      // own host the conversations edge is already Instagram's.
+      ...(endpoint.base === IG_GRAPH ? {} : { platform: inboxParam(platform) }),
+      fields: "participants",
+      limit: "100",
+      access_token: endpoint.token,
+    };
 
-      for (const thread of data.data ?? []) {
-        for (const person of thread.participants?.data ?? []) {
-          // The Page itself is a participant in every thread. Skip it.
-          if (!person.id || person.id === identity?.id) continue;
-          if (person.name?.trim()) names.set(person.id, person.name.trim());
+    for (let page = 0; page < maxPages && url; page += 1) {
+      try {
+        const { data }: { data: InboxPage } = await axios.get(url, { params, timeout: 12000 });
+
+        for (const thread of data.data ?? []) {
+          for (const person of thread.participants?.data ?? []) {
+            // The Page itself is a participant in every thread. Skip it.
+            if (!person.id || person.id === identity?.id) continue;
+            if (person.name?.trim()) names.set(person.id, person.name.trim());
+          }
         }
-      }
 
-      // paging.next is a fully-formed URL with the token already on it.
-      url = data.paging?.next;
-      params = undefined;
-    } catch (error) {
-      const err = error as { response?: { status?: number; data?: unknown } };
-      const detail = err.response
-        ? `conversations → HTTP ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 240)}`
-        : `conversations → ${(error as Error).message}`;
-      // One inbox failing (commonly Instagram, when it isn't linked) must
-      // not throw away the names the other one gave us.
-      console.error(`[Facebook] ${inbox} inbox list failed — ${detail}`);
-      if (inbox === "messenger" && names.size === 0) return { names, error: detail };
-      break;
+        // paging.next is a fully-formed URL with the token already on it.
+        url = data.paging?.next;
+        params = undefined;
+      } catch (error) {
+        const detail = describeGraphError("conversations", error);
+        // One inbox failing (commonly Instagram, when it isn't linked) must
+        // not throw away the names the other one gave us.
+        console.error(`[Facebook] ${platform} inbox list failed — ${detail}`);
+        if (platform === "facebook" && names.size === 0) return { names, error: detail };
+        break;
+      }
     }
-  }
   }
 
   return { names };
+}
+
+/** What graph.facebook.com calls each inbox on the conversations edge. */
+function inboxParam(platform: Platform): string {
+  return platform === "instagram" ? "instagram" : "messenger";
+}
+
+/** A Graph failure as one line, whether it came back as HTTP or as a throw. */
+function describeGraphError(what: string, error: unknown): string {
+  const err = error as { response?: { status?: number; data?: unknown } };
+  return err.response
+    ? `${what} → HTTP ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 240)}`
+    : `${what} → ${(error as Error).message}`;
 }
 
 /**
@@ -398,6 +454,151 @@ export async function getPageIdentity(): Promise<{ id: string; name?: string } |
 interface InboxPage {
   data?: { participants?: { data?: { id?: string; name?: string }[] } }[];
   paging?: { next?: string };
+}
+
+interface ThreadPage {
+  data?: {
+    id?: string;
+    participants?: { data?: { id?: string; name?: string }[] };
+    messages?: {
+      data?: {
+        id?: string;
+        message?: string;
+        created_time?: string;
+        from?: { id?: string; name?: string };
+      }[];
+    };
+  }[];
+  paging?: { next?: string };
+}
+
+export interface ImportedThreads {
+  conversations: number;
+  messages: number;
+  /** Per-platform notes, including why one came back empty. */
+  detail: string;
+}
+
+/**
+ * Pulls the threads already sitting in the studio's Meta inbox.
+ *
+ * A webhook only ever carries what happens next. Everyone who wrote in
+ * before the app was connected — or before Instagram was switched on — is
+ * invisible here until they happen to message again, which for a studio
+ * means an enquiry from last week silently never gets answered.
+ *
+ * So this reads the conversations edge with the messages on it, and stores
+ * what it finds the same way a live delivery would. It deliberately does not
+ * draft replies: writing to fifty people at once off the back of a button
+ * press is not something anyone wants, and half these conversations were
+ * already answered by hand.
+ */
+export async function importExistingConversations(
+  maxThreads = 100
+): Promise<ImportedThreads> {
+  const { getOrCreateConversation, recordMessage } = await import("./db.js");
+  const identity = await getPageIdentity();
+  const notes: string[] = [];
+  let conversations = 0;
+  let messages = 0;
+
+  for (const platform of ["facebook", "instagram"] as const) {
+    const endpoint = await endpointFor(platform);
+    if (!endpoint) {
+      notes.push(`${platform}: not connected`);
+      continue;
+    }
+
+    let url: string | undefined = `${endpoint.base}/me/conversations`;
+    let params: Record<string, string> | undefined = {
+      ...(endpoint.base === IG_GRAPH ? {} : { platform: inboxParam(platform) }),
+      fields: "participants,messages.limit(25){id,message,created_time,from}",
+      limit: "25",
+      access_token: endpoint.token,
+    };
+
+    let seen = 0;
+    let failed = "";
+
+    while (url && seen < maxThreads) {
+      try {
+        const { data }: { data: ThreadPage } = await axios.get(url, {
+          params,
+          timeout: 20000,
+        });
+
+        for (const thread of data.data ?? []) {
+          if (seen >= maxThreads) break;
+          // Whoever isn't us. A thread with nobody else in it is the Page
+          // talking to itself and there's nothing to answer.
+          const customer = (thread.participants?.data ?? []).find(
+            (p) => p.id && p.id !== identity?.id
+          );
+          if (!customer?.id) continue;
+          seen += 1;
+
+          await getOrCreateConversation(customer.id, customer.name?.trim() || undefined, platform);
+          conversations += 1;
+
+          // Oldest first, so the stored thread reads in the order it happened.
+          const turns = [...(thread.messages?.data ?? [])].reverse();
+          for (const turn of turns) {
+            if (!turn.id || !turn.message?.trim()) continue;
+            const fromUs = turn.from?.id === identity?.id;
+            // Keep when it was actually said. Stamping the whole thread
+            // "now" leaves it with no real order, and these turns are what
+            // the agent reads back as the conversation.
+            const said = turn.created_time ? new Date(turn.created_time) : undefined;
+            const stored = await recordMessage(
+              customer.id,
+              turn.id,
+              fromUs ? "manual" : "customer",
+              turn.message.trim(),
+              undefined,
+              undefined,
+              said && !Number.isNaN(said.getTime()) ? said : undefined
+            );
+            // recordMessage returns false for a message already stored, which
+            // is how running this twice stays harmless.
+            if (stored) messages += 1;
+          }
+        }
+
+        url = data.paging?.next;
+        params = undefined;
+      } catch (error) {
+        failed = describeGraphError("conversations", error);
+        console.error(`[Facebook] ${platform} import failed — ${failed}`);
+        break;
+      }
+    }
+
+    notes.push(
+      failed
+        ? `${platform}: ${explainImportFailure(failed, platform)}`
+        : `${platform}: ${seen} thread${seen === 1 ? "" : "s"}`
+    );
+  }
+
+  return { conversations, messages, detail: notes.join(" · ") };
+}
+
+/** A Graph refusal turned into the sentence that says what to do about it. */
+function explainImportFailure(detail: string, platform: Platform): string {
+  if (/pages_messaging|instagram_.*manage_messages|permission/i.test(detail)) {
+    return platform === "instagram"
+      ? "Instagram messaging isn't approved for the app yet, so Meta won't hand over these threads. This will start working once App Review comes back."
+      : "the token is missing the messaging permission — regenerate it with pages_messaging ticked.";
+  }
+  if (/expired|session has been invalidated|OAuthException/i.test(detail)) {
+    return "the saved token has expired — generate a new one and paste it into Settings.";
+  }
+  if (/does not exist|cannot be loaded/i.test(detail)) {
+    return platform === "instagram"
+      ? "no Instagram account is reachable with this token, which is normal until Instagram is connected."
+      : detail;
+  }
+  return detail;
 }
 
 /**

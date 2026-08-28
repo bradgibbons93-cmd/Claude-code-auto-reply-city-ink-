@@ -464,7 +464,7 @@ export async function handleCustomerMessage(
     console.log(`[Agent] Test message from the owner — drafting against: "${text}"`);
   }
 
-  await sendTypingIndicator(senderId);
+  await sendTypingIndicator(senderId, platform);
 
   const known: BookingState = {
     name: conversation?.bookingName ?? null,
@@ -536,7 +536,14 @@ export async function approveDraft(id: number, editedText?: string): Promise<voi
   // board rather than vanishing unsent.
   const resolved = await resolvePendingReply(id, "approved", editedText);
   if (!resolved) return;
-  await sendMessengerMessage(resolved.conversationId, resolved.text);
+  // A reply goes back to the inbox it came from. Sending an Instagram answer
+  // down the Messenger pipe reaches nobody.
+  const thread = await getConversation(resolved.conversationId);
+  await sendMessengerMessage(
+    resolved.conversationId,
+    resolved.text,
+    thread?.platform === "instagram" ? "instagram" : "facebook"
+  );
   await recordMessage(resolved.conversationId, `draft_${id}_sent`, "bot", resolved.text, resolved.text);
 
   // Edits made while testing against your own account aren't real feedback,

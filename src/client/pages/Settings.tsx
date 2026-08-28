@@ -51,6 +51,27 @@ export default function Settings() {
     onError: (error) => toast.error(error.message || "Couldn't reach Facebook."),
   });
 
+  // Everyone who wrote in before the app was watching. A webhook only ever
+  // carries the next message, so without this they stay invisible until they
+  // happen to message again — which for a week-old enquiry means never.
+  const importThreads = trpc.config.importThreads.useMutation({
+    onSuccess: (result) => {
+      if (result.conversations > 0) {
+        toast.success(
+          `Brought in ${result.conversations} conversation${
+            result.conversations === 1 ? "" : "s"
+          } and ${result.messages} message${result.messages === 1 ? "" : "s"}`
+        );
+      } else {
+        toast("Nothing new to bring in");
+      }
+      utils.conversations.list.invalidate();
+      utils.dashboard.invalidate();
+      utils.stats.invalidate();
+    },
+    onError: (error) => toast.error(error.message || "Couldn't reach the inbox."),
+  });
+
   const refreshNames = trpc.config.refreshNames.useMutation({
     onSuccess: (result) => {
       if (result.named > 0) toast.success(`Named ${result.named} customer${result.named === 1 ? "" : "s"}`);
@@ -66,6 +87,9 @@ export default function Settings() {
   const [pageId, setPageId] = useState("");
   const [pageName, setPageName] = useState("");
   const [pageAccessToken, setPageAccessToken] = useState("");
+  // Kept apart from the Page token on purpose — see the schema comment. One
+  // box for both is how you take Messenger down while wiring up Instagram.
+  const [instagramAccessToken, setInstagramAccessToken] = useState("");
   const [appId, setAppId] = useState("");
   const [appSecret, setAppSecret] = useState("");
   const [verifyToken, setVerifyToken] = useState("city_ink_webhook_2024");
@@ -269,6 +293,28 @@ export default function Settings() {
               </p>
             )}
           </div>
+
+          <div className="mt-3 rounded-lg border border-border bg-beige/20 p-3">
+            <p className="text-xs text-muted-foreground">
+              Someone messaged before the app was watching? Facebook only ever sends what
+              happens next, so older threads never arrive. This reads the studio inbox and
+              brings in what's already there. It doesn't draft or send anything.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              onClick={() => importThreads.mutate()}
+              disabled={importThreads.isPending}
+            >
+              {importThreads.isPending ? "Bringing them in…" : "Import existing conversations"}
+            </Button>
+            {importThreads.data && (
+              <p className="mt-2 break-words text-xs text-charcoal">
+                {importThreads.data.detail}
+              </p>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="space-y-3">
           <Input placeholder="Page ID" value={pageId} onChange={(e) => setPageId(e.target.value)} />
@@ -282,6 +328,16 @@ export default function Settings() {
             type="password"
             value={pageAccessToken}
             onChange={(e) => setPageAccessToken(e.target.value)}
+          />
+          <Input
+            placeholder={
+              fb?.hasInstagramToken
+                ? "Instagram access token — saved, leave blank to keep it"
+                : "Instagram access token (optional)"
+            }
+            type="password"
+            value={instagramAccessToken}
+            onChange={(e) => setInstagramAccessToken(e.target.value)}
           />
           <Input placeholder="App ID" value={appId} onChange={(e) => setAppId(e.target.value)} />
           <Input
@@ -304,6 +360,7 @@ export default function Settings() {
                 appId,
                 appSecret,
                 webhookVerifyToken: verifyToken,
+                instagramAccessToken: instagramAccessToken || undefined,
               })
             }
             disabled={saveFacebook.isPending}
