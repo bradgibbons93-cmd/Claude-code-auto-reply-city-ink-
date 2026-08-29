@@ -145,6 +145,9 @@ export async function sendTypingIndicator(
  * ID and a stack of permissions language.
  */
 export function explainProfileFailure(detail: string): string {
+  if (/does not have the capability|\(#3\)/i.test(detail)) {
+    return "Facebook won't give this app people's names one at a time — it never has. Names come from the Page inbox instead, which is why almost everyone is named. The few that aren't are people Facebook won't name to a Page at all.";
+  }
   if (/does not exist|cannot be loaded|missing permissions|Unsupported get request/i.test(detail)) {
     return "Facebook won't release these customers' names. That happens with restricted or deactivated accounts, and it isn't something the app can fix — everyone else is named from the Page inbox as normal.";
   }
@@ -795,21 +798,24 @@ export async function backfillCustomerNames(limit = 50): Promise<{
   if (named === missing.length) {
     return { checked: missing.length, named, detail: `Named all ${named}.` };
   }
+  const why = explainProfileFailure(
+    inboxError ?? lastProfileError?.message ?? "no name available"
+  );
+
   if (named > 0) {
     return {
       checked: missing.length,
       named,
-      detail: `Named ${named} of ${missing.length}. For the rest, Facebook said: ${
-        inboxError ?? lastProfileError?.message ?? "no name available"
-      }`,
+      detail: `Named ${named} of ${missing.length}. ${why}`,
     };
   }
+  // Not a failure worth alarm. A handful of unnamed threads out of hundreds
+  // is the normal resting state — some people simply can't be named to a
+  // Page — and the previous wording made that read as a broken app.
   return {
     checked: missing.length,
     named: 0,
-    detail: `No names came back for any of the ${missing.length}. Facebook said: ${
-      inboxError ?? lastProfileError?.message ?? "no name available"
-    }`,
+    detail: `${missing.length} thread${missing.length === 1 ? "" : "s"} still without a name. ${why}`,
   };
 }
 
