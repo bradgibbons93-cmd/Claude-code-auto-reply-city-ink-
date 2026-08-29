@@ -93,10 +93,15 @@ export async function getOrCreateConversation(
     return existing[0];
   }
 
+  // Deliberately no lastMessageAt. The column defaults to now, and a thread
+  // being imported from three weeks ago would then be stamped "now" before
+  // its first message could say otherwise — which is precisely how a hundred
+  // old conversations all came to read the same age. Left null, the first
+  // recordMessage below sets it from the message itself.
   await db
     .insert(messengerConversations)
-    .values({ conversationId, senderName, platform })
-    .onDuplicateKeyUpdate({ set: { lastMessageAt: new Date() } });
+    .values({ conversationId, senderName, platform, lastMessageAt: null })
+    .onDuplicateKeyUpdate({ set: { conversationId } });
 
   const result = await db
     .select()
@@ -146,7 +151,12 @@ export async function setConversationName(conversationId: string, senderName: st
     .where(eq(messengerConversations.conversationId, conversationId));
 }
 
-export async function getRecentConversations(limit = 30) {
+/**
+ * The inbox. 30 was fine when there were a dozen threads; with a hundred it
+ * silently hid two thirds of the studio's customers, and someone looking for
+ * a name they could see in Meta's inbox concluded the app had lost them.
+ */
+export async function getRecentConversations(limit = 250) {
   const db = await getDb();
   return db
     .select()
@@ -215,11 +225,27 @@ export async function recordMessage(
     throw error;
   }
 
+  /**
+   * The clock only ever moves forward.
+   *
+   * This used to stamp "now" on every message it stored, including a
+   * three-week-old one being imported. So each press of Import rewrote every
+   * thread's time to the moment of the import, and an inbox of conversations
+   * from last month all read "4 minutes ago" — it looked as though the whole
+   * thing had been re-imported from scratch, when really only the clock had
+   * been overwritten. GREATEST keeps whichever is genuinely later, so old
+   * messages arriving late can't pretend to be new.
+   */
+  const when = createdAt ?? new Date();
   await db
     .update(messengerConversations)
     .set({
-      lastMessageAt: new Date(),
-      ...(senderType === "customer" ? { lastCustomerMessageAt: new Date() } : {}),
+      lastMessageAt: sql`GREATEST(COALESCE(${messengerConversations.lastMessageAt}, ${when}), ${when})`,
+      ...(senderType === "customer"
+        ? {
+            lastCustomerMessageAt: sql`GREATEST(COALESCE(${messengerConversations.lastCustomerMessageAt}, ${when}), ${when})`,
+          }
+        : {}),
     })
     .where(eq(messengerConversations.conversationId, conversationId));
 

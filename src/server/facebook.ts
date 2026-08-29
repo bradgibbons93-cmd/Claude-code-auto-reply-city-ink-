@@ -530,7 +530,7 @@ export interface ImportedThreads {
  * already answered by hand.
  */
 export async function importExistingConversations(
-  maxThreads = 100
+  maxThreads = 1000
 ): Promise<ImportedThreads> {
   const { getOrCreateConversation, recordMessage } = await import("./db.js");
   const identity = await getPageIdentity();
@@ -549,8 +549,8 @@ export async function importExistingConversations(
     let params: Record<string, string> | undefined = {
       ...(endpoint.base === IG_GRAPH ? {} : { platform: inboxParam(platform) }),
       fields:
-        "participants,messages.limit(25){id,message,created_time,from,attachments{image_data,file_url,mime_type}}",
-      limit: "25",
+        "participants,messages.limit(100){id,message,created_time,from,attachments{image_data,file_url,mime_type}}",
+      limit: "50",
       access_token: endpoint.token,
     };
 
@@ -633,7 +633,11 @@ export async function importExistingConversations(
     notes.push(
       failed
         ? `${platform}: ${explainImportFailure(failed, platform)}`
-        : `${platform}: ${seen} thread${seen === 1 ? "" : "s"}`
+        // Say so when the ceiling was actually reached, rather than stopping
+        // quietly at a round number and letting it look complete.
+        : `${platform}: ${seen} thread${seen === 1 ? "" : "s"}${
+            seen >= maxThreads ? " (stopped at the limit — press again for the rest)" : ""
+          }`
     );
   }
 

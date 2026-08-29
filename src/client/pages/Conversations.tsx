@@ -284,6 +284,7 @@ function PendingReplyCard({
 
 export default function Conversations() {
   const [selected, setSelected] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
   const inboxRef = useReveal<HTMLDivElement>();
 
   const { data: stats } = trpc.stats.useQuery({} as never, { refetchInterval: 30000 });
@@ -310,6 +311,11 @@ export default function Conversations() {
       refetch();
     },
   });
+
+  const needle = search.trim().toLowerCase();
+  const shownConversations = (conversations ?? []).filter(
+    (c) => !needle || (c.senderName || "").toLowerCase().includes(needle)
+  );
 
   const active = conversations?.find((c) => c.conversationId === selected);
   const senderNameFor = (conversationId: string) =>
@@ -362,10 +368,24 @@ export default function Conversations() {
       <div ref={inboxRef} className="grid gap-6 md:grid-cols-[290px_1fr]">
         <div className="space-y-2">
           <h2 className="px-1 font-display text-sm tracking-[0.14em] text-muted-foreground">
-            INBOX
+            INBOX{conversations?.length ? ` (${conversations.length})` : ""}
           </h2>
-          {conversations?.length ? (
-            conversations.map((c) => (
+
+          {/* A hundred threads is not a list you scroll on a phone. Without
+              this, a customer you can see in Meta's inbox looks lost. */}
+          {(conversations?.length ?? 0) > 8 && (
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name…"
+              aria-label="Search conversations by name"
+              className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-charcoal outline-none transition-colors focus:border-sepia"
+            />
+          )}
+
+          {shownConversations.length ? (
+            shownConversations.map((c) => (
               <button
                 key={c.conversationId}
                 onClick={() => setSelected(c.conversationId)}
@@ -406,6 +426,10 @@ export default function Conversations() {
                 </div>
               </button>
             ))
+          ) : search.trim() ? (
+            <p className="px-1 py-3 text-sm text-muted-foreground">
+              Nobody matching "{search.trim()}".
+            </p>
           ) : (
             <Card>
               <CardContent className="pt-6">
