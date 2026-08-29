@@ -22,6 +22,33 @@ interface RawBodyRequest extends Request {
   rawBody?: Buffer;
 }
 
+/**
+ * What a non-photo attachment was, in words the studio can read on a card.
+ *
+ * A shared link keeps its URL, because for a tattoo enquiry the link the
+ * customer sent IS the reference — dropping it loses the whole message.
+ */
+function describeAttachments(
+  attachments: { type?: string; payload?: { url?: string } }[]
+): string {
+  const noun: Record<string, string> = {
+    video: "a video",
+    audio: "a voice message",
+    file: "a file",
+    location: "their location",
+    fallback: "a link",
+    template: "a link",
+  };
+
+  return attachments
+    .map((a) => {
+      const what = noun[a.type ?? ""] ?? "an attachment";
+      const url = a.payload?.url;
+      return url ? `(sent ${what}: ${url})` : `(sent ${what})`;
+    })
+    .join(" ");
+}
+
 router.get("/facebook", async (req: Request, res: Response) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -96,17 +123,38 @@ router.post("/facebook", async (req: RawBodyRequest, res: Response) => {
             return;
           }
 
-          const photoUrls: string[] = (message.attachments ?? [])
-            .filter((a: { type?: string }) => a.type === "image")
-            .map((a: { payload?: { url?: string } }) => a.payload?.url)
+          const attachments: { type?: string; payload?: { url?: string } }[] =
+            message.attachments ?? [];
+
+          const photoUrls: string[] = attachments
+            .filter((a) => a.type === "image")
+            .map((a) => a.payload?.url)
             .filter((url: string | undefined): url is string => !!url);
 
-          if (!event.sender?.id || (!message.text && !photoUrls.length)) return;
+          /**
+           * Everything that isn't a photo.
+           *
+           * Only images were ever looked at, and a message with no text and
+           * no image was dropped here without a trace. Sharing an Instagram
+           * post of a tattoo you like arrives as "fallback" with no text at
+           * all — which is one of the commonest ways a customer says what
+           * they want, and it was vanishing before it reached the inbox.
+           * Nothing a customer sends should disappear silently; if we can't
+           * show it, we can at least say it arrived.
+           */
+          const others = attachments.filter((a) => a.type !== "image");
+
+          if (!event.sender?.id) return;
+          if (!message.text && !photoUrls.length && !others.length) return;
+
+          const describedOther = others.length ? describeAttachments(others) : "";
 
           await handleCustomerMessage(
             event.sender.id,
             message.mid ?? `msg_${Date.now()}`,
-            message.text ?? "",
+            // A shared link carries its URL in the payload — worth keeping,
+            // because for a tattoo enquiry that link IS the reference.
+            [message.text, describedOther].filter(Boolean).join(" ").trim(),
             photoUrls,
             platform
           );
