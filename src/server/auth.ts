@@ -62,6 +62,66 @@ function valid(token: string | undefined, secret: string): boolean {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+/**
+ * A link Facebook can fetch once, without a session.
+ *
+ * Publishing a post with a photo works by handing Facebook a URL and letting
+ * its servers come and get the picture. Facebook has no cookie, so the moment
+ * a password is set every scheduled post with an image would fail with a 401
+ * — silently, from Brad's point of view, because the failure happens on
+ * Facebook's side of the fetch.
+ *
+ * Opening the route isn't the answer: it serves customers' reference photos
+ * too. So the publisher signs the one path it's about to hand over, the
+ * signature expires, and nothing else is reachable with it.
+ */
+const ASSET_WINDOW_MS = 60 * 60 * 1000;
+
+function assetKey(): Buffer {
+  // Any stable secret will do. When no password is set the route is open
+  // anyway, so this only has to be strong once there is one.
+  const seed = password() || process.env.VERIFY_TOKEN || "city-ink-assets";
+  return crypto.createHash("sha256").update(`cityink-asset:${seed}`).digest();
+}
+
+export function signAssetPath(path: string): string {
+  const expiresAt = Date.now() + ASSET_WINDOW_MS;
+  const mac = crypto
+    .createHmac("sha256", assetKey())
+    .update(`${path}:${expiresAt}`)
+    .digest("hex")
+    .slice(0, 32);
+  return `${path}${path.includes("?") ? "&" : "?"}e=${expiresAt}&s=${mac}`;
+}
+
+function assetSignatureValid(req: Request): boolean {
+  const expiresAt = Number(req.query.e);
+  const given = String(req.query.s ?? "");
+  if (!Number.isFinite(expiresAt) || expiresAt < Date.now() || !given) return false;
+
+  const expected = crypto
+    .createHmac("sha256", assetKey())
+    .update(`${req.path}:${expiresAt}`)
+    .digest("hex")
+    .slice(0, 32);
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/**
+ * The studio's session, or a link the studio itself signed for one fetch.
+ * Used only where something outside has to come and collect a file.
+ */
+export function requireStudioOrSignedLink(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  if (signedIn(req) || assetSignatureValid(req)) return next();
+  res.status(401).json({ error: "Sign in first." });
+}
+
 /** Cookies without pulling in a parser for one header. */
 function readCookie(header: string | undefined, name: string): string | undefined {
   if (!header) return undefined;

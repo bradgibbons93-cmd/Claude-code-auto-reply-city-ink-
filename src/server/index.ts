@@ -14,7 +14,7 @@ import { saveArtistUpload, readArtistUpload, UploadRejected } from "./uploads.js
 import { syncFeed, countFeed } from "./feed.js";
 import QRCode from "qrcode";
 import { getLastLlmError, llmProvider, llmModel, llmBaseUrl } from "./llm.js";
-import { mountAuth, requireStudio } from "./auth.js";
+import { mountAuth, requireStudio, requireStudioOrSignedLink } from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -155,8 +155,10 @@ app.post("/api/post-image", requireStudio, express.json({ limit: "24mb" }), asyn
 // Reference photos, served from our own copy rather than Facebook's CDN —
 // their links expire, ours don't. Content-addressed, so it can be cached
 // hard: the same path always means the same image.
-// Customers' own reference photos. Studio-only.
-app.get<{ id: string }>("/api/attachments/:id", requireStudio, async (req, res) => {
+// Customers' own reference photos, and the pictures on scheduled posts.
+// Studio-only, except for a link the publisher signed so Facebook's servers
+// can come and collect the one image they're about to post.
+app.get<{ id: string }>("/api/attachments/:id", requireStudioOrSignedLink, async (req, res) => {
   try {
     const attachment = await readAttachment(req.params.id);
     if (!attachment) return res.sendStatus(404);
