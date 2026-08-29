@@ -43,6 +43,7 @@ import {
 import { getUpcomingBookings, findFreeSlots } from "./calendar.js";
 import {
   getLastProfileError,
+  explainProfileFailure,
   backfillCustomerNames,
   importExistingConversations,
   getMessengerSubscription,
@@ -309,8 +310,14 @@ export const appRouter = t.router({
         // will; names come from the Page inbox instead. Reporting that
         // failure while every name on screen is correct is crying wolf,
         // and it sent Brad chasing a problem that wasn't there.
-        lastProfileError:
-          (await getConversationsMissingNames(1)).length > 0 ? getLastProfileError() : null,
+        lastProfileError: await (async () => {
+          if ((await getConversationsMissingNames(1)).length === 0) return null;
+          const raw = getLastProfileError();
+          if (!raw) return null;
+          // A sentence, not a Graph dump. The raw text is kept alongside for
+          // the times it's genuinely something new.
+          return { ...raw, message: explainProfileFailure(raw.message), raw: raw.message };
+        })(),
         unnamedConversations: (await getConversationsMissingNames(200)).length,
       };
     }),
