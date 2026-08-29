@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import axios from "axios";
+import { signAssetPath } from "./auth.js";
 import {
   getFacebookConfig,
   getConversationsMissingNames,
@@ -721,7 +722,11 @@ export async function publishPagePost(
   // Facebook fetches the picture from the URL we hand it, so a path to a
   // photo stored here has to be made absolute first — Facebook's servers
   // have no idea what "/api/attachments/…" means.
-  const absoluteImage = imageUrl ? publicUrl(imageUrl) : undefined;
+  // Signed, because once a password is on the dashboard Facebook's fetch of
+  // this picture arrives with no session and would be turned away.
+  const absoluteImage = imageUrl
+    ? publicUrl(imageUrl.startsWith("/") ? signAssetPath(imageUrl) : imageUrl)
+    : undefined;
   if (imageUrl && !absoluteImage) {
     throw new Error(
       "This post has an uploaded photo, but the app doesn't know its own public address. " +
