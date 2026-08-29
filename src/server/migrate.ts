@@ -262,6 +262,37 @@ async function clearPlaceholderNames(): Promise<void> {
   if (cleared) console.log(`[DB] Cleared ${cleared} placeholder name(s) — they can be looked up now`);
 }
 
+/**
+ * Put the thread clocks back where they belong.
+ *
+ * Importing stamped every conversation with the time of the import, so a
+ * hundred threads spanning months all read the same age and the inbox order
+ * became meaningless — which is what made it look as though everything was
+ * being re-imported on every press. The real time is still there, in the
+ * messages themselves, so it can simply be recomputed.
+ */
+async function repairConversationClocks(): Promise<void> {
+  const db = await getDb();
+  const [result] = (await db.execute(
+    sql.raw(
+      `UPDATE messenger_conversations c
+          JOIN (
+            SELECT conversation_id,
+                   MAX(created_at) AS newest,
+                   MAX(CASE WHEN sender_type = 'customer' THEN created_at END) AS newest_customer
+              FROM messenger_messages
+             GROUP BY conversation_id
+          ) m ON m.conversation_id = c.conversation_id
+           SET c.last_message_at = m.newest,
+               c.last_customer_message_at = COALESCE(m.newest_customer, c.last_customer_message_at)
+         WHERE m.newest IS NOT NULL
+           AND (c.last_message_at IS NULL OR c.last_message_at <> m.newest)`
+    )
+  )) as unknown as [{ affectedRows?: number }];
+  const fixed = Number(result?.affectedRows ?? 0);
+  if (fixed) console.log(`[DB] Put ${fixed} thread clock(s) back to when the messages actually arrived`);
+}
+
 export async function ensureTables(): Promise<void> {
   const db = await getDb();
   for (const statement of STATEMENTS) {
@@ -270,5 +301,6 @@ export async function ensureTables(): Promise<void> {
   await ensureColumns();
   await repairFailedDrafts();
   await clearPlaceholderNames();
+  await repairConversationClocks();
   console.log(`[DB] Schema ready (${STATEMENTS.length} tables checked)`);
 }
