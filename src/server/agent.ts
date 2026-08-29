@@ -22,7 +22,12 @@ import {
 } from "./db.js";
 import { invokeLLMJson, getLastLlmError, type ChatMessage } from "./llm.js";
 import { availabilityForPrompt } from "./calendar.js";
-import { sendMessengerMessage, sendTypingIndicator, resolveCustomerName } from "./facebook.js";
+import {
+  sendMessengerMessage,
+  sendTypingIndicator,
+  resolveCustomerName,
+  publicUrl,
+} from "./facebook.js";
 import { cacheAttachments } from "./attachments.js";
 
 const HANDOFF_HOURS = Number(process.env.HANDOFF_PAUSE_HOURS || 12);
@@ -202,13 +207,19 @@ async function notifyOwner(details: {
     return;
   }
 
+  const photoLinks = details.photoUrls
+    .map((url) => publicUrl(url))
+    .filter((url): url is string => !!url);
+
   const lines = [
     "New booking — enter this into Timely:",
     details.customerName ? `Messenger: ${details.customerName}` : undefined,
     `Name: ${details.name}`,
     `Phone: ${details.phone}`,
     `Wants: ${details.dates}`,
-    details.photoUrls.length ? `Reference photo(s): ${details.photoUrls.join(" ")}` : undefined,
+    // Absolute, or they arrive as "/api/attachments/3f9c…" — a path that
+    // means nothing in a Messenger message and can't be tapped.
+    photoLinks.length ? `Reference photo(s): ${photoLinks.join(" ")}` : undefined,
   ].filter(Boolean);
 
   try {
@@ -222,14 +233,22 @@ async function notifyOwner(details: {
   }
 }
 
-/** Pings the owner that a draft is sitting in the dashboard waiting on them. */
-async function notifyOwnerOfDraft() {
+/**
+ * Pings the owner that a draft is sitting in the dashboard waiting on them.
+ *
+ * Says who it's from. The same anonymous line arriving twenty times in a day
+ * tells Brad nothing he can act on — a name lets him judge from the
+ * notification whether it can wait until he's finished the piece he's on.
+ */
+async function notifyOwnerOfDraft(customerName?: string) {
   const config = await getFacebookConfig();
   if (!config?.ownerPsid) return;
   try {
     await sendMessengerMessage(
       config.ownerPsid,
-      "A reply is waiting for your OK — open the dashboard's Conversations tab."
+      customerName
+        ? `A reply to ${customerName} is waiting for your OK — open the dashboard.`
+        : "A reply is waiting for your OK — open the dashboard's Conversations tab."
     );
   } catch (error) {
     console.error("[Agent] Failed to notify the owner of a pending draft:", (error as Error).message);
@@ -524,7 +543,7 @@ export async function handleCustomerMessage(
   );
   if (queued) {
     console.log(`[Agent] Draft queued for ${senderId} (message ${messageId})`);
-    await notifyOwnerOfDraft();
+    await notifyOwnerOfDraft(senderName);
   } else {
     console.warn(`[Agent] Draft already queued for message ${messageId} — skipped`);
   }
