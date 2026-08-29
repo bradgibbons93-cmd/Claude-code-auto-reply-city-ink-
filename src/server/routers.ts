@@ -37,6 +37,7 @@ import {
   approveDraft,
   rejectDraft,
   redraftPendingReply,
+  draftForUnanswered,
   practiceReply,
   suggestPosts,
 } from "./agent.js";
@@ -139,6 +140,12 @@ export const appRouter = t.router({
     redraft: publicProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => redraftPendingReply(input.id)),
+    // Imported threads get no draft — importing writes to nobody. This is
+    // the deliberate second step, for the people who asked something weeks
+    // ago and were missed.
+    draftUnanswered: publicProcedure
+      .input(z.object({ limit: z.number().min(1).max(50).default(20) }).default({ limit: 20 }))
+      .mutation(({ input }) => draftForUnanswered(input.limit)),
   }),
 
   autoReply: t.router({
