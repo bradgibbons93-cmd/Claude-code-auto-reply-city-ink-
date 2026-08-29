@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import axios from "axios";
 import { signAssetPath } from "./auth.js";
+import { cacheAttachments } from "./attachments.js";
 import {
   getFacebookConfig,
   getConversationsMissingNames,
@@ -131,6 +132,29 @@ export async function sendTypingIndicator(
   } catch {
     /* cosmetic only — never block a reply on this */
   }
+}
+
+/**
+ * Why the last name lookup failed, in a sentence someone can act on.
+ *
+ * A raw Graph dump on the settings page reads as a broken app. The common
+ * case here isn't a fault at all: Facebook simply won't release some
+ * people's names to a Page — a restricted or deactivated account, or one
+ * that has never interacted with the Page in a way that grants it. Nothing
+ * about that is fixable from here, and saying so is kinder than an object
+ * ID and a stack of permissions language.
+ */
+export function explainProfileFailure(detail: string): string {
+  if (/does not exist|cannot be loaded|missing permissions|Unsupported get request/i.test(detail)) {
+    return "Facebook won't release these customers' names. That happens with restricted or deactivated accounts, and it isn't something the app can fix — everyone else is named from the Page inbox as normal.";
+  }
+  if (/expired|session has been invalidated|OAuthException/i.test(detail)) {
+    return "The saved Page token has expired. Generate a new one in the Meta app dashboard and paste it in below.";
+  }
+  if (/rate limit|too many calls/i.test(detail)) {
+    return "Facebook is rate-limiting the lookups. Leave it a few minutes and press the button again.";
+  }
+  return detail;
 }
 
 /**
@@ -470,6 +494,14 @@ interface ThreadPage {
         message?: string;
         created_time?: string;
         from?: { id?: string; name?: string };
+        // A reference photo with no words is the commonest enquiry there is.
+        attachments?: {
+          data?: {
+            mime_type?: string;
+            file_url?: string;
+            image_data?: { url?: string; preview_url?: string };
+          }[];
+        };
       }[];
     };
   }[];
@@ -516,7 +548,8 @@ export async function importExistingConversations(
     let url: string | undefined = `${endpoint.base}/me/conversations`;
     let params: Record<string, string> | undefined = {
       ...(endpoint.base === IG_GRAPH ? {} : { platform: inboxParam(platform) }),
-      fields: "participants,messages.limit(25){id,message,created_time,from}",
+      fields:
+        "participants,messages.limit(25){id,message,created_time,from,attachments{image_data,file_url,mime_type}}",
       limit: "25",
       access_token: endpoint.token,
     };
@@ -547,19 +580,39 @@ export async function importExistingConversations(
           // Oldest first, so the stored thread reads in the order it happened.
           const turns = [...(thread.messages?.data ?? [])].reverse();
           for (const turn of turns) {
-            if (!turn.id || !turn.message?.trim()) continue;
+            if (!turn.id) continue;
+
+            // A message with no words is still a message. Half this studio's
+            // enquiries are a photo of what someone wants and nothing else —
+            // skipping them imported the thread as a name with no
+            // conversation in it, which is exactly how it looked.
+            const photos = (turn.attachments?.data ?? [])
+              .filter((a) => !a.mime_type || a.mime_type.startsWith("image/"))
+              .map((a) => a.image_data?.url || a.file_url)
+              .filter((u): u is string => !!u);
+
+            const text = turn.message?.trim();
+            if (!text && !photos.length) continue;
+
             const fromUs = turn.from?.id === identity?.id;
             // Keep when it was actually said. Stamping the whole thread
             // "now" leaves it with no real order, and these turns are what
             // the agent reads back as the conversation.
             const said = turn.created_time ? new Date(turn.created_time) : undefined;
+            // Keep the picture itself — Meta's links expire, and a blank
+            // box where the reference photo should be is no use when the
+            // whole point is pricing the tattoo in it.
+            const kept = photos.length
+              ? await cacheAttachments(photos, customer.id, turn.id)
+              : [];
+
             const stored = await recordMessage(
               customer.id,
               turn.id,
               fromUs ? "manual" : "customer",
-              turn.message.trim(),
+              text || "(sent a photo)",
               undefined,
-              undefined,
+              kept,
               said && !Number.isNaN(said.getTime()) ? said : undefined
             );
             // recordMessage returns false for a message already stored, which

@@ -287,9 +287,12 @@ export default function Settings() {
             {refreshNames.data && (
               <p className="mt-2 break-words text-xs text-charcoal">{refreshNames.data.detail}</p>
             )}
+            {/* Not red, and not a Graph dump. Facebook refusing to hand over
+                a few names is the normal state of affairs, not a fault —
+                painting it as an error sent Brad chasing it twice. */}
             {!refreshNames.data && fb?.lastProfileError && (
-              <p className="mt-2 break-words font-mono text-xs text-destructive">
-                Last failure — {fb.lastProfileError.message}
+              <p className="mt-2 break-words text-xs text-muted-foreground">
+                {fb.lastProfileError.message}
               </p>
             )}
           </div>
