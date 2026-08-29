@@ -293,6 +293,28 @@ async function repairConversationClocks(): Promise<void> {
   if (fixed) console.log(`[DB] Put ${fixed} thread clock(s) back to when the messages actually arrived`);
 }
 
+/**
+ * Drafts written against something the studio itself said.
+ *
+ * Threads imported before the sender attribution was fixed have the studio's
+ * own replies recorded as the customer's, and the agent duly drafted answers
+ * to them — Brad opened the board and found replies to his own sentences.
+ * Those are never worth approving, so they go on boot rather than waiting for
+ * anyone to notice and press something.
+ */
+async function dropDraftsAnsweringOurselves(): Promise<void> {
+  const db = await getDb();
+  const [result] = (await db.execute(
+    sql.raw(
+      `DELETE p FROM pending_replies p
+         JOIN messenger_messages m ON m.message_id = p.customer_message_id
+        WHERE p.status = 'pending' AND m.sender_type <> 'customer'`
+    )
+  )) as unknown as [{ affectedRows?: number }];
+  const dropped = Number(result?.affectedRows ?? 0);
+  if (dropped) console.log(`[DB] Removed ${dropped} draft(s) that were answering the studio's own words`);
+}
+
 export async function ensureTables(): Promise<void> {
   const db = await getDb();
   for (const statement of STATEMENTS) {
@@ -302,5 +324,6 @@ export async function ensureTables(): Promise<void> {
   await repairFailedDrafts();
   await clearPlaceholderNames();
   await repairConversationClocks();
+  await dropDraftsAnsweringOurselves();
   console.log(`[DB] Schema ready (${STATEMENTS.length} tables checked)`);
 }

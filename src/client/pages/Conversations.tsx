@@ -55,6 +55,7 @@ function StatTile({
 function PendingReplyCard({
   draft,
   senderName,
+  platform,
   onOpenThread,
 }: {
   draft: {
@@ -69,6 +70,7 @@ function PendingReplyCard({
     createdAt: string | Date | null;
   };
   senderName: string;
+  platform?: string | null;
   onOpenThread: (conversationId: string) => void;
 }) {
   const utils = trpc.useUtils();
@@ -176,6 +178,13 @@ function PendingReplyCard({
             className="flex min-w-0 items-center gap-2 text-left"
           >
             <Avatar name={senderName} className="h-7 w-7" />
+            {/* Which inbox this reply goes back to. Brad works both and needs
+                to know which conversation he's in without opening it. */}
+            {platform === "instagram" ? (
+              <Instagram className="h-3 w-3 shrink-0 text-sepia" aria-label="Instagram" />
+            ) : (
+              <Facebook className="h-3 w-3 shrink-0 text-sepia" aria-label="Messenger" />
+            )}
             <span className="truncate text-sm text-charcoal underline-offset-2 hover:underline">
               {senderName}
             </span>
@@ -285,6 +294,9 @@ function PendingReplyCard({
 export default function Conversations() {
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  // The split Brad works from: who is waiting on whom. Derived from who
+  // spoke last, so there's nothing to keep up to date by hand.
+  const [filter, setFilter] = useState<"all" | "needs" | "waiting" | "mine">("all");
   const inboxRef = useReveal<HTMLDivElement>();
   const utils = trpc.useUtils();
 
@@ -327,9 +339,26 @@ export default function Conversations() {
   });
 
   const needle = search.trim().toLowerCase();
+  const matchesFilter = (c: { lastSenderType?: string | null; botPausedUntil?: string | Date | null }) => {
+    if (filter === "mine") return isPaused(c.botPausedUntil);
+    if (isPaused(c.botPausedUntil)) return filter === "all";
+    if (filter === "needs") return c.lastSenderType === "customer";
+    if (filter === "waiting") return !!c.lastSenderType && c.lastSenderType !== "customer";
+    return true;
+  };
   const shownConversations = (conversations ?? []).filter(
-    (c) => !needle || (c.senderName || "").toLowerCase().includes(needle)
+    (c) => matchesFilter(c) && (!needle || (c.senderName || "").toLowerCase().includes(needle))
   );
+
+  const counts = {
+    needs: (conversations ?? []).filter(
+      (c) => !isPaused(c.botPausedUntil) && c.lastSenderType === "customer"
+    ).length,
+    waiting: (conversations ?? []).filter(
+      (c) => !isPaused(c.botPausedUntil) && !!c.lastSenderType && c.lastSenderType !== "customer"
+    ).length,
+    mine: (conversations ?? []).filter((c) => isPaused(c.botPausedUntil)).length,
+  };
 
   const active = conversations?.find((c) => c.conversationId === selected);
   const senderNameFor = (conversationId: string) =>
@@ -394,6 +423,9 @@ export default function Conversations() {
                 key={draft.id}
                 draft={draft}
                 senderName={senderNameFor(draft.conversationId)}
+                platform={
+                  conversations?.find((c) => c.conversationId === draft.conversationId)?.platform
+                }
                 onOpenThread={setSelected}
               />
             ))}
@@ -406,6 +438,33 @@ export default function Conversations() {
           <h2 className="px-1 font-display text-sm tracking-[0.14em] text-muted-foreground">
             INBOX{conversations?.length ? ` (${conversations.length})` : ""}
           </h2>
+
+          {/* Who's waiting on whom. The same split Messenger gives you, but
+              worked out from the thread rather than typed in by hand. */}
+          <div className="flex flex-wrap gap-1.5">
+            {(
+              [
+                ["all", `All${conversations?.length ? ` ${conversations.length}` : ""}`],
+                ["needs", `Needs a reply${counts.needs ? ` ${counts.needs}` : ""}`],
+                ["waiting", `Waiting on them${counts.waiting ? ` ${counts.waiting}` : ""}`],
+                ["mine", `You're on it${counts.mine ? ` ${counts.mine}` : ""}`],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setFilter(key)}
+                className={cn(
+                  "rounded-full border px-2.5 py-1 text-[0.68rem] transition-colors",
+                  filter === key
+                    ? "border-sepia bg-sepia/10 text-sepia"
+                    : "border-border text-muted-foreground hover:border-sepia/60 hover:text-charcoal"
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
 
           {/* A hundred threads is not a list you scroll on a phone. Without
               this, a customer you can see in Meta's inbox looks lost. */}
@@ -465,6 +524,14 @@ export default function Conversations() {
           ) : search.trim() ? (
             <p className="px-1 py-3 text-sm text-muted-foreground">
               Nobody matching "{search.trim()}".
+            </p>
+          ) : filter !== "all" && conversations?.length ? (
+            <p className="px-1 py-3 text-sm text-muted-foreground">
+              {filter === "needs"
+                ? "Everyone's been answered."
+                : filter === "waiting"
+                  ? "Nobody's waiting on a reply from you."
+                  : "You haven't taken over any threads."}
             </p>
           ) : (
             <Card>

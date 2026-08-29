@@ -194,11 +194,33 @@ export async function setConversationName(conversationId: string, senderName: st
  */
 export async function getRecentConversations(limit = 250) {
   const db = await getDb();
-  return db
+  const rows = await db
     .select()
     .from(messengerConversations)
     .orderBy(desc(messengerConversations.lastMessageAt))
     .limit(limit);
+  if (!rows.length) return rows.map((r) => ({ ...r, lastSenderType: null as string | null }));
+
+  // Who spoke last in each thread. That single fact is what separates "they
+  // asked something and nobody has answered" from "the ball is in their
+  // court", which is the split Brad actually works from.
+  const ids = rows.map((r) => r.conversationId);
+  const [lastRows] = (await db.execute(
+    sql`SELECT m.conversation_id AS conversationId, m.sender_type AS senderType
+          FROM messenger_messages m
+          JOIN (
+            SELECT conversation_id, MAX(id) AS last_id
+              FROM messenger_messages
+             WHERE conversation_id IN ${ids}
+             GROUP BY conversation_id
+          ) t ON t.last_id = m.id`
+  )) as unknown as [{ conversationId: string; senderType: string }[]];
+
+  const lastBy = new Map((lastRows ?? []).map((r) => [r.conversationId, r.senderType]));
+  return rows.map((r) => ({
+    ...r,
+    lastSenderType: lastBy.get(r.conversationId) ?? null,
+  }));
 }
 
 export async function getConversationMessages(conversationId: string, limit = 50) {
@@ -286,6 +308,52 @@ export async function recordMessage(
     .where(eq(messengerConversations.conversationId, conversationId));
 
   return true;
+}
+
+/**
+ * Correct who a stored message was from.
+ *
+ * recordMessage refuses a message it already has, which is right for
+ * Facebook's retries but wrong when a re-import is carrying a correction.
+ * The studio's own replies were stored as the customer's, so the agent read
+ * its own words back as a question and drafted an answer to them — which is
+ * exactly what "the drafts are replying to things they never asked" looks
+ * like from the dashboard.
+ */
+export async function correctMessageSender(
+  messageId: string,
+  senderType: "customer" | "bot" | "manual"
+): Promise<boolean> {
+  const db = await getDb();
+  const [row] = await db
+    .select({ id: messengerMessages.id, senderType: messengerMessages.senderType })
+    .from(messengerMessages)
+    .where(eq(messengerMessages.messageId, messageId))
+    .limit(1);
+  if (!row || row.senderType === senderType) return false;
+
+  await db
+    .update(messengerMessages)
+    .set({ senderType })
+    .where(eq(messengerMessages.messageId, messageId));
+  return true;
+}
+
+/**
+ * Drafts written against something the studio itself said.
+ *
+ * Once a message is correctly re-labelled as ours, any draft that was
+ * answering it is nonsense and needs to go — leaving them would have Brad
+ * approving replies to his own sentences.
+ */
+export async function dropDraftsAnsweringOurselves(): Promise<number> {
+  const db = await getDb();
+  const [result] = (await db.execute(
+    sql`DELETE p FROM pending_replies p
+          JOIN messenger_messages m ON m.message_id = p.customer_message_id
+         WHERE p.status = 'pending' AND m.sender_type <> 'customer'`
+  )) as unknown as [{ affectedRows?: number }];
+  return Number(result?.affectedRows ?? 0);
 }
 
 /** Human handoff: mute the agent on this thread for a while. */

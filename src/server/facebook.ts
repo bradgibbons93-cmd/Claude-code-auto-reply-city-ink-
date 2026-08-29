@@ -511,6 +511,8 @@ interface ThreadPage {
 export interface ImportedThreads {
   conversations: number;
   messages: number;
+  /** Messages whose sender was stored wrong and has now been put right. */
+  corrected: number;
   /** Per-platform notes, including why one came back empty. */
   detail: string;
 }
@@ -532,11 +534,13 @@ export interface ImportedThreads {
 export async function importExistingConversations(
   maxThreads = 1000
 ): Promise<ImportedThreads> {
-  const { getOrCreateConversation, recordMessage } = await import("./db.js");
+  const { getOrCreateConversation, recordMessage, correctMessageSender, dropDraftsAnsweringOurselves } =
+    await import("./db.js");
   const identity = await getPageIdentity();
   const notes: string[] = [];
   let conversations = 0;
   let messages = 0;
+  let corrected = 0;
 
   for (const platform of ["facebook", "instagram"] as const) {
     const endpoint = await endpointFor(platform);
@@ -638,9 +642,17 @@ export async function importExistingConversations(
               kept,
               said
             );
-            // recordMessage returns false for a message already stored, which
-            // is how running this twice stays harmless.
-            if (stored) messages += 1;
+            if (stored) {
+              messages += 1;
+            } else {
+              // Already stored — but possibly stored wrong. Threads imported
+              // before the sender attribution was fixed have the studio's own
+              // replies recorded as the customer's, which is what had the
+              // agent drafting answers to its own sentences. Pressing Import
+              // again is how that gets put right.
+              const wanted = fromUs ? "manual" : "customer";
+              if (await correctMessageSender(turn.id, wanted)) corrected += 1;
+            }
           }
         }
 
@@ -664,7 +676,20 @@ export async function importExistingConversations(
     );
   }
 
-  return { conversations, messages, detail: notes.join(" · ") };
+  // Any draft that was answering something we now know we said ourselves is
+  // nonsense, and approving one would send a customer a reply to the
+  // studio's own words.
+  const droppedDrafts = corrected ? await dropDraftsAnsweringOurselves() : 0;
+  if (corrected) {
+    notes.push(
+      `corrected who sent ${corrected} message${corrected === 1 ? "" : "s"}` +
+        (droppedDrafts
+          ? `, and removed ${droppedDrafts} draft${droppedDrafts === 1 ? "" : "s"} written against them`
+          : "")
+    );
+  }
+
+  return { conversations, messages, corrected, detail: notes.join(" · ") };
 }
 
 /** A Graph refusal turned into the sentence that says what to do about it. */
