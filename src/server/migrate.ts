@@ -240,6 +240,28 @@ async function repairFailedDrafts(): Promise<void> {
   if (moved) console.log(`[DB] Re-flagged ${moved} draft(s) the AI never wrote`);
 }
 
+/**
+ * Threads stored under Meta's placeholder name.
+ *
+ * "Facebook user" is what Meta returns when the app can't read someone's
+ * profile. It was being kept as a real name, which meant the thread looked
+ * named, the backfill skipped it, and the studio was stuck greeting several
+ * different people as "Facebook user" with no way to correct it. Clearing it
+ * puts them back in the queue the Fetch customer names button works from.
+ */
+async function clearPlaceholderNames(): Promise<void> {
+  const db = await getDb();
+  const [result] = (await db.execute(
+    sql.raw(
+      `UPDATE messenger_conversations
+          SET sender_name = NULL
+        WHERE sender_name REGEXP '^[[:space:]]*(Facebook|Instagram|Messenger)[[:space:]]+[Uu]ser[[:space:]]*$'`
+    )
+  )) as unknown as [{ affectedRows?: number }];
+  const cleared = Number(result?.affectedRows ?? 0);
+  if (cleared) console.log(`[DB] Cleared ${cleared} placeholder name(s) — they can be looked up now`);
+}
+
 export async function ensureTables(): Promise<void> {
   const db = await getDb();
   for (const statement of STATEMENTS) {
@@ -247,5 +269,6 @@ export async function ensureTables(): Promise<void> {
   }
   await ensureColumns();
   await repairFailedDrafts();
+  await clearPlaceholderNames();
   console.log(`[DB] Schema ready (${STATEMENTS.length} tables checked)`);
 }
