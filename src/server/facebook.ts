@@ -5,6 +5,7 @@ import {
   getConversationsMissingNames,
   setConversationName,
   updatePageIdentity,
+  realName,
 } from "./db.js";
 
 // Overridable so the whole thing can be run end to end against a stand-in
@@ -164,10 +165,11 @@ export async function getSenderProfile(
         params: { fields, access_token: endpoint.token },
         timeout: 8000,
       });
-      const name =
+      const name = realName(
         [data.first_name, data.last_name].filter(Boolean).join(" ") ||
-        data.name ||
-        (data.username ? `@${data.username}` : "");
+          data.name ||
+          (data.username ? `@${data.username}` : "")
+      );
       if (name) {
         lastProfileError = null;
         return { name };
@@ -375,7 +377,8 @@ export async function fetchInboxParticipants(
           for (const person of thread.participants?.data ?? []) {
             // The Page itself is a participant in every thread. Skip it.
             if (!person.id || person.id === identity?.id) continue;
-            if (person.name?.trim()) names.set(person.id, person.name.trim());
+            const named = realName(person.name);
+            if (named) names.set(person.id, named);
           }
         }
 
@@ -537,7 +540,7 @@ export async function importExistingConversations(
           if (!customer?.id) continue;
           seen += 1;
 
-          await getOrCreateConversation(customer.id, customer.name?.trim() || undefined, platform);
+          await getOrCreateConversation(customer.id, realName(customer.name), platform);
           conversations += 1;
 
           // Oldest first, so the stored thread reads in the order it happened.

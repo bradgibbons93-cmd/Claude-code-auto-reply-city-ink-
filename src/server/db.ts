@@ -17,6 +17,27 @@ import {
   type InsertUser,
 } from "../drizzle/schema.js";
 
+/**
+ * Meta hands back "Facebook user" — or "Instagram User" — as the participant's
+ * name when the app can't read that person's profile. It is a placeholder
+ * wearing a name's clothes, and storing it does more harm than storing
+ * nothing: the thread then looks named, so the backfill skips it and the
+ * studio is left greeting two different people as "Facebook user" forever.
+ *
+ * Lives here rather than in facebook.ts because that module already imports
+ * this one, and the reverse would close the loop.
+ */
+export function isPlaceholderName(name: string | undefined | null): boolean {
+  const trimmed = name?.trim();
+  if (!trimmed) return true;
+  return /^(facebook|instagram|messenger)\s+user$/i.test(trimmed);
+}
+
+/** A name we'd actually put on a card, or nothing. */
+export function realName(name: string | undefined | null): string | undefined {
+  return isPlaceholderName(name) ? undefined : name!.trim();
+}
+
 let _db: ReturnType<typeof drizzle> | null = null;
 
 export async function getDb() {
@@ -35,10 +56,14 @@ export async function getDb() {
 
 export async function getOrCreateConversation(
   conversationId: string,
-  senderName?: string,
+  rawName?: string,
   platform: "facebook" | "instagram" = "facebook"
 ) {
   const db = await getDb();
+  // Sanitised here rather than at each call site, so no caller can write
+  // "Facebook user" into a name column by accident — this is the one door
+  // every path goes through.
+  const senderName = realName(rawName);
 
   const existing = await db
     .select()
@@ -53,7 +78,8 @@ export async function getOrCreateConversation(
     // Backfill a name, and correct the platform on a thread stored before
     // Instagram was wired up — those were all recorded as "facebook".
     const patch: { senderName?: string; platform?: "facebook" | "instagram" } = {};
-    if (senderName && !existing[0].senderName) patch.senderName = senderName;
+    // A stored placeholder is worth overwriting — it isn't anyone's name.
+    if (senderName && isPlaceholderName(existing[0].senderName)) patch.senderName = senderName;
     if (platform === "instagram" && existing[0].platform !== "instagram") {
       patch.platform = "instagram";
     }
@@ -93,7 +119,12 @@ export async function getConversationsMissingNames(limit = 50) {
     .from(messengerConversations)
     .orderBy(desc(messengerConversations.lastMessageAt))
     .limit(limit);
-  return rows.filter((row) => !row.senderName?.trim()).map((row) => row.conversationId);
+  // "Facebook user" counts as missing. Meta returns it when the app can't
+  // read someone's profile, and treating it as a real name is what left two
+  // different people both greeted as "Facebook user" with no way to fix it.
+  return rows
+    .filter((row) => isPlaceholderName(row.senderName))
+    .map((row) => row.conversationId);
 }
 
 /** One thread as it stands, without creating it if it isn't there. */
