@@ -132,6 +132,42 @@ export async function getConversationsMissingNames(limit = 50) {
     .map((row) => row.conversationId);
 }
 
+/**
+ * Threads where the customer spoke last and nobody has answered.
+ *
+ * An imported conversation gets no draft — importing deliberately writes
+ * nothing to anyone. But some of those people asked a real question weeks
+ * ago and never got a reply, and they're the ones worth the agent's time.
+ * Excludes anything already waiting in the queue, and anything the studio
+ * has muted.
+ */
+export async function getUnansweredConversations(limit = 20) {
+  const db = await getDb();
+  const rows = await db.execute(
+    sql`SELECT c.conversation_id AS conversationId
+          FROM messenger_conversations c
+          JOIN (
+            SELECT m1.conversation_id, m1.sender_type
+              FROM messenger_messages m1
+              JOIN (
+                SELECT conversation_id, MAX(id) AS last_id
+                  FROM messenger_messages
+                 GROUP BY conversation_id
+              ) t ON t.last_id = m1.id
+          ) last ON last.conversation_id = c.conversation_id
+         WHERE last.sender_type = 'customer'
+           AND (c.bot_paused_until IS NULL OR c.bot_paused_until < NOW())
+           AND NOT EXISTS (
+             SELECT 1 FROM pending_replies p
+              WHERE p.conversation_id = c.conversation_id AND p.status = 'pending'
+           )
+         ORDER BY c.last_message_at DESC
+         LIMIT ${limit}`
+  );
+  const list = (rows as unknown as [{ conversationId: string }[]])[0] ?? [];
+  return list.map((r) => r.conversationId);
+}
+
 /** One thread as it stands, without creating it if it isn't there. */
 export async function getConversation(conversationId: string) {
   const db = await getDb();

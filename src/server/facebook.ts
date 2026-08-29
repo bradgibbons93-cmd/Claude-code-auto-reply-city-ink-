@@ -579,6 +579,9 @@ export async function importExistingConversations(
 
           // Oldest first, so the stored thread reads in the order it happened.
           const turns = [...(thread.messages?.data ?? [])].reverse();
+          // The newest timestamp seen so far in this thread, for the rare
+          // message Graph hands over without one.
+          let lastKnownTime: Date | undefined;
           for (const turn of turns) {
             if (!turn.id) continue;
 
@@ -594,11 +597,31 @@ export async function importExistingConversations(
             const text = turn.message?.trim();
             if (!text && !photos.length) continue;
 
-            const fromUs = turn.from?.id === identity?.id;
+            // Anyone who isn't the customer is us — the Page, an admin
+            // replying by hand, or Meta's own instant reply. Comparing
+            // against the Page identity instead meant a greeting the studio
+            // sent came back labelled as the customer's own words, which is
+            // worse than useless: it's what the agent reads as history.
+            // Anything not positively from the customer is treated as ours.
+            // Graph attaches a sender to every real message; the ones without
+            // are system lines like "Brad Potter replied to an ad." Putting
+            // those in the customer's mouth is the worse mistake — the agent
+            // reads this back as the conversation and would sit there trying
+            // to answer a status line.
+            const fromId = turn.from?.id;
+            const fromUs = fromId !== customer.id;
             // Keep when it was actually said. Stamping the whole thread
             // "now" leaves it with no real order, and these turns are what
             // the agent reads back as the conversation.
-            const said = turn.created_time ? new Date(turn.created_time) : undefined;
+            // Graph occasionally omits created_time. Letting that fall
+            // through to "now" stamps a months-old message with today, and
+            // the thread leaps to the top of the inbox past conversations
+            // that really are more recent. Carry the last known time
+            // forward instead — these arrive in order.
+            const parsed = turn.created_time ? new Date(turn.created_time) : undefined;
+            const said =
+              parsed && !Number.isNaN(parsed.getTime()) ? parsed : lastKnownTime;
+            if (said) lastKnownTime = said;
             // Keep the picture itself — Meta's links expire, and a blank
             // box where the reference photo should be is no use when the
             // whole point is pricing the tattoo in it.
@@ -613,7 +636,7 @@ export async function importExistingConversations(
               text || "(sent a photo)",
               undefined,
               kept,
-              said && !Number.isNaN(said.getTime()) ? said : undefined
+              said
             );
             // recordMessage returns false for a message already stored, which
             // is how running this twice stays harmless.

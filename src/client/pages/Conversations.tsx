@@ -286,6 +286,7 @@ export default function Conversations() {
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const inboxRef = useReveal<HTMLDivElement>();
+  const utils = trpc.useUtils();
 
   const { data: stats } = trpc.stats.useQuery({} as never, { refetchInterval: 30000 });
   const { data: conversations, refetch } = trpc.conversations.list.useQuery(undefined, {
@@ -297,6 +298,19 @@ export default function Conversations() {
   );
   const { data: pendingReplies } = trpc.pendingReplies.list.useQuery(undefined, {
     refetchInterval: 10000,
+  });
+
+  // The people who asked something and never got an answer. Importing
+  // brought their threads in but deliberately wrote nothing — this is the
+  // second, separate press that says "now go and draft for them".
+  const draftUnanswered = trpc.pendingReplies.draftUnanswered.useMutation({
+    onSuccess: (result) => {
+      if (result.drafted) toast.success(result.detail);
+      else toast(result.detail);
+      utils.pendingReplies.list.invalidate();
+      utils.stats.invalidate();
+    },
+    onError: (error) => toast.error(error.message || "Couldn't reach the AI."),
   });
 
   const pause = trpc.conversations.pause.useMutation({
@@ -344,6 +358,28 @@ export default function Conversations() {
           emphasise
         />
         <StatTile label="Posts queued" value={stats?.pendingPosts} />
+      </div>
+
+      {/* Imported threads arrive with no draft, on purpose — importing writes
+          to nobody. But some of those people asked something weeks ago and
+          were missed, and they're the ones worth answering. Separate press,
+          so it can never happen by accident. */}
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-beige/20 px-4 py-3">
+        <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+          Someone asked a question and never got an answer? This writes a draft for each of
+          them — nothing sends, they all wait for your OK like any other.
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => draftUnanswered.mutate({ limit: 20 })}
+          disabled={draftUnanswered.isPending}
+        >
+          <Sparkles
+            className={cn("mr-2 h-3.5 w-3.5", draftUnanswered.isPending && "animate-pulse")}
+          />
+          {draftUnanswered.isPending ? "Drafting…" : "Draft the unanswered"}
+        </Button>
       </div>
 
       {waiting > 0 && (

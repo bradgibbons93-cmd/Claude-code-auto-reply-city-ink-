@@ -19,6 +19,7 @@ import {
   getConversation,
   getPendingReply,
   replacePendingReplyDraft,
+  getUnansweredConversations,
 } from "./db.js";
 import { invokeLLMJson, getLastLlmError, type ChatMessage } from "./llm.js";
 import { availabilityForPrompt } from "./calendar.js";
@@ -399,6 +400,92 @@ export async function redraftPendingReply(id: number): Promise<{ ok: boolean; re
   });
   console.log(`[Agent] Redrafted pending reply ${id}`);
   return { ok: true };
+}
+
+/**
+ * Writes drafts for people who asked something and never got an answer.
+ *
+ * Importing deliberately sends nothing and drafts nothing — nobody wants a
+ * button that writes to fifty customers at once. But among those imported
+ * threads are people who asked a real question weeks ago and were missed,
+ * and those are exactly the ones worth answering. This drafts for them, in
+ * small batches, and still sends nothing: every one waits for approval like
+ * any other.
+ *
+ * Quiet on purpose — no owner ping per draft. Twenty notifications arriving
+ * at once because someone pressed a button is not news, it's an alarm.
+ */
+export async function draftForUnanswered(
+  limit = 20
+): Promise<{ drafted: number; failed: number; detail: string }> {
+  const ids = await getUnansweredConversations(limit);
+  if (!ids.length) {
+    return { drafted: 0, failed: 0, detail: "Everyone who's written in has a reply waiting or has had one." };
+  }
+
+  let drafted = 0;
+  let failed = 0;
+  // Threads the loop passed over — a draft for that exact message already
+  // exists, or there was nothing of the customer's to answer. Counting these
+  // as failures told Brad the AI was broken when it had simply run out of
+  // work, which is the opposite of reassuring.
+  let skipped = 0;
+
+  for (const conversationId of ids) {
+    try {
+      const turns = await getRecentTurns(conversationId, 20);
+      const answering = [...turns].reverse().find((t) => t.senderType === "customer");
+      if (!answering) {
+        skipped += 1;
+        continue;
+      }
+
+      const conversation = await getConversation(conversationId);
+      const known: BookingState = {
+        name: conversation?.bookingName ?? null,
+        phone: conversation?.bookingPhone ?? null,
+        dates: conversation?.bookingDates ?? null,
+      };
+
+      const composed = await composeDraft(
+        conversationId,
+        answering.content,
+        !!answering.attachmentUrls?.length,
+        known
+      );
+      if (composed.llmFailed) {
+        failed += 1;
+        continue;
+      }
+
+      const queued = await createPendingReply(
+        conversationId,
+        answering.messageId,
+        composed.reply,
+        composed.sensitive,
+        composed.alternatives,
+        false
+      );
+      if (queued) drafted += 1;
+      else skipped += 1;
+    } catch (error) {
+      failed += 1;
+      console.error(`[Agent] Couldn't draft for ${conversationId}:`, (error as Error).message);
+    }
+  }
+
+  const detail =
+    drafted && failed
+      ? `Drafted ${drafted}. ${failed} the AI couldn't write — try those again in a moment.`
+      : drafted
+        ? `Drafted ${drafted} repl${drafted === 1 ? "y" : "ies"} — none sent, they're all waiting for your OK.`
+        : failed
+          ? `The AI couldn't write any of them. Settings → AI has a Test button that says why.`
+          : `Nothing new to draft — everyone who's written in already has a reply waiting, or has had one.`;
+  void skipped;
+
+  console.log(`[Agent] Bulk draft: ${drafted} written, ${failed} failed`);
+  return { drafted, failed, detail };
 }
 
 /**
