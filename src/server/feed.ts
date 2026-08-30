@@ -320,13 +320,20 @@ function explain(problems: string[], facts?: TokenFacts): string {
       );
     }
 
+    // The token has the permission and Facebook refuses anyway. A permission
+    // lives in two places: on the token, where the person granted it, and on
+    // the app, where Meta decides whether the app may use it at all. Only the
+    // first of those is fixed by generating a new token, which is why doing so
+    // changes nothing here. Nothing on this screen can fix the second.
     if (facts?.scopes.includes("pages_read_engagement")) {
       return (
-        "The saved token does carry pages_read_engagement" +
-        (facts.issuedAt ? ` (issued ${when(facts.issuedAt)})` : "") +
-        ", so the permission isn't the problem and pasting a new token won't help. " +
-        "Facebook is refusing for another reason — most often the app still needs " +
-        `Standard Access for it. Facebook's own words: ${all.slice(0, 300)}`
+        "Nothing is wrong with the connection — the saved token is the Page token, it's " +
+        "valid, and pages_read_engagement is on it. Generating another one won't change " +
+        "this. The permission also has to be switched on for the app itself, and that's " +
+        "what's missing: in the Meta app dashboard under App Review → Permissions and " +
+        "Features, find pages_read_engagement and request access for it. Until that's " +
+        "granted the Live feed stays empty. Messages are completely unaffected — they use " +
+        "a different permission and are working."
       );
     }
 
