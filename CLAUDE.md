@@ -83,8 +83,23 @@ is not sold to other businesses — **that must stay true**, or the approval is
 at risk. Selling it to other studios needs multi-tenant work and the Instagram
 Business Login OAuth flow first.
 
-`pages_read_engagement` (for the Live feed) only needs Standard Access on a
-Page Brad administers — no review required.
+**`pages_read_engagement` was not in the submission, and the Live feed cannot
+work until it is granted.** This was got wrong once, at length: Brad was told
+three times to regenerate his Page token with the permission ticked. He did,
+correctly, and the feed still returned `(#10) requires 'pages_read_engagement'
+or the 'Page Public Content Access' feature` — with `debug_token` confirming a
+valid Page token carrying the permission.
+
+A permission lives in **two** places. On the token, where the person grants it
+in the login dialog. And on the app, where Meta decides whether the app may use
+it at all (App Review → Permissions and Features). Only the first is visible in
+the Access Token Debugger, and only the first is changed by pasting a new token.
+When a scope is present on a valid token and Graph refuses anyway, it is always
+the second — don't send anyone back to the Graph API Explorer.
+
+`/me/posts` is also the wrong edge for a Page's own posts; `published_posts` is
+the documented one, with `feed` as the older equivalent. `syncFeed` tries all
+three. That wasn't the cause here, but it would have been on some Pages.
 
 ## Testing
 
