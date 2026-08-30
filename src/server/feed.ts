@@ -180,26 +180,42 @@ export async function syncFeed(days = BACKFILL_DAYS): Promise<FeedSyncResult> {
   let facebook = 0;
   let instagram = 0;
 
-  try {
-    const posts = await pagedGet(
-      `${GRAPH}/me/posts`,
-      {
-        fields:
-          "id,message,created_time,permalink_url,full_picture,likes.summary(true),comments.summary(true)",
-        limit: "50",
-        access_token: token,
-      },
-      6,
-      since
-    );
-    facebook = await store(posts, "facebook", since);
-  } catch (error) {
-    const err = error as { response?: { status?: number; data?: unknown } };
-    problems.push(
-      err.response
-        ? `Facebook posts → HTTP ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 200)}`
-        : `Facebook posts → ${(error as Error).message}`
-    );
+  // /me/posts is the obvious edge and the wrong one. With a valid Page token
+  // carrying pages_read_engagement it still answers "(#10) requires
+  // pages_read_engagement or Page Public Content Access" — the error for
+  // reading a Page you don't manage, which is not what's happening. The
+  // documented edge for a Page's own posts is published_posts; feed is the
+  // older equivalent and includes other people's posts to the Page. Try them
+  // in that order rather than sending anyone back to the app dashboard for a
+  // permission they already granted.
+  const POST_EDGES = ["me/published_posts", "me/feed", "me/posts"];
+  for (const edge of POST_EDGES) {
+    try {
+      const posts = await pagedGet(
+        `${GRAPH}/${edge}`,
+        {
+          fields:
+            "id,message,created_time,permalink_url,full_picture,likes.summary(true),comments.summary(true)",
+          limit: "50",
+          access_token: token,
+        },
+        6,
+        since
+      );
+      facebook = await store(posts, "facebook", since);
+      // An edge that worked settles it — the ones tried before it were
+      // attempts, not faults, and must not be reported as though they were.
+      problems.length = 0;
+      if (edge !== POST_EDGES[0]) console.log(`[Feed] Read the Page's posts from /${edge}`);
+      break;
+    } catch (error) {
+      const err = error as { response?: { status?: number; data?: unknown } };
+      problems.push(
+        err.response
+          ? `/${edge} → HTTP ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 400)}`
+          : `/${edge} → ${(error as Error).message}`
+      );
+    }
   }
 
   // Instagram only exists here if a business account is linked to the Page.
