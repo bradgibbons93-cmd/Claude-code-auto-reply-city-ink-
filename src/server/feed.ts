@@ -27,6 +27,47 @@ export interface FeedSyncResult {
   detail: string;
 }
 
+/** What Facebook says about the token we actually have saved. */
+interface TokenFacts {
+  /** "PAGE" or "USER" — reading Page posts needs a Page one. */
+  type?: string;
+  scopes: string[];
+  issuedAt?: Date;
+  valid: boolean;
+}
+
+/**
+ * Ask Facebook what the saved token really is.
+ *
+ * Guessing at this has already cost an evening. The settings box only ever
+ * says a token is saved, never which one, so a paste that silently didn't
+ * take looks identical to a permission Facebook refused to grant. debug_token
+ * distinguishes the two, and it's the app's own credentials doing the asking,
+ * so it works even when the token itself can't read anything.
+ */
+async function inspectToken(
+  token: string,
+  appId?: string | null,
+  appSecret?: string | null
+): Promise<TokenFacts | undefined> {
+  if (!appId || !appSecret) return undefined;
+  try {
+    const { data } = await axios.get(`${GRAPH}/debug_token`, {
+      params: { input_token: token, access_token: `${appId}|${appSecret}` },
+      timeout: 10000,
+    });
+    const info = data?.data ?? {};
+    return {
+      type: typeof info.type === "string" ? info.type : undefined,
+      scopes: Array.isArray(info.scopes) ? (info.scopes as string[]) : [],
+      issuedAt: info.issued_at ? new Date(info.issued_at * 1000) : undefined,
+      valid: info.is_valid !== false,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 interface GraphPost {
   id: string;
   message?: string;
@@ -191,12 +232,38 @@ export async function syncFeed(days = BACKFILL_DAYS): Promise<FeedSyncResult> {
   }
 
   const total = facebook + instagram;
-  const detail = problems.length
-    ? `${total} post${total === 1 ? "" : "s"} in. ${explain(problems)}`
-    : `${facebook} from Facebook, ${instagram} from Instagram.`;
+  if (!problems.length) {
+    const detail = `${facebook} from Facebook, ${instagram} from Instagram.`;
+    console.log(`[Feed] Sync: ${detail}`);
+    return { facebook, instagram, detail };
+  }
 
-  console.log(`[Feed] Sync: ${detail}`);
+  // Log what Facebook actually said before turning it into advice. An earlier
+  // version kept only the advice, so a wrong guess was indistinguishable from
+  // a right one and the logs couldn't settle it.
+  console.warn(`[Feed] Sync failed. Graph said: ${problems.join(" · ")}`);
+
+  const facts = await inspectToken(token, config.appId, config.appSecret);
+  if (facts) {
+    console.warn(
+      `[Feed] Saved token: type=${facts.type ?? "unknown"} valid=${facts.valid} ` +
+        `issued=${facts.issuedAt?.toISOString() ?? "unknown"} scopes=${facts.scopes.join(",") || "none"}`
+    );
+  }
+
+  const detail = `${total} post${total === 1 ? "" : "s"} in. ${explain(problems, facts)}`;
   return { facebook, instagram, detail };
+}
+
+/** "on 30 Aug at 2:14 pm" — a token's age is how you spot the wrong one. */
+function when(at: Date): string {
+  return at.toLocaleString("en-AU", {
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "Australia/Melbourne",
+  });
 }
 
 /**
@@ -205,17 +272,54 @@ export async function syncFeed(days = BACKFILL_DAYS): Promise<FeedSyncResult> {
  * A raw Graph error dumped on screen reads as a broken app. Nearly every
  * failure here is one of a handful of known causes with a known fix, so name
  * the fix. The raw text is still logged for anything genuinely unexpected.
+ *
+ * Where the fix depends on what the saved token is, check it rather than
+ * assume: telling someone to add a permission their token already carries
+ * sends them round the same loop a second time.
  */
-function explain(problems: string[]): string {
+function explain(problems: string[], facts?: TokenFacts): string {
   const all = problems.join(" ");
 
   if (/pages_read_engagement|Page Public Content Access/i.test(all)) {
+    // A User token reads the person's own posts, not the Page's, and no
+    // permission will change that. It's the easiest wrong token to paste,
+    // because it's the one the Graph Explorer shows you first.
+    if (facts?.type && facts.type.toUpperCase() !== "PAGE") {
+      return (
+        `The saved token is a ${facts.type.toLowerCase()} token, not the Page token, so ` +
+        "Facebook is looking for your own posts rather than the studio's. In the Graph API " +
+        "Explorer, switch the \"User or Page\" dropdown to City Ink Tattoo Geelong, copy the " +
+        "token that appears, and paste that into the Facebook Page box above."
+      );
+    }
+
+    if (facts && !facts.scopes.includes("pages_read_engagement")) {
+      const age = facts.issuedAt ? ` The one saved was issued ${when(facts.issuedAt)}.` : "";
+      return (
+        "Facebook won't hand over the Page's posts until the connection includes the " +
+        `pages_read_engagement permission, and the saved token doesn't carry it.${age} ` +
+        "Regenerate the Page access token in the Meta app dashboard with pages_read_engagement " +
+        "ticked, paste it into the Facebook Page box above, and refresh. Messages are " +
+        "unaffected — they use a different permission and keep working either way."
+      );
+    }
+
+    if (facts?.scopes.includes("pages_read_engagement")) {
+      return (
+        "The saved token does carry pages_read_engagement" +
+        (facts.issuedAt ? ` (issued ${when(facts.issuedAt)})` : "") +
+        ", so the permission isn't the problem and pasting a new token won't help. " +
+        "Facebook is refusing for another reason — most often the app still needs " +
+        `Standard Access for it. Facebook's own words: ${all.slice(0, 300)}`
+      );
+    }
+
     return (
       "Facebook won't hand over the Page's posts until the connection includes the " +
-      "pages_read_engagement permission. It isn't on the saved token. Regenerate the " +
-      "Page access token in the Meta app dashboard with pages_read_engagement ticked, " +
-      "paste it into the Facebook Page box above, and refresh. Messages are unaffected — " +
-      "they use a different permission and keep working either way."
+      "pages_read_engagement permission. Regenerate the Page access token in the Meta app " +
+      "dashboard with pages_read_engagement ticked, paste it into the Facebook Page box " +
+      "above, and refresh. Messages are unaffected — they use a different permission and " +
+      "keep working either way."
     );
   }
 
