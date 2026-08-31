@@ -1056,6 +1056,55 @@ function fingerprint(customerMessage: string, studioReply: string): string {
     .slice(0, 64);
 }
 
+/**
+ * Mine the studio's own inbox for examples, instead of only learning from
+ * files someone thought to upload.
+ *
+ * The app is already holding thousands of real messages — every thread it has
+ * imported — and each customer question followed by the studio's own answer is
+ * exactly the example the drafter wants. Uploading Facebook's JSON export was
+ * the only way in, which meant the app knew far less about how the studio
+ * talks than it was sitting on.
+ *
+ * Only replies the studio actually typed count. Messages sent by the agent are
+ * marked "bot", and feeding those back in would teach it from its own drafts —
+ * its habits would harden instead of matching Brad's. Only the immediately
+ * following message is taken, so a reply is never paired with a question it
+ * wasn't answering. Duplicates are dropped on the fingerprint, so this is safe
+ * to run as often as you like and safe to mix with uploaded files.
+ */
+export async function learnFromStoredChats(): Promise<{
+  imported: number;
+  skipped: number;
+  found: number;
+}> {
+  const db = await getDb();
+  const rows = await db.execute(
+    sql`SELECT c.content AS customerMessage, r.content AS studioReply
+          FROM messenger_messages c
+          JOIN messenger_messages r
+            ON r.conversation_id = c.conversation_id
+           AND r.id = (
+             SELECT MIN(m.id) FROM messenger_messages m
+              WHERE m.conversation_id = c.conversation_id AND m.id > c.id
+           )
+         WHERE c.sender_type = 'customer'
+           AND r.sender_type = 'manual'
+           AND CHAR_LENGTH(TRIM(c.content)) > 3
+           AND CHAR_LENGTH(TRIM(r.content)) > 9`
+  );
+  const pairs = (rows as unknown as [Array<{ customerMessage: string; studioReply: string }>])[0] ?? [];
+
+  // "(sent a photo)" and friends are what the app writes when a message had
+  // no words. They're real messages but they teach nothing.
+  const usable = pairs.filter(
+    (p) => !/^\(/.test(p.customerMessage.trim()) && !/^\(/.test(p.studioReply.trim())
+  );
+
+  const { imported, skipped } = await importExampleExchanges(usable, "the studio's own inbox");
+  return { imported, skipped, found: usable.length };
+}
+
 export async function importExampleExchanges(
   pairs: Array<{ customerMessage: string; studioReply: string }>,
   source?: string

@@ -20,6 +20,7 @@ import {
   deleteKnowledge,
   getPendingReplies,
   importExampleExchanges,
+  learnFromStoredChats,
   countExampleExchanges,
   clearExampleExchanges,
   getRecentDraftEdits,
@@ -317,6 +318,10 @@ export const appRouter = t.router({
       )
       .mutation(({ input }) => importExampleExchanges(input.pairs, input.source)),
     clear: publicProcedure.mutation(() => clearExampleExchanges()),
+    // Everything the app already holds. Uploading Facebook's export was the
+    // only way to teach it, while thousands of real exchanges sat unused in
+    // its own database.
+    learnFromInbox: publicProcedure.mutation(() => learnFromStoredChats()),
   }),
 
   config: t.router({
