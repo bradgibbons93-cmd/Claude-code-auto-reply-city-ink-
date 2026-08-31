@@ -74,8 +74,14 @@ export default function Settings() {
 
   const refreshNames = trpc.config.refreshNames.useMutation({
     onSuccess: (result) => {
-      if (result.named > 0) toast.success(`Named ${result.named} customer${result.named === 1 ? "" : "s"}`);
-      else toast.error("No names came back");
+      // A handful with no name is the resting state, not a failure: Facebook
+      // will not name those people to a Page at all. Shouting "No names came
+      // back" in red made a healthy inbox look broken.
+      if (result.named > 0) {
+        toast.success(`Named ${result.named} customer${result.named === 1 ? "" : "s"}`);
+      } else {
+        toast("Everyone Facebook will name is already named", { duration: 6000 });
+      }
       utils.conversations.list.invalidate();
       utils.pendingReplies.list.invalidate();
       utils.dashboard.invalidate();

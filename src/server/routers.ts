@@ -49,6 +49,7 @@ import {
   importExistingConversations,
   getMessengerSubscription,
   subscribePageToApp,
+  ensureMessengerSubscription,
 } from "./facebook.js";
 import { getLastWebhookDelivery } from "./routes/webhook.js";
 import { getStoredWebhookDelivery } from "./db.js";
@@ -386,7 +387,31 @@ export const appRouter = t.router({
           pageId: report.pageId ?? input.pageId,
           pageName: report.pageName ?? input.pageName,
         });
-        return { detail: report.detail };
+
+        /**
+         * Put the subscription back now, not in six hours.
+         *
+         * Facebook drops a Page's subscription after sustained delivery
+         * failures, and an expired token causes exactly that. So the moment a
+         * token stops working is the moment the subscription starts dying —
+         * and pasting a new one is the moment it can be repaired. Leaving that
+         * to the boot check or the six-hourly cron meant a token could be
+         * fixed and the inbox still receive nothing, with the screen showing a
+         * green token and no messages, which is the most confusing state of
+         * all. Idempotent: when the subscription is fine this is one read.
+         */
+        const sub = await ensureMessengerSubscription().catch((error: Error) => ({
+          action: "failed" as const,
+          detail: error.message,
+        }));
+        const subDetail =
+          sub.action === "resubscribed"
+            ? " Facebook had stopped sending messages to the app, so I've turned that back on — new messages will arrive from now."
+            : sub.action === "failed"
+              ? ` One thing left: Facebook isn't delivering messages to the app yet — ${sub.detail}`
+              : "";
+
+        return { detail: `${report.detail}${subDetail}`, subscription: sub.action };
       }),
     // Go and fetch names for the threads already sitting there as
     // "a customer" — a webhook is never coming to fix those on its own.
