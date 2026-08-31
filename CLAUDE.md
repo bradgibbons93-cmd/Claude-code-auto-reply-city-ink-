@@ -25,6 +25,11 @@ don't add an auto-send path without asking him directly.
 Railway auto-deploys that branch on push. Merging to `main` does not deploy —
 pushing the branch does.
 
+**Send Brad the dashboard link every time something ships.** He asked for it
+directly. He is on a phone, the link is not memorised, and a fix he cannot
+reach is a fix that did not happen. Confirm the Railway deploy succeeded
+first — a link to a broken build is worse than no link.
+
 ## Things that will waste your time if you don't know them
 
 **Address Facebook as `/me`, never the saved Page ID.** A hand-typed Page ID
