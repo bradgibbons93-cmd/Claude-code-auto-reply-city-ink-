@@ -86,19 +86,36 @@ router.post("/facebook", async (req: RawBodyRequest, res: Response) => {
   const config = await getFacebookConfig().catch(() => undefined);
 
   if (config?.appSecret) {
-    const ok = verifyWebhookSignature(
-      req.rawBody ?? Buffer.alloc(0),
-      req.headers["x-hub-signature-256"] as string | undefined,
-      config.appSecret
-    );
+    const raw = req.rawBody ?? Buffer.alloc(0);
+    const signature = req.headers["x-hub-signature-256"] as string | undefined;
+    // Trimmed here as well as on save, so a secret already stored with a
+    // stray newline starts working on deploy rather than needing a re-paste.
+    const ok = verifyWebhookSignature(raw, signature, config.appSecret.trim());
     if (!ok) {
       // Never accept it — the signature is what proves this came from Meta.
       // But record it, loudly. Silently 403-ing real customer messages while
       // the dashboard reported zero and every other panel looked healthy is
       // how a whole day's enquiries went missing without anyone knowing.
+      /**
+       * Say enough to tell the two causes apart next time.
+       *
+       * A wrong secret and a right secret with a stray character look
+       * identical from here, and guessing between them cost a day. So report
+       * whether the untrimmed form would have matched, and what kind of
+       * delivery this was — dozens of rejections an hour is alarming if they
+       * are customer messages and merely noisy if they are read receipts.
+       *
+       * The body is unverified, so it is described, never acted on.
+       */
+      const untrimmedWouldMatch =
+        config.appSecret !== config.appSecret.trim() &&
+        verifyWebhookSignature(raw, signature, config.appSecret);
+      const kind = typeof req.body?.object === "string" ? req.body.object : "unknown";
+      const carriesMessage = JSON.stringify(req.body ?? {}).includes('"message"');
       console.warn(
-        "[Webhook] Rejected: bad signature — the saved App secret doesn't match the one " +
-          "Facebook is signing with. Real messages are being turned away."
+        `[Webhook] Rejected: bad signature — object=${kind} ` +
+          `carriesMessage=${carriesMessage} untrimmedWouldMatch=${untrimmedWouldMatch}. ` +
+          "The saved App secret doesn't match the one Facebook is signing with."
       );
       void recordWebhookRejection();
       return res.sendStatus(403);

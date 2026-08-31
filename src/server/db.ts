@@ -889,12 +889,21 @@ export async function setFacebookConfig(input: {
         instagramTokenHost: input.instagramAccessToken
           ? (input.instagramTokenHost ?? null)
           : existing.instagramTokenHost,
-        appSecret: input.appSecret || existing.appSecret,
+        // Trimmed, always. Copying the App secret out of Meta's dashboard
+        // picks up a trailing space or newline easily, and every other use of
+        // it tolerates that — debug_token is a URL parameter and Meta strips
+        // it. The webhook HMAC does not: one invisible character and every
+        // real customer message is refused, with nothing to see anywhere.
+        appSecret: input.appSecret.trim() || existing.appSecret,
         isConfigured: true,
       })
       .where(eq(facebookConfig.id, existing.id));
   } else {
-    await db.insert(facebookConfig).values({ ...input, isConfigured: true });
+    await db.insert(facebookConfig).values({
+      ...input,
+      appSecret: input.appSecret.trim(),
+      isConfigured: true,
+    });
   }
 }
 
