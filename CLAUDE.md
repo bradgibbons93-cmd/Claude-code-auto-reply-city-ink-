@@ -74,6 +74,15 @@ exactly the image being published.
 messages are the commonest tattoo enquiries there are. Both were being dropped
 at different points; don't reintroduce a `!text` guard.
 
+**"Rejected: bad signature" means messages are arriving and being binned.**
+Not that Facebook is quiet — the opposite. It means the saved `app_secret`
+doesn't match the one Meta signs with, and every real enquiry is being 403'd
+while the dashboard shows zero messages and every other panel reads green.
+Facebook retries, so the log fills up. Never weaken the check; the fix is to
+re-paste the App secret. The count is stored on `facebook_config` and shown at
+the top of the delivery panel, because forty rejections an hour is a diagnosis
+and a silent 403 is not.
+
 **Thread clocks only move forward**, to when the message was actually sent.
 Stamping `now()` on import made a hundred threads all read the same age and
 destroyed the inbox order.

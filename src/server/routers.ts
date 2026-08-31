@@ -52,7 +52,7 @@ import {
   ensureMessengerSubscription,
 } from "./facebook.js";
 import { getLastWebhookDelivery } from "./routes/webhook.js";
-import { getStoredWebhookDelivery } from "./db.js";
+import { getStoredWebhookDelivery, getWebhookRejections } from "./db.js";
 import { syncFeed, listFeed, countFeed } from "./feed.js";
 import { makeTokenLast, describeToken, instagramTokenHost } from "./token.js";
 import {
@@ -468,6 +468,9 @@ export const appRouter = t.router({
       // remembers from before the last deploy. Held only in memory, this read
       // "nothing has ever arrived" after every push.
       lastDelivery: getLastWebhookDelivery() ?? (await getStoredWebhookDelivery()),
+      // Facebook delivering and us refusing is a different failure from
+      // Facebook not delivering, and the opposite of "nothing is arriving".
+      rejected: await getWebhookRejections(),
     })),
     subscribeMessenger: publicProcedure.mutation(() => subscribePageToApp()),
     timely: publicProcedure.query(() => getTimelyConfig().catch(() => null)),

@@ -233,6 +233,23 @@ export default function Settings() {
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
+          {/* Facebook delivering and the app refusing is the worst of the
+              failures and the least visible: every other panel reads healthy
+              while real enquiries are turned away. It goes above everything. */}
+          {delivery?.rejected && (
+            <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+              <strong>
+                Facebook is sending {delivery.rejected.count} message
+                {delivery.rejected.count === 1 ? "" : "s"} that this app is turning away.
+              </strong>{" "}
+              They're being rejected because the saved <strong>App secret</strong> doesn't match
+              the one Facebook signs with — so the messages are real, and they aren't getting in.
+              Copy the App secret from the Meta app dashboard (Settings → Basic → App secret →
+              Show) into the box below and save. Facebook retries, so recent ones should land
+              once it matches.
+            </div>
+          )}
+
           <div
             className={`rounded-lg border p-3 text-sm ${
               delivery?.subscribed && !delivery?.missing?.length

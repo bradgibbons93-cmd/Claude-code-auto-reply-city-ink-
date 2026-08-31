@@ -1,7 +1,12 @@
 import { Router, type Request, type Response } from "express";
 import { verifyWebhookSignature } from "../facebook.js";
 import { handleCustomerMessage, handleEcho } from "../agent.js";
-import { getFacebookConfig, recordWebhookDelivery } from "../db.js";
+import {
+  getFacebookConfig,
+  recordWebhookDelivery,
+  recordWebhookRejection,
+  clearWebhookRejections,
+} from "../db.js";
 
 const router = Router();
 
@@ -83,9 +88,19 @@ router.post("/facebook", async (req: RawBodyRequest, res: Response) => {
       config.appSecret
     );
     if (!ok) {
-      console.warn("[Webhook] Rejected: bad signature");
+      // Never accept it — the signature is what proves this came from Meta.
+      // But record it, loudly. Silently 403-ing real customer messages while
+      // the dashboard reported zero and every other panel looked healthy is
+      // how a whole day's enquiries went missing without anyone knowing.
+      console.warn(
+        "[Webhook] Rejected: bad signature — the saved App secret doesn't match the one " +
+          "Facebook is signing with. Real messages are being turned away."
+      );
+      void recordWebhookRejection();
       return res.sendStatus(403);
     }
+    // Accepted. Whatever was wrong before is over.
+    void clearWebhookRejections();
   }
 
   /**

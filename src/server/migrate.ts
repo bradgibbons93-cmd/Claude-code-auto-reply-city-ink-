@@ -201,6 +201,8 @@ const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   // after a push — which reads as a dead webhook when nothing is wrong at all.
   { table: "facebook_config", column: "instagram_token_host", ddl: "VARCHAR(16)" },
   { table: "facebook_config", column: "last_delivery_at", ddl: "TIMESTAMP NULL" },
+  { table: "facebook_config", column: "last_rejected_at", ddl: "TIMESTAMP NULL" },
+  { table: "facebook_config", column: "rejected_count", ddl: "INT DEFAULT 0" },
   { table: "facebook_config", column: "last_delivery_kind", ddl: "VARCHAR(64)" },
   {
     table: "messenger_conversations",

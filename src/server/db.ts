@@ -810,6 +810,38 @@ export async function recordWebhookDelivery(kind: string): Promise<void> {
   }
 }
 
+/**
+ * Facebook delivered something and we refused it. Counted, because one
+ * rejection is a curiosity and forty in an afternoon is the whole problem.
+ */
+export async function recordWebhookRejection(): Promise<void> {
+  try {
+    const db = await getDb();
+    await db.update(facebookConfig).set({
+      lastRejectedAt: new Date(),
+      rejectedCount: sql`COALESCE(${facebookConfig.rejectedCount}, 0) + 1`,
+    });
+  } catch (error) {
+    console.warn(`[DB] Couldn't record the rejection: ${(error as Error).message}`);
+  }
+}
+
+/** Clear the tally once deliveries are being accepted again. */
+export async function clearWebhookRejections(): Promise<void> {
+  try {
+    const db = await getDb();
+    await db.update(facebookConfig).set({ rejectedCount: 0, lastRejectedAt: null });
+  } catch {
+    /* never worth failing a webhook over */
+  }
+}
+
+export async function getWebhookRejections(): Promise<{ at: string; count: number } | null> {
+  const config = await getFacebookConfig().catch(() => undefined);
+  if (!config?.lastRejectedAt || !config.rejectedCount) return null;
+  return { at: new Date(config.lastRejectedAt).toISOString(), count: config.rejectedCount };
+}
+
 export async function getStoredWebhookDelivery(): Promise<{ at: string; kind: string } | null> {
   const config = await getFacebookConfig().catch(() => undefined);
   if (!config?.lastDeliveryAt) return null;

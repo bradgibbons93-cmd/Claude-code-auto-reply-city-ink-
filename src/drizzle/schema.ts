@@ -224,6 +224,13 @@ export const facebookConfig = mysqlTable("facebook_config", {
   // healthy webhook look dead.
   lastDeliveryAt: timestamp("last_delivery_at"),
   lastDeliveryKind: varchar("last_delivery_kind", { length: 64 }),
+  // Deliveries Facebook made that we threw away because the signature didn't
+  // match. This is the worst possible failure — real customer messages
+  // arriving and being binned — and it was completely silent: a 403 back to
+  // Facebook, one line in a log nobody reads, and a dashboard showing zero
+  // messages with every other panel green.
+  lastRejectedAt: timestamp("last_rejected_at"),
+  rejectedCount: int("rejected_count").default(0),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
 
