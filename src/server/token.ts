@@ -209,3 +209,28 @@ export async function makeTokenLast(
       : "Saved.",
   };
 }
+
+/**
+ * Which of Meta's two Instagram flows a pasted token belongs to.
+ *
+ * Meta's own "Instagram settings" page, inside the Messenger product, offers a
+ * "Generate token" button per Page — and what it hands back is a PAGE token.
+ * Pasting that into a box labelled "Instagram access token" is the obvious
+ * thing to do, and it used to route every Instagram call to
+ * graph.instagram.com, which refuses Page tokens outright. Instagram would
+ * simply go quiet, with the settings screen showing a token saved.
+ *
+ * debug_token answers this definitively: it only recognises tokens issued for
+ * this app on the Facebook side, so a token it can vouch for as a PAGE token
+ * belongs on graph.facebook.com. Anything it won't vouch for is treated as an
+ * Instagram-login token, which is the safe default and what was assumed before.
+ */
+export async function instagramTokenHost(
+  token: string,
+  appId: string | null | undefined,
+  appSecret: string | null | undefined
+): Promise<"facebook" | "instagram"> {
+  if (!token || !appId || !appSecret) return "instagram";
+  const facts = await describeToken(token, appId, appSecret);
+  return facts?.valid && facts.type?.toUpperCase() === "PAGE" ? "facebook" : "instagram";
+}

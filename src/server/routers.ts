@@ -54,7 +54,7 @@ import {
 import { getLastWebhookDelivery } from "./routes/webhook.js";
 import { getStoredWebhookDelivery } from "./db.js";
 import { syncFeed, listFeed, countFeed } from "./feed.js";
-import { makeTokenLast, describeToken } from "./token.js";
+import { makeTokenLast, describeToken, instagramTokenHost } from "./token.js";
 import {
   listArtistUploads,
   markUploadUsed,
@@ -62,6 +62,26 @@ import {
   countUploadsToday,
 } from "./uploads.js";
 import { testLlm, llmProvider, llmModel, llmBaseUrl, getLastLlmError } from "./llm.js";
+
+/**
+ * Work out which Meta host a pasted Instagram token belongs to, so it gets
+ * sent somewhere that will accept it. Only when one was actually typed —
+ * blank means keep what's saved, host included.
+ */
+async function withInstagramHost<T extends { instagramAccessToken?: string; appId: string; appSecret: string }>(
+  input: T
+): Promise<T & { instagramTokenHost?: "facebook" | "instagram" }> {
+  if (!input.instagramAccessToken) return input;
+  const existing = await getFacebookConfig().catch(() => undefined);
+  return {
+    ...input,
+    instagramTokenHost: await instagramTokenHost(
+      input.instagramAccessToken,
+      input.appId || existing?.appId,
+      input.appSecret || existing?.appSecret
+    ),
+  };
+}
 
 const t = initTRPC.create();
 const publicProcedure = t.procedure;
@@ -374,7 +394,7 @@ export const appRouter = t.router({
         // either way. Skipping it here would have made the most natural thing
         // to try next, saving again, do nothing at all.
         if (!input.pageAccessToken) {
-          await setFacebookConfig(input);
+          await setFacebookConfig(await withInstagramHost(input));
           const only = await ensureMessengerSubscription().catch((error: Error) => ({
             action: "failed" as const,
             detail: error.message,
@@ -397,7 +417,7 @@ export const appRouter = t.router({
           input.pageId || existing?.pageId
         );
         await setFacebookConfig({
-          ...input,
+          ...(await withInstagramHost(input)),
           pageAccessToken: report.token,
           // Facebook just told us which Page this is. Believe it over the box.
           pageId: report.pageId ?? input.pageId,

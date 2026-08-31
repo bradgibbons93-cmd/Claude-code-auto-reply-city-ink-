@@ -823,6 +823,8 @@ export async function setFacebookConfig(input: {
   pageId: string;
   pageAccessToken: string;
   instagramAccessToken?: string;
+  /** Which Meta host that token belongs to — see the schema comment. */
+  instagramTokenHost?: "facebook" | "instagram";
   appId: string;
   appSecret: string;
   webhookVerifyToken: string;
@@ -839,6 +841,12 @@ export async function setFacebookConfig(input: {
         ...input,
         pageAccessToken: input.pageAccessToken || existing.pageAccessToken,
         instagramAccessToken: input.instagramAccessToken || existing.instagramAccessToken,
+        // A blank Instagram box keeps the saved token, so it must keep the
+        // saved host too — otherwise saving anything else would quietly
+        // re-route Instagram to the wrong Meta server.
+        instagramTokenHost: input.instagramAccessToken
+          ? (input.instagramTokenHost ?? null)
+          : existing.instagramTokenHost,
         appSecret: input.appSecret || existing.appSecret,
         isConfigured: true,
       })

@@ -205,6 +205,12 @@ export const facebookConfig = mysqlTable("facebook_config", {
   // Messenger down with it. Optional: a Page token carrying the Instagram
   // permissions does the job on its own, and then this stays empty.
   instagramAccessToken: text("instagram_access_token"),
+  // Which of Meta's two Instagram flows this token came from, so it gets sent
+  // to the host that will accept it. "facebook" = a Page token carrying the
+  // Instagram permissions (graph.facebook.com); "instagram" = a token from the
+  // Instagram-login flow (graph.instagram.com). Guessing wrong is silent: the
+  // wrong host simply refuses every call.
+  instagramTokenHost: varchar("instagram_token_host", { length: 16 }),
   appId: varchar("app_id", { length: 191 }).notNull(),
   appSecret: varchar("app_secret", { length: 255 }).notNull(),
   webhookVerifyToken: varchar("webhook_verify_token", { length: 255 }).notNull(),

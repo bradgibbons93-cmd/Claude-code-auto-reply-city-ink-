@@ -47,7 +47,14 @@ async function endpointFor(
   if (!config) return null;
 
   if (platform === "instagram" && config.instagramAccessToken) {
-    return { base: IG_GRAPH, token: config.instagramAccessToken };
+    // Which host depends on where the token came from, not on which box it
+    // was typed into. Meta's own Instagram-settings page hands out a PAGE
+    // token, and pasting that here used to send every Instagram call to
+    // graph.instagram.com, which refuses Page tokens outright — Instagram
+    // would go quiet with nothing to show for it. Worked out at save time and
+    // stored; the old default stands for tokens saved before that existed.
+    const base = config.instagramTokenHost === "facebook" ? GRAPH : IG_GRAPH;
+    return { base, token: config.instagramAccessToken };
   }
   if (!config.pageAccessToken) return null;
   return { base: GRAPH, token: config.pageAccessToken };

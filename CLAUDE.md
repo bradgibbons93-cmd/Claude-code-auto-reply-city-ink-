@@ -56,6 +56,15 @@ Instagram-login token talks to `graph.instagram.com` and Page endpoints refuse
 it. `endpointFor(platform)` handles both. Instagram has its own token column
 so it can't clobber Messenger's.
 
+The trap: Meta's **Instagram settings** page, inside the *Messenger* product,
+has a "Generate token" button per Page — and it hands back a **Page** token.
+Pasting that into the box marked "Instagram access token" is the obvious move
+and used to route every Instagram call to `graph.instagram.com`, which refuses
+Page tokens outright; Instagram would go silent with a token saved on screen.
+`instagramTokenHost()` asks `debug_token` at save time and stores which host
+the token belongs to, so the routing follows what it *is*, not which box it
+went in.
+
 **Facebook fetches post images from this app's own URL, with no cookie.** With
 `DASHBOARD_PASSWORD` set, `/api/attachments/:id` would 401 and every photo
 post would fail silently. `signAssetPath()` issues a one-hour signed link for

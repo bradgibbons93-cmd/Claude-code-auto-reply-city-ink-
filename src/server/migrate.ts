@@ -199,6 +199,7 @@ const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   // Kept in the database, not in memory. Held in a module variable it reset on
   // every deploy, so the delivery panel said "nothing has ever arrived" minutes
   // after a push — which reads as a dead webhook when nothing is wrong at all.
+  { table: "facebook_config", column: "instagram_token_host", ddl: "VARCHAR(16)" },
   { table: "facebook_config", column: "last_delivery_at", ddl: "TIMESTAMP NULL" },
   { table: "facebook_config", column: "last_delivery_kind", ddl: "VARCHAR(64)" },
   {
