@@ -51,6 +51,7 @@ import {
   subscribePageToApp,
 } from "./facebook.js";
 import { getLastWebhookDelivery } from "./routes/webhook.js";
+import { getStoredWebhookDelivery } from "./db.js";
 import { syncFeed, listFeed, countFeed } from "./feed.js";
 import { makeTokenLast, describeToken } from "./token.js";
 import {
@@ -402,7 +403,10 @@ export const appRouter = t.router({
      */
     messengerDelivery: publicProcedure.query(async () => ({
       ...(await getMessengerSubscription()),
-      lastDelivery: getLastWebhookDelivery(),
+      // Whatever this process has seen, or failing that what the database
+      // remembers from before the last deploy. Held only in memory, this read
+      // "nothing has ever arrived" after every push.
+      lastDelivery: getLastWebhookDelivery() ?? (await getStoredWebhookDelivery()),
     })),
     subscribeMessenger: publicProcedure.mutation(() => subscribePageToApp()),
     timely: publicProcedure.query(() => getTimelyConfig().catch(() => null)),

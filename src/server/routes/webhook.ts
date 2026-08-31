@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { verifyWebhookSignature } from "../facebook.js";
 import { handleCustomerMessage, handleEcho } from "../agent.js";
-import { getFacebookConfig } from "../db.js";
+import { getFacebookConfig, recordWebhookDelivery } from "../db.js";
 
 const router = Router();
 
@@ -16,6 +16,12 @@ const router = Router();
 let lastDelivery: { at: string; kind: string } | null = null;
 export function getLastWebhookDelivery() {
   return lastDelivery;
+}
+
+/** In memory for this process, and in the database so a deploy can't forget. */
+function noteDelivery(kind: string): void {
+  lastDelivery = { at: new Date().toISOString(), kind };
+  void recordWebhookDelivery(kind);
 }
 
 interface RawBodyRequest extends Request {
@@ -58,7 +64,7 @@ router.get("/facebook", async (req: Request, res: Response) => {
   const expected = config?.webhookVerifyToken || process.env.VERIFY_TOKEN;
 
   if (mode === "subscribe" && token && token === expected && challenge) {
-    lastDelivery = { at: new Date().toISOString(), kind: "verification" };
+    noteDelivery("verification");
     console.log("[Webhook] Verified by Facebook");
     return res.status(200).send(challenge);
   }
@@ -90,7 +96,7 @@ router.post("/facebook", async (req: RawBodyRequest, res: Response) => {
    */
   res.sendStatus(200);
 
-  lastDelivery = { at: new Date().toISOString(), kind: req.body?.object ?? "unknown" };
+  noteDelivery(req.body?.object ?? "unknown");
 
   /**
    * "page" is Messenger. "instagram" is Instagram DMs — a separate webhook

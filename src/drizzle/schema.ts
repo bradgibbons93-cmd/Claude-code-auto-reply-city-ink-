@@ -212,6 +212,12 @@ export const facebookConfig = mysqlTable("facebook_config", {
   // Messenger PSID of the studio owner's own account. Set by sending
   // "set owner <verify token>" from that account — see agent.ts.
   ownerPsid: varchar("owner_psid", { length: 191 }),
+  // When Facebook last delivered anything, and what. Stored rather than held
+  // in memory: a module variable resets on every deploy, so the delivery panel
+  // reported "nothing has ever arrived" minutes after a push and made a
+  // healthy webhook look dead.
+  lastDeliveryAt: timestamp("last_delivery_at"),
+  lastDeliveryKind: varchar("last_delivery_kind", { length: 64 }),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
 

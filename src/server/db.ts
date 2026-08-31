@@ -793,6 +793,32 @@ export async function getFacebookConfig() {
   return result[0];
 }
 
+/**
+ * Remember that Facebook delivered something.
+ *
+ * Never throws: a webhook has already been acknowledged by the time this runs,
+ * and losing the record of a delivery is not a reason to lose the delivery.
+ */
+export async function recordWebhookDelivery(kind: string): Promise<void> {
+  try {
+    const db = await getDb();
+    await db
+      .update(facebookConfig)
+      .set({ lastDeliveryAt: new Date(), lastDeliveryKind: kind.slice(0, 64) });
+  } catch (error) {
+    console.warn(`[DB] Couldn't record the webhook delivery: ${(error as Error).message}`);
+  }
+}
+
+export async function getStoredWebhookDelivery(): Promise<{ at: string; kind: string } | null> {
+  const config = await getFacebookConfig().catch(() => undefined);
+  if (!config?.lastDeliveryAt) return null;
+  return {
+    at: new Date(config.lastDeliveryAt).toISOString(),
+    kind: config.lastDeliveryKind ?? "unknown",
+  };
+}
+
 export async function setFacebookConfig(input: {
   pageId: string;
   pageAccessToken: string;
