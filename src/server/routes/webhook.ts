@@ -26,6 +26,10 @@ export function getLastWebhookDelivery() {
 /** In memory for this process, and in the database so a deploy can't forget. */
 function noteDelivery(kind: string): void {
   lastDelivery = { at: new Date().toISOString(), kind };
+  // Say so. Only failures were ever logged, so a webhook that worked and one
+  // that was being silently refused produced the same empty log — which is
+  // most of why a day went into finding out which was happening.
+  console.log(`[Webhook] Accepted a ${kind} delivery from Facebook`);
   void recordWebhookDelivery(kind);
 }
 

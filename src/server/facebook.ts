@@ -420,13 +420,19 @@ export async function fetchInboxParticipants(
       // own host the conversations edge is already Instagram's.
       ...(endpoint.base === IG_GRAPH ? {} : { platform: inboxParam(platform) }),
       fields: "participants",
-      limit: "100",
+      // Instagram's conversations edge is slower than Messenger's and answers
+      // big pages with "Please reduce the amount of data you're asking for",
+      // or simply doesn't answer inside the timeout. Ask it for less.
+      limit: platform === "instagram" ? "25" : "100",
       access_token: endpoint.token,
     };
 
     for (let page = 0; page < maxPages && url; page += 1) {
       try {
-        const { data }: { data: InboxPage } = await axios.get(url, { params, timeout: 12000 });
+        const { data }: { data: InboxPage } = await axios.get(url, {
+          params,
+          timeout: platform === "instagram" ? 30000 : 12000,
+        });
 
         for (const thread of data.data ?? []) {
           for (const person of thread.participants?.data ?? []) {
@@ -582,9 +588,15 @@ export async function importExistingConversations(
     let url: string | undefined = `${endpoint.base}/me/conversations`;
     let params: Record<string, string> | undefined = {
       ...(endpoint.base === IG_GRAPH ? {} : { platform: inboxParam(platform) }),
+      // Instagram answered this with HTTP 500 "Please reduce the amount of
+      // data you're asking for" — fifty threads of a hundred messages each,
+      // with attachments, is more than that edge will assemble. Messenger
+      // handles it fine, so only Instagram pays for it.
       fields:
-        "participants,messages.limit(100){id,message,created_time,from,attachments{image_data,file_url,mime_type}}",
-      limit: "50",
+        platform === "instagram"
+          ? "participants,messages.limit(25){id,message,created_time,from,attachments{image_data,file_url,mime_type}}"
+          : "participants,messages.limit(100){id,message,created_time,from,attachments{image_data,file_url,mime_type}}",
+      limit: platform === "instagram" ? "15" : "50",
       access_token: endpoint.token,
     };
 
@@ -595,7 +607,8 @@ export async function importExistingConversations(
       try {
         const { data }: { data: ThreadPage } = await axios.get(url, {
           params,
-          timeout: 20000,
+          // Instagram's edge is consistently slower than Messenger's.
+          timeout: platform === "instagram" ? 40000 : 20000,
         });
 
         for (const thread of data.data ?? []) {
