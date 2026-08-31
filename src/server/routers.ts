@@ -369,9 +369,25 @@ export const appRouter = t.router({
         // hour, silently, and takes the whole inbox with it when it does. So
         // upgrade it here rather than asking anyone to know the difference.
         // Blank means "keep the saved one", which is not a paste at all.
+        // Blank token box means "keep the saved one" — but pressing Save is
+        // still someone asking for this to work, so the delivery check runs
+        // either way. Skipping it here would have made the most natural thing
+        // to try next, saving again, do nothing at all.
         if (!input.pageAccessToken) {
           await setFacebookConfig(input);
-          return { detail: "Saved." };
+          const only = await ensureMessengerSubscription().catch((error: Error) => ({
+            action: "failed" as const,
+            detail: error.message,
+          }));
+          return {
+            detail:
+              only.action === "resubscribed"
+                ? "Saved. Facebook had stopped sending messages to the app, so I've turned that back on — new messages will arrive from now."
+                : only.action === "failed"
+                  ? `Saved. One thing left: Facebook isn't delivering messages to the app yet — ${only.detail}`
+                  : "Saved. Facebook is delivering messages to the app.",
+            subscription: only.action,
+          };
         }
         const existing = await getFacebookConfig();
         const report = await makeTokenLast(
