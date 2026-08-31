@@ -52,6 +52,7 @@ import {
 } from "./facebook.js";
 import { getLastWebhookDelivery } from "./routes/webhook.js";
 import { syncFeed, listFeed, countFeed } from "./feed.js";
+import { makeTokenLast, describeToken } from "./token.js";
 import {
   listArtistUploads,
   markUploadUsed,
@@ -326,6 +327,24 @@ export const appRouter = t.router({
           return { ...raw, message: explainProfileFailure(raw.message), raw: raw.message };
         })(),
         unnamedConversations: (await getConversationsMissingNames(200)).length,
+        // When the saved token dies, and whether it already has. Everything
+        // in this app goes quiet at once when it expires — no messages, no
+        // names, no import — and until now nothing said so until the morning
+        // after. Asked of Facebook directly, so it can't drift.
+        token: await (async () => {
+          if (!config.pageAccessToken || !config.appId || !config.appSecret) return null;
+          const facts = await describeToken(
+            config.pageAccessToken,
+            config.appId,
+            config.appSecret
+          );
+          if (!facts) return null;
+          return {
+            valid: facts.valid,
+            expiresAt: facts.expiresAt?.toISOString() ?? null,
+            permanent: facts.valid && !facts.expiresAt,
+          };
+        })(),
       };
     }),
     saveFacebook: publicProcedure
@@ -343,7 +362,31 @@ export const appRouter = t.router({
           pageName: z.string().optional(),
         })
       )
-      .mutation(({ input }) => setFacebookConfig(input)),
+      .mutation(async ({ input }) => {
+        // A token pasted straight from the Graph API Explorer dies within the
+        // hour, silently, and takes the whole inbox with it when it does. So
+        // upgrade it here rather than asking anyone to know the difference.
+        // Blank means "keep the saved one", which is not a paste at all.
+        if (!input.pageAccessToken) {
+          await setFacebookConfig(input);
+          return { detail: "Saved." };
+        }
+        const existing = await getFacebookConfig();
+        const report = await makeTokenLast(
+          input.pageAccessToken,
+          input.appId || existing?.appId,
+          input.appSecret || existing?.appSecret,
+          input.pageId || existing?.pageId
+        );
+        await setFacebookConfig({
+          ...input,
+          pageAccessToken: report.token,
+          // Facebook just told us which Page this is. Believe it over the box.
+          pageId: report.pageId ?? input.pageId,
+          pageName: report.pageName ?? input.pageName,
+        });
+        return { detail: report.detail };
+      }),
     // Go and fetch names for the threads already sitting there as
     // "a customer" — a webhook is never coming to fix those on its own.
     refreshNames: publicProcedure.mutation(() => backfillCustomerNames()),

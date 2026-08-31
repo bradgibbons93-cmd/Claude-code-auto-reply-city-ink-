@@ -115,9 +115,13 @@ export default function Settings() {
   }, [timely]);
 
   const saveFacebook = trpc.config.saveFacebook.useMutation({
-    onSuccess: () => {
-      toast.success("Page connected");
+    onSuccess: (result) => {
+      // Say what actually happened to the token. A pasted one is usually
+      // swapped for the Page's own, which never expires — and knowing that
+      // is the difference between doing this once and doing it every day.
+      toast.success(result?.detail ?? "Page connected", { duration: 8000 });
       utils.config.facebook.invalidate();
+      utils.config.messengerDelivery.invalidate();
     },
     // Reporting the real error matters: this used to always blame empty
     // fields, which sent you hunting through the form when the actual
@@ -227,18 +231,29 @@ export default function Settings() {
             className={`rounded-lg border p-3 text-sm ${
               delivery?.subscribed && !delivery?.missing?.length
                 ? "border-success/40 bg-success/10 text-success"
-                : "border-destructive/40 bg-destructive/5 text-destructive"
+                : delivery?.unknown
+                  ? "border-border bg-beige/30 text-charcoal"
+                  : "border-destructive/40 bg-destructive/5 text-destructive"
             }`}
           >
             {delivery?.detail ?? "Checking…"}
           </div>
 
+          {/* "no" and "we couldn't ask" are different answers. Printing the
+              first when we meant the second turned an expired token into a
+              hunt for a subscription that was never broken. */}
           <dl className="grid grid-cols-[9rem_1fr] gap-x-3 gap-y-1 text-sm">
             <dt className="text-muted-foreground">Page subscribed</dt>
-            <dd className="text-charcoal">{delivery ? (delivery.subscribed ? "yes" : "no") : "…"}</dd>
+            <dd className="text-charcoal">
+              {!delivery ? "…" : delivery.unknown ? "couldn't check" : delivery.subscribed ? "yes" : "no"}
+            </dd>
             <dt className="text-muted-foreground">Events</dt>
             <dd className="break-all text-charcoal">
-              {delivery?.fields?.length ? delivery.fields.join(", ") : "none"}
+              {delivery?.unknown
+                ? "couldn't check"
+                : delivery?.fields?.length
+                  ? delivery.fields.join(", ")
+                  : "none"}
             </dd>
             <dt className="text-muted-foreground">Last delivery</dt>
             <dd className="text-charcoal">
@@ -320,6 +335,40 @@ export default function Settings() {
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
+          {/* The state of the saved token, before anything else on this card.
+              An expired one takes down messages, names and the import all at
+              once, and every panel then reports its own symptom instead of
+              the cause. */}
+          {fb?.token && (
+            <div
+              className={`rounded-lg border p-3 text-sm ${
+                !fb.token.valid
+                  ? "border-destructive/40 bg-destructive/5 text-destructive"
+                  : fb.token.permanent
+                    ? "border-success/40 bg-success/10 text-success"
+                    : "border-border bg-beige/30 text-charcoal"
+              }`}
+            >
+              {!fb.token.valid ? (
+                <>
+                  <strong>The saved Page token has expired.</strong> Nothing can be read from
+                  Facebook until it's replaced — no new messages, no names, no import. Paste a
+                  new one below; the user token from the Graph API Explorer is fine, the app
+                  swaps it for the Page's own permanent one.
+                </>
+              ) : fb.token.permanent ? (
+                "Page token is good and has no expiry — this shouldn't need doing again."
+              ) : (
+                <>
+                  <strong>This token expires {new Date(fb.token.expiresAt!).toLocaleString("en-AU", {
+                    day: "numeric", month: "short", hour: "numeric", minute: "2-digit",
+                  })}.</strong>{" "}
+                  Paste the user token from the Graph API Explorer below and the app will trade
+                  it for a permanent one.
+                </>
+              )}
+            </div>
+          )}
           <Input placeholder="Page ID" value={pageId} onChange={(e) => setPageId(e.target.value)} />
           <Input
             placeholder="Page name (optional)"

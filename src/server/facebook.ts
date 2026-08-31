@@ -233,13 +233,21 @@ export const MESSENGER_FIELDS = [
 
 export async function getMessengerSubscription(): Promise<{
   subscribed: boolean;
+  /** True when Facebook wouldn't answer, so "not subscribed" isn't known. */
+  unknown: boolean;
   fields: string[];
   missing: string[];
   detail: string;
 }> {
   const config = await getFacebookConfig();
   if (!config?.pageAccessToken) {
-    return { subscribed: false, fields: [], missing: [], detail: "Facebook isn't connected yet." };
+    return {
+      subscribed: false,
+      unknown: true,
+      fields: [],
+      missing: [],
+      detail: "Facebook isn't connected yet.",
+    };
   }
 
   try {
@@ -252,6 +260,7 @@ export async function getMessengerSubscription(): Promise<{
     if (apps.length === 0) {
       return {
         subscribed: false,
+        unknown: false,
         fields: [],
         missing: [...MESSENGER_FIELDS],
         detail: "This Page is NOT subscribed to the app, so Facebook sends it nothing.",
@@ -262,6 +271,7 @@ export async function getMessengerSubscription(): Promise<{
     const missing = MESSENGER_FIELDS.filter((f) => !fields.includes(f));
     return {
       subscribed: true,
+      unknown: false,
       fields,
       missing,
       detail: missing.length
@@ -269,14 +279,24 @@ export async function getMessengerSubscription(): Promise<{
         : "Subscribed, and receiving every message event.",
     };
   } catch (error) {
+    // Not knowing is not the same as no. Reporting a failed check as "not
+    // subscribed" sent someone hunting a subscription problem that didn't
+    // exist, when the real answer was that the token had expired overnight.
     const err = error as { response?: { status?: number; data?: unknown } };
+    const raw = JSON.stringify(err.response?.data ?? "");
+    const expired = /Session has expired|Error validating access token|code":190/i.test(raw);
     return {
       subscribed: false,
+      unknown: true,
       fields: [],
       missing: [],
-      detail: err.response
-        ? `Couldn't check — HTTP ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 200)}`
-        : `Couldn't check — ${(error as Error).message}`,
+      detail: expired
+        ? "Couldn't check — the saved Page token has expired, so Facebook won't answer " +
+          "anything. Paste a fresh one into the Page access token box below and this comes " +
+          "back on its own. The subscription itself is almost certainly still fine."
+        : `Couldn't check — Facebook wouldn't answer${
+            err.response ? ` (HTTP ${err.response.status})` : ""
+          }. This says nothing about whether the Page is subscribed.`,
     };
   }
 }
