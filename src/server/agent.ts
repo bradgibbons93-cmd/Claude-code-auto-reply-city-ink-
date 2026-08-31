@@ -416,9 +416,10 @@ export async function redraftPendingReply(id: number): Promise<{ ok: boolean; re
  * at once because someone pressed a button is not news, it's an alarm.
  */
 export async function draftForUnanswered(
-  limit = 20
+  limit = 20,
+  newerThanMinutes?: number
 ): Promise<{ drafted: number; failed: number; detail: string }> {
-  const ids = await getUnansweredConversations(limit);
+  const ids = await getUnansweredConversations(limit, newerThanMinutes);
   if (!ids.length) {
     return { drafted: 0, failed: 0, detail: "Everyone who's written in has a reply waiting or has had one." };
   }

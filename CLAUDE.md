@@ -83,6 +83,17 @@ re-paste the App secret. The count is stored on `facebook_config` and shown at
 the top of the delivery panel, because forty rejections an hour is a diagnosis
 and a silent 403 is not.
 
+**The app pulls the inbox every three minutes; it does not only wait to be
+pushed to.** Three separate faults in two days each broke Facebook's push and
+each produced the identical symptom — an inbox that quietly stopped. An
+expired token, a subscription Facebook had dropped, and a stale `app_secret`
+that 403'd every delivery. Fixing one never protected against the next, so
+`scheduler.ts` polls `importExistingConversations(30)` and drafts only for
+threads whose last message is under thirty minutes old. The webhook is still
+the fast path; this is the floor under it. Both are idempotent on
+`message_id`, so they cannot duplicate each other — there is a test for
+exactly that.
+
 **Thread clocks only move forward**, to when the message was actually sent.
 Stamping `now()` on import made a hundred threads all read the same age and
 destroyed the inbox order.

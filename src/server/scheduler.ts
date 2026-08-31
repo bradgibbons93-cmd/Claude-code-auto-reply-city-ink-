@@ -1,8 +1,9 @@
 import cron from "node-cron";
 import { getDuePosts, updatePostStatus } from "./db.js";
-import { publishPagePost } from "./facebook.js";
+import { publishPagePost, importExistingConversations } from "./facebook.js";
 import { syncFeed } from "./feed.js";
 import { ensureMessengerSubscription } from "./facebook.js";
+import { draftForUnanswered } from "./agent.js";
 
 /**
  * Runs every minute. Each post is flipped to "draft" before publishing so a
@@ -18,6 +19,41 @@ export function startScheduler() {
       if (action !== "none") console.log(`[Facebook] Messenger subscription ${action} — ${detail}`);
     } catch (error) {
       console.error("[Facebook] Subscription check failed:", (error as Error).message);
+    }
+  });
+
+  /**
+   * Read the studio inbox ourselves, every few minutes.
+   *
+   * Everything about new messages depended on Facebook pushing them to us,
+   * and for two days it didn't: first an expired token, then a subscription
+   * Facebook had dropped, then every delivery refused over a stale App
+   * secret. Each was a different fault with the same symptom — an inbox that
+   * quietly stopped — and no amount of fixing one protects against the next.
+   *
+   * So the app stops relying on being pushed to. The webhook is still the
+   * fast path and nothing about it changes; this is the floor underneath it.
+   * Pulling the recent threads is the same call the Import button makes, it
+   * is idempotent, and a message already stored is skipped, so the two paths
+   * cannot duplicate each other.
+   *
+   * Only the recent end of the inbox — thirty threads is far more than a
+   * studio gets between polls, and asking for everything every three minutes
+   * would be rude to an API we depend on.
+   */
+  cron.schedule("*/3 * * * *", async () => {
+    try {
+      const { conversations, messages } = await importExistingConversations(30);
+      if (!messages) return;
+      console.log(`[Inbox] Pulled ${messages} message(s) across ${conversations} thread(s)`);
+
+      // Draft only for what has just come in. Drafting for everything
+      // unanswered would write replies into threads the studio deliberately
+      // left alone weeks ago.
+      const { drafted } = await draftForUnanswered(10, 30);
+      if (drafted) console.log(`[Inbox] Wrote ${drafted} draft(s) for the new messages`);
+    } catch (error) {
+      console.error("[Inbox] Poll failed:", (error as Error).message);
     }
   });
 

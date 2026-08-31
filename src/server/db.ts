@@ -141,8 +141,18 @@ export async function getConversationsMissingNames(limit = 50) {
  * Excludes anything already waiting in the queue, and anything the studio
  * has muted.
  */
-export async function getUnansweredConversations(limit = 20) {
+/**
+ * Threads where the customer spoke last and no draft is waiting.
+ *
+ * `newerThanMinutes` narrows it to messages that have just arrived, which is
+ * what the automatic poll wants: drafting for everything unanswered would
+ * write replies to threads the studio deliberately left alone months ago.
+ */
+export async function getUnansweredConversations(limit = 20, newerThanMinutes?: number) {
   const db = await getDb();
+  const recent = newerThanMinutes
+    ? sql` AND c.last_message_at > NOW() - INTERVAL ${newerThanMinutes} MINUTE`
+    : sql``;
   const rows = await db.execute(
     sql`SELECT c.conversation_id AS conversationId
           FROM messenger_conversations c
@@ -160,7 +170,7 @@ export async function getUnansweredConversations(limit = 20) {
            AND NOT EXISTS (
              SELECT 1 FROM pending_replies p
               WHERE p.conversation_id = c.conversation_id AND p.status = 'pending'
-           )
+           )${recent}
          ORDER BY c.last_message_at DESC
          LIMIT ${limit}`
   );
