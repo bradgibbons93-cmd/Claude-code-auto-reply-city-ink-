@@ -272,7 +272,10 @@ export default function PostScheduler() {
                 </p>
 
                 {post.status === "failed" && post.lastError && (
-                  <p className="mt-2 text-sm text-red-400">Facebook said: {post.lastError}</p>
+                  // Explained server-side now, so this is a sentence rather than a
+                  // Graph dump — "Facebook said:" in front of it read like the
+                  // app was quoting an error it hadn't understood.
+                  <p className="mt-2 text-sm text-red-400">{post.lastError}</p>
                 )}
               </CardContent>
             </Card>

@@ -871,6 +871,53 @@ export async function publishPagePost(
     ? { url: absoluteImage, caption: content, access_token: config.pageAccessToken }
     : { message: content, access_token: config.pageAccessToken };
 
-  const { data } = await axios.post(endpoint, payload, { timeout: 30000 });
-  return (data.post_id || data.id) as string;
+  try {
+    const { data } = await axios.post(endpoint, payload, { timeout: 30000 });
+    return (data.post_id || data.id) as string;
+  } catch (error) {
+    const err = error as { response?: { data?: { error?: { message?: string } } } };
+    const raw = err.response?.data?.error?.message ?? (error as Error).message;
+    throw new Error(explainPublishFailure(raw));
+  }
+}
+
+/**
+ * Why a post didn't go up, in words the studio can act on.
+ *
+ * The raw text of a Graph refusal was being printed on the card — "(#200) The
+ * permission(s) pages_manage_posts are not available. It could because either
+ * they are deprecated or need to be approved by App Review." — which is both
+ * ungrammatical and useless to someone who doesn't know what a permission is.
+ *
+ * The distinction that matters, learned the hard way on pages_read_engagement:
+ * a permission the app has not been granted cannot be fixed by generating a
+ * new token, and saying "check your token" sends someone round a loop that
+ * cannot end. So name the real place it is granted.
+ */
+export function explainPublishFailure(raw: string): string {
+  if (/pages_manage_posts/i.test(raw)) {
+    return (
+      "Facebook won't let the app post to the Page yet. Posting needs the " +
+      "pages_manage_posts permission, and it hasn't been granted to this app — that's " +
+      "requested in the Meta app dashboard under App Review → Permissions and Features, " +
+      "the same place as pages_read_engagement. Nothing on this screen or in the token " +
+      "can fix it, and the post is kept so it can go up once it's approved. Messages and " +
+      "replies are unaffected."
+    );
+  }
+  if (/Session has expired|Error validating access token|code.{0,4}190/i.test(raw)) {
+    return (
+      "The saved Page token has expired, so Facebook turned the post away. Paste a fresh " +
+      "one in Settings and the post can be scheduled again — nothing was lost."
+    );
+  }
+  if (/pages_read_engagement|Page Public Content Access/i.test(raw)) {
+    return (
+      "Facebook refused because the app hasn't been granted the permission it needs for " +
+      "this Page. Request it in the Meta app dashboard under App Review → Permissions and " +
+      "Features; a new token won't help."
+    );
+  }
+  // Something genuinely unfamiliar. Trim it, but don't pretend to understand.
+  return raw.length > 300 ? `${raw.slice(0, 300)}…` : raw;
 }

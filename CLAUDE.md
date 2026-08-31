@@ -102,6 +102,13 @@ the Access Token Debugger, and only the first is changed by pasting a new token.
 When a scope is present on a valid token and Graph refuses anyway, it is always
 the second — don't send anyone back to the Graph API Explorer.
 
+**`pages_manage_posts` is missing too, and it blocks publishing.** Same story,
+found later: a scheduled post failed with `(#200) The permission(s)
+pages_manage_posts are not available`. It is on neither the token nor the app.
+Both it and `pages_read_engagement` need requesting under App Review →
+Permissions and Features. `explainPublishFailure()` says so on the post card
+rather than printing Graph's own ungrammatical sentence.
+
 `/me/posts` is also the wrong edge for a Page's own posts; `published_posts` is
 the documented one, with `feed` as the older equivalent. `syncFeed` tries all
 three. That wasn't the cause here, but it would have been on some Pages.
