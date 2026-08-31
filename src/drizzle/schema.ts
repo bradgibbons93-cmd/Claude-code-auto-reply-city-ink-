@@ -231,6 +231,10 @@ export const facebookConfig = mysqlTable("facebook_config", {
   // messages with every other panel green.
   lastRejectedAt: timestamp("last_rejected_at"),
   rejectedCount: int("rejected_count").default(0),
+  // Why the last one was refused, in a form the settings page can show. The
+  // same facts were going to the hosting logs, which is no use to the person
+  // who can actually see this app.
+  lastRejectionDetail: varchar("last_rejection_detail", { length: 255 }),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
 

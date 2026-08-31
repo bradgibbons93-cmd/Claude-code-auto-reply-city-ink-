@@ -247,6 +247,14 @@ export default function Settings() {
               Copy the App secret from the Meta app dashboard (Settings → Basic → App secret →
               Show) into the box below and save. Facebook retries, so recent ones should land
               once it matches.
+              {delivery.rejected.detail && (
+                <>
+                  {" "}
+                  <span className="mt-2 block font-mono text-xs opacity-80">
+                    Last one: {delivery.rejected.detail}
+                  </span>
+                </>
+              )}
             </div>
           )}
 

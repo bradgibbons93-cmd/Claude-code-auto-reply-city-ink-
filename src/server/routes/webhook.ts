@@ -107,6 +107,7 @@ router.post("/facebook", async (req: RawBodyRequest, res: Response) => {
        *
        * The body is unverified, so it is described, never acted on.
        */
+      // Worked out before recording, so the settings page can show it.
       const untrimmedWouldMatch =
         config.appSecret !== config.appSecret.trim() &&
         verifyWebhookSignature(raw, signature, config.appSecret);
@@ -117,7 +118,10 @@ router.post("/facebook", async (req: RawBodyRequest, res: Response) => {
           `carriesMessage=${carriesMessage} untrimmedWouldMatch=${untrimmedWouldMatch}. ` +
           "The saved App secret doesn't match the one Facebook is signing with."
       );
-      void recordWebhookRejection();
+      void recordWebhookRejection(
+        `object=${kind}, carries a message=${carriesMessage}, ` +
+          `whitespace was the cause=${untrimmedWouldMatch}`
+      );
       return res.sendStatus(403);
     }
     // Accepted. Whatever was wrong before is over.

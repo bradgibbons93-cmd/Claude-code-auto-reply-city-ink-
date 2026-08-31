@@ -203,6 +203,7 @@ const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "facebook_config", column: "last_delivery_at", ddl: "TIMESTAMP NULL" },
   { table: "facebook_config", column: "last_rejected_at", ddl: "TIMESTAMP NULL" },
   { table: "facebook_config", column: "rejected_count", ddl: "INT DEFAULT 0" },
+  { table: "facebook_config", column: "last_rejection_detail", ddl: "VARCHAR(255)" },
   { table: "facebook_config", column: "last_delivery_kind", ddl: "VARCHAR(64)" },
   {
     table: "messenger_conversations",
