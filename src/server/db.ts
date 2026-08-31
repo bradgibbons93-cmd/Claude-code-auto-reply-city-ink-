@@ -878,6 +878,8 @@ export async function setFacebookConfig(input: {
   instagramAccessToken?: string;
   /** Which Meta host that token belongs to — see the schema comment. */
   instagramTokenHost?: "facebook" | "instagram";
+  /** Instagram signs its own webhooks — see the schema comment. */
+  instagramAppSecret?: string;
   appId: string;
   appSecret: string;
   webhookVerifyToken: string;
@@ -906,6 +908,8 @@ export async function setFacebookConfig(input: {
         // it. The webhook HMAC does not: one invisible character and every
         // real customer message is refused, with nothing to see anywhere.
         appSecret: input.appSecret.trim() || existing.appSecret,
+        instagramAppSecret:
+          input.instagramAppSecret?.trim() || existing.instagramAppSecret,
         isConfigured: true,
       })
       .where(eq(facebookConfig.id, existing.id));
@@ -1194,10 +1198,41 @@ export async function findSimilarExchanges(query: string, limit = 4) {
 
   if (matched[0]?.length) return matched[0];
 
+  /**
+   * The fulltext index is not to be relied on alone.
+   *
+   * It can go stale and then match nothing at all — proven locally, where an
+   * exact term scored zero until the table was rebuilt — and it fails without
+   * complaining, so hundreds of learned examples would simply stop reaching
+   * the drafter with nothing anywhere to say so.
+   *
+   * The old fallback searched for the whole customer message as one string,
+   * which matches almost nothing, so in practice there was no fallback. This
+   * looks for the words that carry the meaning: the longest few, which for a
+   * tattoo enquiry are the ones worth matching on — "wrist", "sleeve",
+   * "deposit" — rather than "how" and "for".
+   */
+  const words = Array.from(
+    new Set(
+      cleaned
+        .toLowerCase()
+        .split(/[^a-z0-9']+/i)
+        .filter((w) => w.length > 3)
+    )
+  )
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 4);
+
+  if (!words.length) return [];
+
+  const likes = sql.join(
+    words.map((w) => sql`customer_message LIKE ${`%${w}%`}`),
+    sql` OR `
+  );
   const [fallback] = (await db.execute(
     sql`SELECT customer_message AS customerMessage, studio_reply AS studioReply
         FROM example_exchanges
-        WHERE customer_message LIKE ${"%" + cleaned.slice(0, 40) + "%"}
+        WHERE ${likes}
         LIMIT ${limit}`
   )) as unknown as [Array<{ customerMessage: string; studioReply: string }>];
 

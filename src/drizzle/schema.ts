@@ -211,6 +211,11 @@ export const facebookConfig = mysqlTable("facebook_config", {
   // Instagram-login flow (graph.instagram.com). Guessing wrong is silent: the
   // wrong host simply refuses every call.
   instagramTokenHost: varchar("instagram_token_host", { length: 16 }),
+  // Instagram signs its webhooks with the Instagram app's own secret, which is
+  // a different value from the Facebook app secret even inside one Meta app.
+  // Verifying Instagram deliveries with the Facebook secret refused every DM
+  // the studio received, silently, for days.
+  instagramAppSecret: varchar("instagram_app_secret", { length: 255 }),
   appId: varchar("app_id", { length: 191 }).notNull(),
   appSecret: varchar("app_secret", { length: 255 }).notNull(),
   webhookVerifyToken: varchar("webhook_verify_token", { length: 255 }).notNull(),

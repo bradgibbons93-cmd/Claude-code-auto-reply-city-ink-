@@ -339,6 +339,7 @@ export const appRouter = t.router({
         // The value never leaves the server; the browser only needs to know
         // whether one is saved so the field can say so.
         hasInstagramToken: !!config.instagramAccessToken,
+        hasInstagramAppSecret: !!config.instagramAppSecret,
         hasOwner: !!config.ownerPsid,
         // Why customers show as "a customer" — but ONLY when any actually
         // do. The per-person profile lookup fails for this app and always
@@ -383,6 +384,9 @@ export const appRouter = t.router({
           pageAccessToken: z.string(),
           // Blank means "keep whatever's saved", same as the Page token.
           instagramAccessToken: z.string().optional(),
+          // Instagram signs its webhooks with its own app secret. Blank means
+          // "keep the saved one", same as every other secret on this form.
+          instagramAppSecret: z.string().optional(),
           appId: z.string().min(1),
           appSecret: z.string(),
           webhookVerifyToken: z.string().min(1),

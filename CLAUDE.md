@@ -74,6 +74,15 @@ exactly the image being published.
 messages are the commonest tattoo enquiries there are. Both were being dropped
 at different points; don't reintroduce a `!text` guard.
 
+**Instagram signs its webhooks with a different app secret from Facebook's.**
+This is what "it's still not pulling messages" actually was, after two days of
+token and permission chases. Every rejected delivery in the logs was
+`object=instagram`, several carrying real DMs, and not one was `object=page` —
+Messenger was never broken, it was quiet, because the studio's customers use
+Instagram. The webhook now accepts a delivery signed by either the Facebook or
+the Instagram app secret; both are the studio's own credentials, and a forgery
+still matches neither. `instagram_app_secret` has its own box in Settings.
+
 **"Rejected: bad signature" means messages are arriving and being binned.**
 Not that Facebook is quiet — the opposite. It means the saved `app_secret`
 doesn't match the one Meta signs with, and every real enquiry is being 403'd

@@ -96,6 +96,9 @@ export default function Settings() {
   // Kept apart from the Page token on purpose — see the schema comment. One
   // box for both is how you take Messenger down while wiring up Instagram.
   const [instagramAccessToken, setInstagramAccessToken] = useState("");
+  // Instagram signs its webhooks with a different secret from Facebook's, and
+  // every Instagram DM was refused for want of it.
+  const [instagramAppSecret, setInstagramAppSecret] = useState("");
   const [appId, setAppId] = useState("");
   const [appSecret, setAppSecret] = useState("");
   const [verifyToken, setVerifyToken] = useState("city_ink_webhook_2024");
@@ -422,6 +425,16 @@ export default function Settings() {
             value={instagramAccessToken}
             onChange={(e) => setInstagramAccessToken(e.target.value)}
           />
+          <Input
+            placeholder={
+              fb?.hasInstagramAppSecret
+                ? "Instagram app secret — saved, leave blank to keep it"
+                : "Instagram app secret (from the Instagram product, not the Facebook one)"
+            }
+            type="password"
+            value={instagramAppSecret}
+            onChange={(e) => setInstagramAppSecret(e.target.value)}
+          />
           <Input placeholder="App ID" value={appId} onChange={(e) => setAppId(e.target.value)} />
           <Input
             placeholder={fb?.isConfigured ? "App secret — saved, leave blank to keep it" : "App secret"}
@@ -444,6 +457,7 @@ export default function Settings() {
                 appSecret,
                 webhookVerifyToken: verifyToken,
                 instagramAccessToken: instagramAccessToken || undefined,
+                instagramAppSecret: instagramAppSecret || undefined,
               })
             }
             disabled={saveFacebook.isPending}

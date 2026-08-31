@@ -88,9 +88,26 @@ router.post("/facebook", async (req: RawBodyRequest, res: Response) => {
   if (config?.appSecret) {
     const raw = req.rawBody ?? Buffer.alloc(0);
     const signature = req.headers["x-hub-signature-256"] as string | undefined;
-    // Trimmed here as well as on save, so a secret already stored with a
-    // stray newline starts working on deploy rather than needing a re-paste.
-    const ok = verifyWebhookSignature(raw, signature, config.appSecret.trim());
+    /**
+     * Two secrets, because Meta uses two.
+     *
+     * Every rejected delivery in the logs was object=instagram, several
+     * carrying real DMs, while not one Messenger delivery was ever refused —
+     * Messenger simply had nothing to send. Instagram signs its webhooks with
+     * the Instagram product's own app secret, which is a different value from
+     * the Facebook app secret even inside a single Meta app. Checking
+     * Instagram deliveries against the Facebook secret refused every DM the
+     * studio received, for days, silently.
+     *
+     * Both are the studio's own credentials, so accepting a delivery that
+     * matches either is not a loosening: a forged one still matches neither.
+     * Trimmed, because a pasted secret picks up whitespace easily and every
+     * other use of it tolerates that while an HMAC does not.
+     */
+    const secrets = [config.appSecret, config.instagramAppSecret]
+      .map((secret) => secret?.trim())
+      .filter((secret): secret is string => !!secret);
+    const ok = secrets.some((secret) => verifyWebhookSignature(raw, signature, secret));
     if (!ok) {
       // Never accept it — the signature is what proves this came from Meta.
       // But record it, loudly. Silently 403-ing real customer messages while
@@ -112,6 +129,9 @@ router.post("/facebook", async (req: RawBodyRequest, res: Response) => {
         config.appSecret !== config.appSecret.trim() &&
         verifyWebhookSignature(raw, signature, config.appSecret);
       const kind = typeof req.body?.object === "string" ? req.body.object : "unknown";
+      // An Instagram delivery refused while no Instagram secret is saved is a
+      // missing setting, not a wrong one, and it has its own answer.
+      const needsInstagramSecret = kind === "instagram" && !config.instagramAppSecret;
       const carriesMessage = JSON.stringify(req.body ?? {}).includes('"message"');
       console.warn(
         `[Webhook] Rejected: bad signature — object=${kind} ` +
@@ -119,8 +139,11 @@ router.post("/facebook", async (req: RawBodyRequest, res: Response) => {
           "The saved App secret doesn't match the one Facebook is signing with."
       );
       void recordWebhookRejection(
-        `object=${kind}, carries a message=${carriesMessage}, ` +
-          `whitespace was the cause=${untrimmedWouldMatch}`
+        needsInstagramSecret
+          ? "These are Instagram DMs. Instagram signs them with the Instagram app secret, " +
+            "which is a different value from the Facebook one — paste it in below."
+          : `object=${kind}, carries a message=${carriesMessage}, ` +
+            `whitespace was the cause=${untrimmedWouldMatch}`
       );
       return res.sendStatus(403);
     }
