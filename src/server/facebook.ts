@@ -152,6 +152,13 @@ export async function sendTypingIndicator(
  * ID and a stack of permissions language.
  */
 export function explainProfileFailure(detail: string): string {
+  // Instagram names have their own answer, and it isn't the Facebook one.
+  // Meta will not name an Instagram customer to an app without Advanced
+  // Access to instagram_manage_messages — which is granted by App Review, not
+  // by anything on this screen. The messages themselves arrive regardless.
+  if (/Advanced Access to instagram_manage_messages|instagram_manage_messages permission/i.test(detail)) {
+    return "Instagram won't tell the app who these customers are until Meta grants Advanced Access to instagram_manage_messages, which is part of the App Review already submitted. Their messages arrive and can be replied to as normal — only the name is missing, and it fills itself in once approval lands.";
+  }
   if (/does not have the capability|\(#3\)/i.test(detail)) {
     return "Facebook won't give this app people's names one at a time — it never has. Names come from the Page inbox instead, which is why almost everyone is named. The few that aren't are people Facebook won't name to a Page at all.";
   }
@@ -422,8 +429,9 @@ export async function fetchInboxParticipants(
       fields: "participants",
       // Instagram's conversations edge is slower than Messenger's and answers
       // big pages with "Please reduce the amount of data you're asking for",
-      // or simply doesn't answer inside the timeout. Ask it for less.
-      limit: platform === "instagram" ? "25" : "100",
+      // or simply doesn't answer inside the timeout. Twenty-five was still too
+      // many — it kept refusing — so ask it for very little and page instead.
+      limit: platform === "instagram" ? "8" : "100",
       access_token: endpoint.token,
     };
 
@@ -594,9 +602,11 @@ export async function importExistingConversations(
       // handles it fine, so only Instagram pays for it.
       fields:
         platform === "instagram"
-          ? "participants,messages.limit(25){id,message,created_time,from,attachments{image_data,file_url,mime_type}}"
+          ? "participants,messages.limit(10){id,message,created_time,from,attachments{image_data,file_url,mime_type}}"
           : "participants,messages.limit(100){id,message,created_time,from,attachments{image_data,file_url,mime_type}}",
-      limit: platform === "instagram" ? "15" : "50",
+      // Same refusal as the participants list, and for the same reason: this
+      // edge assembles far less for Instagram than it will for Messenger.
+      limit: platform === "instagram" ? "5" : "50",
       access_token: endpoint.token,
     };
 
