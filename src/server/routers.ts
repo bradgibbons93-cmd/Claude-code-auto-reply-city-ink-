@@ -2,6 +2,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
   getRecentConversations,
+  searchInbox,
   getConversationMessages,
   getActiveAutoReplyRules,
   createAutoReplyRule,
@@ -440,6 +441,11 @@ export const appRouter = t.router({
       return { sent };
     }),
   }),
+
+  /** The header search box, which until now was decorative. */
+  search: publicProcedure
+    .input(z.object({ query: z.string().max(200) }))
+    .query(({ input }) => searchInbox(input.query)),
 
   knowledge: t.router({
     list: publicProcedure.query(() => getStudioKnowledge()),

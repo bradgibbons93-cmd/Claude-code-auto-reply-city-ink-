@@ -202,6 +202,63 @@ export async function setConversationName(conversationId: string, senderName: st
  * silently hid two thirds of the studio's customers, and someone looking for
  * a name they could see in Meta's inbox concluded the app had lost them.
  */
+/**
+ * Find a customer, or the thing they said.
+ *
+ * The search box in the header did nothing at all — a control on every page
+ * that looks like it works and doesn't. Searching by name alone would have
+ * been half of it: the studio remembers "the bloke who wanted the koi on his
+ * forearm" far more often than it remembers his name, so the message text is
+ * searched too and the matching line is what comes back.
+ *
+ * LIKE rather than the FULLTEXT index deliberately. The index on this table
+ * would ignore a word appearing in more than half the rows — "tattoo",
+ * "booking", "price", the words a tattoo studio actually searches for — and
+ * it went stale and scored an exact term at zero once already.
+ */
+export async function searchInbox(query: string, limit = 8) {
+  const term = query.trim();
+  if (term.length < 2) return [];
+  const like = `%${term}%`;
+
+  const db = await getDb();
+  const [rows] = (await db.execute(
+    sql`SELECT c.conversation_id AS conversationId,
+               c.sender_name    AS senderName,
+               c.platform       AS platform,
+               c.last_message_at AS lastMessageAt,
+               (SELECT m.content FROM messenger_messages m
+                 WHERE m.conversation_id = c.conversation_id
+                   AND m.content LIKE ${like}
+                 ORDER BY m.id DESC LIMIT 1) AS snippet
+          FROM messenger_conversations c
+         WHERE c.sender_name LIKE ${like}
+            OR EXISTS (SELECT 1 FROM messenger_messages m
+                        WHERE m.conversation_id = c.conversation_id
+                          AND m.content LIKE ${like})
+         ORDER BY c.last_message_at DESC
+         LIMIT ${limit}`
+  )) as unknown as [
+    {
+      conversationId: string;
+      senderName: string | null;
+      platform: string | null;
+      lastMessageAt: string | null;
+      snippet: string | null;
+    }[],
+  ];
+
+  return (rows ?? []).map((row) => ({
+    conversationId: row.conversationId,
+    senderName: row.senderName,
+    platform: (row.platform ?? "facebook") as "facebook" | "instagram",
+    lastMessageAt: row.lastMessageAt,
+    // Trimmed here rather than in the browser, so a customer who pasted an
+    // essay doesn't arrive as a thousand characters for a one-line row.
+    snippet: row.snippet ? row.snippet.replace(/\s+/g, " ").trim().slice(0, 160) : null,
+  }));
+}
+
 export async function getRecentConversations(limit = 250) {
   const db = await getDb();
   const rows = await db

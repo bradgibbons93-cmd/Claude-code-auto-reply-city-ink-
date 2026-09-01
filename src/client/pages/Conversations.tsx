@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearch } from "wouter";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
@@ -292,12 +293,24 @@ function PendingReplyCard({
 }
 
 export default function Conversations() {
-  const [selected, setSelected] = useState<string | null>(null);
+  // ?thread=… so a search result, a notification, or a link from the
+  // dashboard opens the right conversation — and survives a refresh, which
+  // a selection held only in React state never did.
+  const [selected, setSelected] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get("thread")
+  );
   const [search, setSearch] = useState("");
   // The split Brad works from: who is waiting on whom. Derived from who
   // spoke last, so there's nothing to keep up to date by hand.
   const [filter, setFilter] = useState<"all" | "needs" | "waiting" | "mine">("all");
   const inboxRef = useReveal<HTMLDivElement>();
+  // Navigating to /messages?thread=… while already on the page doesn't
+  // remount, so the initial state above wouldn't fire a second time.
+  const routeSearch = useSearch();
+  useEffect(() => {
+    const thread = new URLSearchParams(routeSearch).get("thread");
+    if (thread) setSelected(thread);
+  }, [routeSearch]);
   const utils = trpc.useUtils();
 
   const { data: stats } = trpc.stats.useQuery({} as never, { refetchInterval: 30000 });

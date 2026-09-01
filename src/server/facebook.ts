@@ -23,6 +23,50 @@ const IG_GRAPH =
   process.env.FACEBOOK_GRAPH_URL ||
   "https://graph.instagram.com/v21.0";
 
+/**
+ * Instagram's conversations edge refuses a page it considers too big, with
+ * an HTTP 500 and "Please reduce the amount of data you're asking for" — and
+ * how big is too big is not a fixed number. Eight threads was already a
+ * reduction from twenty-five and it still refuses on this studio's inbox.
+ *
+ * So stop guessing a number and let Instagram pick it: ask, and on that one
+ * error halve the page and ask again, down to a single thread. A studio's
+ * inbox is small; four extra round trips is nothing next to Instagram
+ * silently returning nothing, which is what happened instead.
+ *
+ * Only that error is retried. A 403 over a missing permission would come
+ * back identically no matter how small the page is.
+ */
+function asksForTooMuch(error: unknown): boolean {
+  const body = (error as { response?: { data?: { error?: { message?: string } } } })?.response?.data
+    ?.error?.message;
+  return /reduce the amount of data/i.test(body ?? "");
+}
+
+async function getShrinking<T>(
+  url: string,
+  params: Record<string, string> | undefined,
+  timeout: number
+): Promise<{ data: T }> {
+  const start = Number(params?.limit ?? 0);
+  let attempt = 0;
+  let limit = start;
+
+  for (;;) {
+    try {
+      return await axios.get<T>(url, { params, timeout });
+    } catch (error) {
+      // Nothing to shrink on a paging URL, which carries its own limit.
+      if (!params || !start || !asksForTooMuch(error) || limit <= 1 || attempt >= 4) throw error;
+      attempt += 1;
+      limit = Math.max(1, Math.floor(limit / 2));
+      params = { ...params, limit: String(limit) };
+      console.warn(`[Facebook] Instagram refused that page — asking for ${limit} instead`);
+    }
+  }
+}
+
+
 export type Platform = "facebook" | "instagram";
 
 /**
@@ -437,10 +481,11 @@ export async function fetchInboxParticipants(
 
     for (let page = 0; page < maxPages && url; page += 1) {
       try {
-        const { data }: { data: InboxPage } = await axios.get(url, {
+        const { data }: { data: InboxPage } = await getShrinking(
+          url,
           params,
-          timeout: platform === "instagram" ? 30000 : 12000,
-        });
+          platform === "instagram" ? 30000 : 12000
+        );
 
         for (const thread of data.data ?? []) {
           for (const person of thread.participants?.data ?? []) {
@@ -615,11 +660,14 @@ export async function importExistingConversations(
 
     while (url && seen < maxThreads) {
       try {
-        const { data }: { data: ThreadPage } = await axios.get(url, {
+        // Instagram's edge is consistently slower than Messenger's, and it
+        // refuses a page it thinks is too big — so let it name the size
+        // rather than guessing another number that also gets refused.
+        const { data }: { data: ThreadPage } = await getShrinking(
+          url,
           params,
-          // Instagram's edge is consistently slower than Messenger's.
-          timeout: platform === "instagram" ? 40000 : 20000,
-        });
+          platform === "instagram" ? 40000 : 20000
+        );
 
         for (const thread of data.data ?? []) {
           if (seen >= maxThreads) break;

@@ -181,6 +181,20 @@ rather than printing Graph's own ungrammatical sentence.
 the documented one, with `feed` as the older equivalent. `syncFeed` tries all
 three. That wasn't the cause here, but it would have been on some Pages.
 
+**Instagram refuses a page it thinks is too big, and how big is not a fixed
+number.** Twenty-five was reduced to eight and the live server still logged
+`HTTP 500: Please reduce the amount of data you're asking for` every three
+minutes. Guessing a smaller number has now failed twice, so `getShrinking()`
+halves the page and asks again, down to one, on that error only. Messenger
+keeps its full page and never sees this.
+
+**The header search box searches message text, not just names.** The studio
+remembers "the bloke who wanted the koi on his forearm" long before it
+remembers his name. LIKE, not the FULLTEXT index, on purpose: that index drops
+a word appearing in over half the rows, which is every word a tattoo studio
+would search for. A result opens `/messages?thread=…`, so a thread is
+linkable and survives a refresh.
+
 ## The palette
 
 Coffee brown `#6F5A4B` and silver gray `#E9E9EA`, off the sheet Brad sent,
@@ -206,6 +220,13 @@ Verify in a browser with Playwright (Chromium at `/opt/pw-browsers/chromium`;
 install it with `npm install --no-save playwright` — it is not a dependency).
 Don't use `waitUntil: "networkidle"` — Google Fonts is blocked in the sandbox
 and it never settles.
+
+**`IG_GRAPH` falls back to `FACEBOOK_GRAPH_URL`** so one stand-in server can
+serve both hosts — which also means the code correctly concludes it is already
+on Instagram's host and drops the `platform` parameter. A suite that tells the
+two inboxes apart by that parameter will see everything as Instagram. Tell
+them apart by the `fields` they ask for instead (Messenger takes 100 messages
+a thread, Instagram 10).
 
 **`pkill -f "dist/server/index.js"` kills your own shell**, because the
 pattern matches the very command line that contains it. Cost half an hour of
