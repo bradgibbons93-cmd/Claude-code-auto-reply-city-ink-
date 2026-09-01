@@ -107,6 +107,36 @@ exactly that.
 Stamping `now()` on import made a hundred threads all read the same age and
 destroyed the inbox order.
 
+**Notifications go to the phone by web push, not through Messenger.** The
+Messenger ping to `ownerPsid` is still there and still fires, but it only
+works inside Facebook's 24-hour window — which is closed exactly when the
+studio has been quiet, so the one channel went silent when it mattered most.
+`push.ts` holds a VAPID keypair in `app_settings`, **generated once**:
+regenerating it silently orphans every subscription already handed out, and
+the switch in Settings still reads "on" while nothing ever arrives again.
+
+On an **iPhone the dashboard has to be added to the home screen** before a
+push can be delivered at all — Apple's rule, and there is no error to read,
+the API simply isn't there. `pushReadiness()` says so in a sentence instead of
+letting the button fail silently. That is what `manifest.webmanifest`, `sw.js`
+and the two icons in `public/` are for.
+
+One buzz per thread, claimed in the database (`claimNotificationSlot`), not in
+memory — four reference photos is one enquiry, and four buzzes is how someone
+learns to swipe the buzz away without reading it.
+
+**An empty draft is deliberate when `llmFailed` is set.** The card appears
+with an empty box so the studio writes the reply themselves; a placeholder
+there would be worse, because a placeholder can be approved by accident.
+Empty drafts *without* that flag are refused. Three suites exist purely to
+hold that line — don't "fix" the empty box.
+
+**Gallery photos are publishable now, and both halves were broken.**
+`posts.create` rejected `/api/uploads/…` even though the picker offered it,
+and the route was `requireStudio` rather than `requireStudioOrSignedLink`, so
+Facebook's own fetch of the picture would have 401'd behind a password. Same
+trap as `/api/attachments/`, one route later.
+
 ## The login
 
 Off unless `DASHBOARD_PASSWORD` is set in Railway. Deliberately dormant while
@@ -151,6 +181,18 @@ rather than printing Graph's own ungrammatical sentence.
 the documented one, with `feed` as the older equivalent. `syncFeed` tries all
 three. That wasn't the cause here, but it would have been on some Pages.
 
+## The palette
+
+Coffee brown `#6F5A4B` and silver gray `#E9E9EA`, off the sheet Brad sent,
+with the logo's ink black `#1A1A1A` carrying the type. Light theme: silver
+ground, coffee for anything that has to be looked at. Dark theme: espresso
+ground, the silver as the type, the coffee lifted to read against it — it was
+violet before, which was a third colour the studio doesn't own.
+
+Everything resolves through CSS variables in `index.css`, so **don't reach for
+a Tailwind palette colour** (`blue-500`, `purple-400`) in a component. Three
+of those had crept in and were the only non-brand colours on the page.
+
 ## Testing
 
 There is no CI. Suites live in the session scratchpad, not the repo, and run
@@ -160,9 +202,21 @@ Pattern worth keeping: stand up a fake `graph.facebook.com` on a port, point
 be **HMAC-signed with the app secret** or they're rejected — an unsigned test
 looks like a broken app.
 
-Verify in a browser with Playwright (Chromium at `/opt/pw-browsers/chromium`).
+Verify in a browser with Playwright (Chromium at `/opt/pw-browsers/chromium`;
+install it with `npm install --no-save playwright` — it is not a dependency).
 Don't use `waitUntil: "networkidle"` — Google Fonts is blocked in the sandbox
 and it never settles.
+
+**`pkill -f "dist/server/index.js"` kills your own shell**, because the
+pattern matches the very command line that contains it. Cost half an hour of
+tool calls returning exit 1 with no output. Start each run on a fresh port
+instead, or keep the PID.
+
+**web-push always speaks https**, whatever the endpoint's scheme says, so a
+stand-in push service has to be a TLS server with a self-signed certificate
+and `NODE_TLS_REJECT_UNAUTHORIZED=0` in the test process only. Against a plain
+`http://` listener it fails with an OpenSSL "packet length too long", which
+reads like a bug in the app and isn't.
 
 ## Working with Brad
 

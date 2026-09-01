@@ -1,4 +1,4 @@
-import { initTRPC } from "@trpc/server";
+import { initTRPC, TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
   getRecentConversations,
@@ -63,6 +63,33 @@ import {
   countUploadsToday,
 } from "./uploads.js";
 import { testLlm, llmProvider, llmModel, llmBaseUrl, getLastLlmError } from "./llm.js";
+import { bulkSchedule, describeUploads, BulkRejected } from "./bulk.js";
+import {
+  getVapidKeys,
+  saveSubscription,
+  removeSubscription,
+  listSubscriptions,
+  countSubscriptions,
+  getNotifySettings,
+  setNotifySettings,
+  sendPush,
+} from "./push.js";
+
+/**
+ * What counts as a picture this app can hand to Facebook.
+ *
+ * Three shapes: anything already on the internet, a photo uploaded straight
+ * into the composer, and — the one that was missing — a photo out of the
+ * studio gallery. Picking from the gallery was offered in the UI and then
+ * refused here, so the pick simply failed to save.
+ */
+function isPostImage(value: string): boolean {
+  return (
+    /^https?:\/\//.test(value) ||
+    value.startsWith("/api/attachments/") ||
+    value.startsWith("/api/uploads/")
+  );
+}
 
 /**
  * Work out which Meta host a pasted Instagram token belongs to, so it gets
@@ -203,7 +230,7 @@ export const appRouter = t.router({
           // on a phone it never is.
           imageUrl: z
             .string()
-            .refine((v) => /^https?:\/\//.test(v) || v.startsWith("/api/attachments/"), {
+            .refine((v) => isPostImage(v), {
               message: "Needs to be a link, or a photo uploaded here.",
             })
             .optional(),
@@ -228,6 +255,81 @@ export const appRouter = t.router({
       .input(z.object({ prompt: z.string().min(1) }))
       .mutation(async ({ input }) => ({ caption: await generateCaption(input.prompt) })),
     suggest: publicProcedure.mutation(() => suggestPosts()),
+
+    /**
+     * A week of posts in one go.
+     *
+     * The photos are already here — the artists send them in every day. What
+     * was missing was any way to turn eleven of them into eleven posts
+     * without opening the composer eleven times.
+     */
+    bulkSchedule: publicProcedure
+      .input(
+        z.object({
+          photos: z
+            .array(
+              z.object({
+                imageUrl: z.string().refine(isPostImage, {
+                  message: "That photo isn't one this app can publish.",
+                }),
+                caption: z.string().max(4000).optional(),
+                uploadId: z.string().max(64).optional(),
+              })
+            )
+            .min(1)
+            .max(60),
+          startDate: z.coerce.date(),
+          timeOfDay: z
+            .string()
+            .regex(/^\d{1,2}:\d{2}$/, "Use a time like 11:00")
+            .default("11:00"),
+          spacingDays: z.number().int().min(1).max(30).default(1),
+          sharedCaption: z.string().max(4000).optional(),
+          writeCaptions: z.boolean().default(false),
+          avoidClashes: z.boolean().default(true),
+        })
+      )
+      .mutation(async ({ input }) => {
+        // Gallery picks carry the artist's own note, which is the only
+        // honest brief an AI caption can have — the model can't see the
+        // photo, so without it it would be inventing the tattoo.
+        const details = await describeUploads(
+          input.photos.map((p) => p.uploadId).filter((id): id is string => !!id)
+        );
+
+        const items = input.photos.map((photo) => {
+          const known = photo.uploadId ? details.get(photo.uploadId) : undefined;
+          return {
+            imageUrl: photo.imageUrl,
+            caption: photo.caption,
+            note: known?.note,
+            artistName: known?.artistName,
+            uploadId: photo.uploadId,
+          };
+        });
+
+        try {
+          const { scheduled } = await bulkSchedule(items, {
+            startDate: input.startDate,
+            timeOfDay: input.timeOfDay,
+            spacingDays: input.spacingDays,
+            sharedCaption: input.sharedCaption,
+            writeCaptions: input.writeCaptions,
+            avoidClashes: input.avoidClashes,
+          });
+          return {
+            scheduled: scheduled.map((post) => ({
+              imageUrl: post.imageUrl,
+              caption: post.caption,
+              scheduledAt: post.scheduledAt,
+              aiGenerated: post.aiGenerated,
+            })),
+          };
+        } catch (error) {
+          if (error instanceof BulkRejected) throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+          throw error;
+        }
+      }),
   }),
 
   /**
@@ -273,6 +375,70 @@ export const appRouter = t.router({
         }
         return result;
       }),
+  }),
+
+  /**
+   * Notifications on the studio's phone.
+   *
+   * Deliberately separate from the Facebook settings: this is the app's own
+   * channel and it has to keep working when Facebook doesn't, which is the
+   * whole reason it exists.
+   */
+  push: t.router({
+    /** What the browser needs to subscribe. Public by design — it identifies
+     * this server to the push service and grants nothing on its own. */
+    key: publicProcedure.query(async () => ({ publicKey: (await getVapidKeys()).publicKey })),
+
+    status: publicProcedure.query(async () => ({
+      devices: await listSubscriptions(),
+      count: await countSubscriptions(),
+      settings: await getNotifySettings(),
+    })),
+
+    subscribe: publicProcedure
+      .input(
+        z.object({
+          endpoint: z.string().url().max(2000),
+          keys: z.object({ p256dh: z.string().max(255), auth: z.string().max(255) }),
+          label: z.string().max(190).optional(),
+        })
+      )
+      .mutation(({ input }) =>
+        saveSubscription({ endpoint: input.endpoint, keys: input.keys }, input.label)
+      ),
+
+    unsubscribe: publicProcedure
+      .input(z.object({ endpoint: z.string().max(2000) }))
+      .mutation(async ({ input }) => {
+        await removeSubscription(input.endpoint);
+        return { ok: true };
+      }),
+
+    saveSettings: publicProcedure
+      .input(
+        z.object({
+          onMessage: z.boolean().optional(),
+          onBooking: z.boolean().optional(),
+          onDraft: z.boolean().optional(),
+          onProblem: z.boolean().optional(),
+          quietFrom: z.string().regex(/^\d{1,2}:\d{2}$/).optional(),
+          quietTo: z.string().regex(/^\d{1,2}:\d{2}$/).optional(),
+          throttleMinutes: z.number().int().min(0).max(180).optional(),
+        })
+      )
+      .mutation(({ input }) => setNotifySettings(input)),
+
+    // The only honest way to know it works. "Subscribed" is a claim; a buzz
+    // in the pocket is the evidence.
+    test: publicProcedure.mutation(async () => {
+      const { sent } = await sendPush({
+        title: "City Ink — test",
+        body: "Notifications are working. This is what a new enquiry will look like.",
+        url: "/messages",
+        tag: "test",
+      });
+      return { sent };
+    }),
   }),
 
   knowledge: t.router({

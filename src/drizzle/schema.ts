@@ -52,6 +52,10 @@ export const messengerConversations = mysqlTable(
     bookingDates: varchar("booking_dates", { length: 255 }),
     bookingPhotoUrls: json("booking_photo_urls").$type<string[]>(),
     bookingNotifiedAt: timestamp("booking_notified_at"),
+    // When this thread last set off a phone notification. Five photos in a
+    // row is one enquiry, not five, and five buzzes for it is how a person
+    // learns to ignore the buzz.
+    lastNotifiedAt: timestamp("last_notified_at"),
   },
   (t) => ({
     convIdx: uniqueIndex("conv_id_idx").on(t.conversationId),
@@ -192,6 +196,46 @@ export const scheduledPosts = mysqlTable("scheduled_posts", {
   lastError: text("last_error"),
   publishedAt: timestamp("published_at"),
   createdAt: timestamp("created_at").defaultNow(),
+});
+
+/**
+ * Where to send a notification, one row per device that asked for them.
+ *
+ * Brad is on a phone all day with his hands full, and the dashboard is a tab
+ * he isn't looking at. The Messenger ping that existed before only reaches
+ * him inside Facebook's 24-hour window, which closes exactly when a quiet
+ * week means he hasn't messaged the Page — so it went silent precisely when
+ * it mattered least and stayed silent when it mattered most.
+ *
+ * Keyed on a hash of the endpoint rather than the endpoint itself: push
+ * endpoints run past what MySQL will index, and re-subscribing on the same
+ * device should replace the row, not add a second one that double-buzzes.
+ */
+export const pushSubscriptions = mysqlTable("push_subscriptions", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  endpoint: text("endpoint").notNull(),
+  p256dh: varchar("p256dh", { length: 255 }).notNull(),
+  auth: varchar("auth", { length: 255 }).notNull(),
+  /** "iPhone", "Studio iPad" — so a device can be turned off by name. */
+  label: varchar("label", { length: 191 }),
+  lastSentAt: timestamp("last_sent_at"),
+  /** Consecutive failures. A dead endpoint is dropped rather than retried forever. */
+  failures: int("failures").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+/**
+ * Small, boring key/value store.
+ *
+ * Holds the VAPID keypair (generated once on first use, then never again —
+ * regenerating it silently invalidates every subscription) and the
+ * notification preferences. A separate table rather than more columns on
+ * facebook_config, because none of this is Facebook's.
+ */
+export const appSettings = mysqlTable("app_settings", {
+  name: varchar("name", { length: 64 }).primaryKey(),
+  value: text("value"),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
 
 export const facebookConfig = mysqlTable("facebook_config", {

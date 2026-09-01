@@ -4,6 +4,9 @@ import { publishPagePost, importExistingConversations } from "./facebook.js";
 import { syncFeed } from "./feed.js";
 import { ensureMessengerSubscription } from "./facebook.js";
 import { draftForUnanswered } from "./agent.js";
+import { notifyOnce, clearAlert } from "./push.js";
+import { getFacebookConfig, getWebhookRejections } from "./db.js";
+import { describeToken } from "./token.js";
 
 /**
  * Runs every minute. Each post is flipped to "draft" before publishing so a
@@ -57,6 +60,69 @@ export function startScheduler() {
     }
   });
 
+  /**
+   * The watch on the things that fail silently.
+   *
+   * Every outage this app has had looked identical from the dashboard: green
+   * panels, an inbox that quietly stopped. An expired token, a subscription
+   * Facebook had dropped, a stale app secret refusing every delivery. None of
+   * them announced themselves and each was found days later, by hand.
+   *
+   * So the app now goes looking, twice a day, and says so on the phone.
+   * notifyOnce holds it to one alert per fault per day — Facebook retries a
+   * refused delivery, and forty buzzes an hour is the same as none.
+   */
+  cron.schedule("13 8,17 * * *", async () => {
+    try {
+      const config = await getFacebookConfig().catch(() => undefined);
+      if (!config?.pageAccessToken || !config.appId || !config.appSecret) return;
+
+      // Asked of Facebook rather than guessed. Everything goes at once when a
+      // token dies — no messages, no names, no import, no posting.
+      const facts = await describeToken(config.pageAccessToken, config.appId, config.appSecret);
+      if (facts && !facts.valid) {
+        await notifyOnce("token", {
+          title: "City Ink — the Facebook token has expired",
+          body: "Nothing is coming in until it's replaced. Settings → Facebook Page.",
+          url: "/settings#connections",
+          tag: "token",
+        });
+      } else if (facts?.expiresAt) {
+        const daysLeft = (new Date(facts.expiresAt).getTime() - Date.now()) / 86_400_000;
+        if (daysLeft < 4) {
+          await notifyOnce("token", {
+            title: "City Ink — the Facebook token runs out soon",
+            body: `About ${Math.max(0, Math.round(daysLeft))} day(s) left. Replacing it now avoids a silent stop.`,
+            url: "/settings#connections",
+            tag: "token",
+          });
+        } else {
+          await clearAlert("token");
+        }
+      } else {
+        await clearAlert("token");
+      }
+
+      // Deliveries being refused means messages ARE arriving and being binned
+      // — the opposite of a quiet Page, and invisible without this.
+      const rejections = await getWebhookRejections().catch(() => undefined);
+      const recent =
+        !!rejections?.at && Date.now() - new Date(rejections.at).getTime() < 24 * 3600_000;
+      if (recent && (rejections?.count ?? 0) > 5) {
+        await notifyOnce("rejections", {
+          title: "City Ink — messages are being turned away",
+          body: `${rejections?.count} refused. The saved app secret doesn't match the one Meta signs with.`,
+          url: "/settings#delivery",
+          tag: "rejections",
+        });
+      } else if (!recent) {
+        await clearAlert("rejections");
+      }
+    } catch (error) {
+      console.error("[Watch] Health check failed:", (error as Error).message);
+    }
+  });
+
   // Keep the feed current. Hourly is plenty — a studio posts a few times a
   // week, and this costs a Graph call, not a page load.
   cron.schedule("7 * * * *", async () => {
@@ -88,6 +154,15 @@ export function startScheduler() {
             ?.error?.message ?? (error as Error).message;
         await updatePostStatus(post.id, "failed", { lastError: message });
         console.error(`[Scheduler] Post ${post.id} failed:`, message);
+        // A scheduled post failing is invisible until someone opens the Posts
+        // page — and a batch scheduled a fortnight out could fail every day
+        // for a fortnight before anyone looked.
+        await notifyOnce(`post-fail`, {
+          title: "City Ink — a scheduled post didn't go out",
+          body: message.slice(0, 160),
+          url: "/posts",
+          tag: "post-fail",
+        }).catch(() => undefined);
       }
     }
   });

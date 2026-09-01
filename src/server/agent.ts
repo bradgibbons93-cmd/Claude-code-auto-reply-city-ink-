@@ -7,6 +7,7 @@ import {
   getFacebookConfig,
   updateBookingDetails,
   markBookingNotified,
+  claimNotificationSlot,
   setOwnerPsid,
   createPendingReply,
   supersedePendingReplies,
@@ -30,6 +31,7 @@ import {
   publicUrl,
 } from "./facebook.js";
 import { cacheAttachments } from "./attachments.js";
+import { notify, getNotifySettings } from "./push.js";
 
 const HANDOFF_HOURS = Number(process.env.HANDOFF_PAUSE_HOURS || 12);
 
@@ -200,6 +202,18 @@ async function notifyOwner(details: {
   dates: string;
   photoUrls: string[];
 }) {
+  // The phone first, and independently of Messenger. This is the one alert
+  // in the app that costs money to miss, and the Messenger route below only
+  // works inside Facebook's 24-hour window — which is closed exactly when
+  // the studio has been quiet.
+  await notify("booking", {
+    title: `Booking — ${details.name}`,
+    body: `${details.phone}\n${details.dates}`,
+    url: "/bookings",
+    tag: `booking-${details.phone}`,
+    urgent: true,
+  }).catch(() => undefined);
+
   const config = await getFacebookConfig();
   if (!config?.ownerPsid) {
     console.warn(
@@ -242,6 +256,13 @@ async function notifyOwner(details: {
  * notification whether it can wait until he's finished the piece he's on.
  */
 async function notifyOwnerOfDraft(customerName?: string) {
+  await notify("draft", {
+    title: "A reply is ready for your OK",
+    body: customerName ? `For ${customerName}. Nothing sends until you approve it.` : "Nothing sends until you approve it.",
+    url: "/messages",
+    tag: "draft",
+  }).catch(() => undefined);
+
   const config = await getFacebookConfig();
   if (!config?.ownerPsid) return;
   try {
@@ -493,6 +514,53 @@ export async function draftForUnanswered(
  * BUG FIX #6 — the original sent one message with no history, so every reply
  * forgot the last. This loads the recent turns first.
  */
+/**
+ * One buzz per enquiry, not one per message.
+ *
+ * The throttle is claimed in the database rather than held in memory, so a
+ * restart between two photos doesn't reopen the gate — and so two webhook
+ * deliveries landing together can't both decide they're the first.
+ *
+ * The studio's own account is skipped: Brad messages the Page to test things
+ * and to register for alerts, and being notified about himself is the fastest
+ * way to teach someone the notifications are noise.
+ */
+async function notifyOfCustomerMessage(
+  senderId: string,
+  senderName: string | undefined,
+  text: string,
+  photoCount: number,
+  platform: "facebook" | "instagram"
+): Promise<void> {
+  try {
+    const config = await getFacebookConfig().catch(() => undefined);
+    if (config?.ownerPsid && config.ownerPsid === senderId) return;
+
+    const settings = await getNotifySettings();
+    if (!settings.onMessage) return;
+    if (!(await claimNotificationSlot(senderId, settings.throttleMinutes))) return;
+
+    const who = senderName || (platform === "instagram" ? "An Instagram DM" : "A new enquiry");
+    const preview = text.trim()
+      ? text.trim().slice(0, 140)
+      : photoCount === 1
+        ? "Sent a photo."
+        : `Sent ${photoCount} photos.`;
+
+    await notify("message", {
+      title: platform === "instagram" ? `${who} — Instagram` : who,
+      body: preview,
+      url: "/messages",
+      // Per thread, so a second message replaces the first on the lock
+      // screen instead of stacking two half-read lines.
+      tag: `thread-${senderId}`,
+    });
+  } catch (error) {
+    // Never let a notification stop a customer's message being handled.
+    console.warn("[Push] Couldn't announce a new message:", (error as Error).message);
+  }
+}
+
 export async function handleCustomerMessage(
   senderId: string,
   messageId: string,
@@ -527,6 +595,12 @@ export async function handleCustomerMessage(
     console.log(`[Agent] Duplicate delivery ignored: ${messageId}`);
     return;
   }
+
+  // Brad's phone, not the dashboard tab nobody has open. Deliberately before
+  // the pause check below: a thread a person has taken over still deserves
+  // to announce itself, because "someone replied an hour ago" is not the
+  // same as "this has been answered".
+  await notifyOfCustomerMessage(senderId, senderName, text, keptPhotos.length, platform);
 
   // BUG FIX #7 — a human took this thread over, so stay out of it.
   if (conversation?.botPausedUntil && new Date(conversation.botPausedUntil) > new Date()) {

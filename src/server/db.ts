@@ -426,6 +426,38 @@ export async function markBookingNotified(conversationId: string) {
     .where(eq(messengerConversations.conversationId, conversationId));
 }
 
+/**
+ * Whether this thread is allowed to set off a phone notification, and if so,
+ * claim the slot in the same breath.
+ *
+ * A customer sending four reference photos is one enquiry. Four buzzes for
+ * it is how somebody learns to swipe the buzz away without reading it, which
+ * is worse than no notification at all. The claim is the update itself, so
+ * two deliveries arriving together can't both decide they're first.
+ */
+export async function claimNotificationSlot(
+  conversationId: string,
+  throttleMinutes: number
+): Promise<boolean> {
+  const db = await getDb();
+  const rows = await db
+    .select({ lastNotifiedAt: messengerConversations.lastNotifiedAt })
+    .from(messengerConversations)
+    .where(eq(messengerConversations.conversationId, conversationId))
+    .limit(1);
+  if (!rows.length) return false;
+
+  const last = rows[0].lastNotifiedAt ? new Date(rows[0].lastNotifiedAt).getTime() : 0;
+  const window = Math.max(0, throttleMinutes) * 60_000;
+  if (last && Date.now() - last < window) return false;
+
+  await db
+    .update(messengerConversations)
+    .set({ lastNotifiedAt: new Date() })
+    .where(eq(messengerConversations.conversationId, conversationId));
+  return true;
+}
+
 export async function setOwnerPsid(psid: string) {
   const db = await getDb();
   const existing = await getFacebookConfig();
@@ -537,6 +569,19 @@ export async function createPendingReply(
   alternatives?: { label: string; text: string }[],
   llmFailed = false
 ): Promise<boolean> {
+  // An empty draft with nothing explaining it is a card on the board with a
+  // heading and nothing under it — unreadable, unapprovable, and it makes the
+  // count at the top of the dashboard a lie.
+  //
+  // An empty draft flagged llmFailed is a different thing and is deliberate:
+  // the card appears with an empty box and a note that the AI couldn't write
+  // it, so the studio writes the reply themselves. A placeholder there would
+  // be worse, because a placeholder can be approved by accident.
+  if (!draftText.trim() && !llmFailed) {
+    console.warn(`[Agent] Refused to queue an empty draft for ${conversationId}`);
+    return false;
+  }
+
   const db = await getDb();
   try {
     await db.insert(pendingReplies).values({

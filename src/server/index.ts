@@ -90,7 +90,15 @@ app.post("/api/uploads", express.json({ limit: "24mb" }), async (req, res) => {
   }
 });
 
-app.get<{ id: string }>("/api/uploads/:id", requireStudio, async (req, res) => {
+/**
+ * A gallery photo. Studio-only, or a link the publisher signed.
+ *
+ * The signed variant matters because these are now postable: Facebook comes
+ * and collects the picture itself, with no cookie, so behind a password
+ * every bulk-scheduled post would have failed on Facebook's side of the
+ * fetch — invisibly, the same way the attachments route did.
+ */
+app.get<{ id: string }>("/api/uploads/:id", requireStudioOrSignedLink, async (req, res) => {
   try {
     const upload = await readArtistUpload(req.params.id);
     if (!upload) return res.sendStatus(404);
@@ -115,7 +123,7 @@ app.get("/api/upload-qr.png", requireStudio, async (req, res) => {
       width: 720,
       margin: 2,
       errorCorrectionLevel: "M",
-      color: { dark: "#2B2622", light: "#FFFFFF" },
+      color: { dark: "#6F5A4B", light: "#FFFFFF" },
     });
     res.setHeader("Content-Type", "image/png");
     res.setHeader("Cache-Control", "public, max-age=86400");

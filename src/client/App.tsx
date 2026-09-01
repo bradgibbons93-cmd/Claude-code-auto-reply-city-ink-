@@ -122,7 +122,10 @@ function StatusBar() {
   }, []);
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 flex justify-center pb-4">
+    // Bottom-right rather than centred: sitting in the middle of the page it
+    // covered whatever card happened to be under it, which on the dashboard
+    // was the top of a scheduled post.
+    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 flex justify-end pb-4 pr-3 sm:pr-6">
       <div className="glass pointer-events-auto flex items-center gap-4 rounded-full border px-5 py-2 text-xs text-muted-foreground shadow-soft">
         <span className="flex items-center gap-2">
           <span className="live-dot" />

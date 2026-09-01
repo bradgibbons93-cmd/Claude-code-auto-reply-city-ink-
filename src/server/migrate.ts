@@ -156,6 +156,23 @@ const STATEMENTS = [
     KEY upload_created_idx (created_at)
   )`,
 
+  `CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id VARCHAR(64) PRIMARY KEY,
+    endpoint TEXT NOT NULL,
+    p256dh VARCHAR(255) NOT NULL,
+    auth VARCHAR(255) NOT NULL,
+    label VARCHAR(191),
+    last_sent_at TIMESTAMP NULL,
+    failures INT DEFAULT 0,
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS app_settings (
+    name VARCHAR(64) PRIMARY KEY,
+    value TEXT,
+    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  )`,
+
   `CREATE TABLE IF NOT EXISTS example_exchanges (
     id INT AUTO_INCREMENT PRIMARY KEY,
     customer_message TEXT NOT NULL,
@@ -189,6 +206,7 @@ const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "messenger_conversations", column: "booking_dates", ddl: "VARCHAR(255)" },
   { table: "messenger_conversations", column: "booking_photo_urls", ddl: "JSON" },
   { table: "messenger_conversations", column: "booking_notified_at", ddl: "TIMESTAMP NULL" },
+  { table: "messenger_conversations", column: "last_notified_at", ddl: "TIMESTAMP NULL" },
   { table: "facebook_config", column: "owner_psid", ddl: "VARCHAR(191)" },
   { table: "timely_config", column: "calendar_ics_url", ddl: "VARCHAR(1024)" },
   { table: "pending_replies", column: "is_sensitive", ddl: "BOOLEAN DEFAULT FALSE" },

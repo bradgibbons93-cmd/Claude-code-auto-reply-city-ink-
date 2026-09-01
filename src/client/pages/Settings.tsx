@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import PhoneNotifications from "@/components/PhoneNotifications";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -466,6 +467,8 @@ export default function Settings() {
           </Button>
         </CardContent>
       </Card>
+
+      <PhoneNotifications />
 
       <Card className="border-border">
         <CardHeader>
