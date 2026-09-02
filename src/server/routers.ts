@@ -74,6 +74,7 @@ import {
   getNotifySettings,
   setNotifySettings,
   sendPush,
+  getLastPushError,
 } from "./push.js";
 
 /**
@@ -195,9 +196,24 @@ export const appRouter = t.router({
     // Imported threads get no draft — importing writes to nobody. This is
     // the deliberate second step, for the people who asked something weeks
     // ago and were missed.
+    /**
+     * Draft for everyone who wrote in and never got an answer.
+     *
+     * Bounded to the last fortnight by default. It used to reach back over
+     * everything ever stored, which put a June enquiry — long since answered
+     * by hand from Meta's own inbox, where this app can't see it — on the
+     * board as though it had just come in.
+     */
     draftUnanswered: publicProcedure
-      .input(z.object({ limit: z.number().min(1).max(50).default(20) }).default({ limit: 20 }))
-      .mutation(({ input }) => draftForUnanswered(input.limit)),
+      .input(
+        z
+          .object({
+            limit: z.number().min(1).max(50).default(20),
+            withinDays: z.number().min(1).max(365).default(14),
+          })
+          .default({ limit: 20, withinDays: 14 })
+      )
+      .mutation(({ input }) => draftForUnanswered(input.limit, input.withinDays * 24 * 60)),
   }),
 
   autoReply: t.router({
@@ -431,14 +447,19 @@ export const appRouter = t.router({
 
     // The only honest way to know it works. "Subscribed" is a claim; a buzz
     // in the pocket is the evidence.
+    //
+    // It reports what actually happened. Saying "no devices are registered"
+    // when a device was registered and the push service refused it sent the
+    // studio to fix the one thing that wasn't broken.
     test: publicProcedure.mutation(async () => {
-      const { sent } = await sendPush({
+      const devices = await countSubscriptions();
+      const { sent, dropped } = await sendPush({
         title: "City Ink — test",
         body: "Notifications are working. This is what a new enquiry will look like.",
         url: "/messages",
         tag: "test",
       });
-      return { sent };
+      return { sent, devices, dropped, error: sent ? null : getLastPushError() };
     }),
   }),
 
@@ -636,7 +657,9 @@ export const appRouter = t.router({
     // Everyone who wrote in before the app was watching. A webhook only ever
     // carries what happens next, so without this they stay invisible until
     // they happen to message again.
-    importThreads: publicProcedure.mutation(() => importExistingConversations()),
+    // Forced: pressing the button is the instruction to try now, whatever
+    // the poll's back-off has decided about this inbox.
+    importThreads: publicProcedure.mutation(() => importExistingConversations(1000, true)),
 
     /**
      * Is Facebook actually delivering? Verifying the webhook URL is only half

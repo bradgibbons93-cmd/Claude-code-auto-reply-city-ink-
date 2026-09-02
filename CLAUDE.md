@@ -107,6 +107,59 @@ exactly that.
 Stamping `now()` on import made a hundred threads all read the same age and
 destroyed the inbox order.
 
+**Who spoke last is decided by when a message was SAID, never by row id.**
+`MAX(id)` is insert order, and insert order is not message order — a thread
+pulled in across two imports can have an older message on a higher id. Two
+queries used it while every other reader ordered by `created_at`, so they
+disagreed with the thread view. That is how a June enquiry the studio had
+already answered by hand came back onto the board as unanswered, and how
+genuinely new ones sat in "waiting on them" and were never drafted for. Both
+symptoms, one cause.
+
+**The studio answers plenty of messages from Meta's own inbox, where this app
+cannot see them.** Echoes cover it going forward; anything older is only known
+if it was imported. So "Draft the unanswered" is bounded to a fortnight — it
+used to reach back over everything ever stored — and any draft answering a
+message over two weeks old carries a warning on the card.
+
+**A draft is claimed before it is sent, so a failed send has to put it back.**
+It didn't, and that is the worst bug this app has had: approving marked the
+draft resolved and only then tried to send, so when Meta refused, the card
+vanished looking exactly like a reply that had gone and the customer was never
+answered by anyone. `restorePendingReply` puts it back with `send_error` on it,
+and the card says so in red.
+
+**Meta's standard reply window closes 24 hours after the customer's last
+message**, which for a tattoo studio is the normal case, not the edge case.
+Every reply here is read and approved by a person, so a refused send is retried
+once under `messaging_type: "MESSAGE_TAG"` with `tag: "HUMAN_AGENT"`, which is
+both what the Human Agent permission is for and true. Seven days is the ceiling
+even then; past that, `explainSendFailure()` says to answer from the phone.
+
+**A 200 from Graph is not proof anything was sent.** Check for `message_id`.
+
+**Apple refuses a push outright if the VAPID contact isn't routable.** The
+default was a `mailto:` at `.example`, a reserved domain, so every notification
+to an iPhone came back 403 while the panel read "On for this iphone" and listed
+the device. It defaults to the dashboard's own address now. `PUBLIC_URL` is not
+set on Railway; `RAILWAY_PUBLIC_DOMAIN` is, and both `publicUrl()` and the VAPID
+contact fall back to it.
+
+**`max_tokens` has to leave room for a model that thinks before it answers.**
+At 1500, Claude Sonnet 5 spent the whole budget reasoning and returned a
+response with no text block at all — which surfaced as "Empty LLM response" and
+read like an unreachable model. Eight of nine drafts failed in one minute. It
+is 4000 now, retried once at double, and a missing text block reports
+`stop_reason` and which blocks did arrive.
+
+**Instagram says "too many conversations" as well as "reduce the amount of
+data",** and they mean the same thing. Only the second was recognised, so the
+shrink never engaged on the error this studio's inbox actually returns. Worse,
+retrying a 40-second timeout four times outlasts the three-minute poll, so the
+polls overlapped. There is a per-inbox back-off now (3 minutes doubling to 30);
+**a manual Import ignores it**, because pressing the button is the instruction
+to try now.
+
 **Notifications go to the phone by web push, not through Messenger.** The
 Messenger ping to `ownerPsid` is still there and still fires, but it only
 works inside Facebook's 24-hour window — which is closed exactly when the
@@ -232,6 +285,10 @@ a thread, Instagram 10).
 pattern matches the very command line that contains it. Cost half an hour of
 tool calls returning exit 1 with no output. Start each run on a fresh port
 instead, or keep the PID.
+
+**Suites that assert on notifications must pin the quiet hours.** The defaults
+are 22:00–07:00, so a test written in the afternoon passes and the same test
+fails at one in the morning. One did.
 
 **web-push always speaks https**, whatever the endpoint's scheme says, so a
 stand-in push service has to be a TLS server with a self-signed certificate

@@ -38,9 +38,52 @@ const IG_GRAPH =
  * back identically no matter how small the page is.
  */
 function asksForTooMuch(error: unknown): boolean {
-  const body = (error as { response?: { data?: { error?: { message?: string } } } })?.response?.data
-    ?.error?.message;
-  return /reduce the amount of data/i.test(body ?? "");
+  const err = (error as {
+    response?: { data?: { error?: { message?: string; error_subcode?: number; error_user_msg?: string } } };
+  })?.response?.data?.error;
+  if (!err) return false;
+  // Meta says the same thing two ways, and the second one is the one the
+  // studio's own inbox actually returns:
+  //   "Please reduce the amount of data you're asking for"
+  //   "Your query has timed out since you have too many conversations"  (2534084)
+  // Only the first was recognised, so the retry never engaged on the error
+  // that was firing every three minutes.
+  return (
+    err.error_subcode === 2534084 ||
+    /reduce the amount of data/i.test(err.message ?? "") ||
+    /too many conversations/i.test(err.error_user_msg ?? "")
+  );
+}
+
+/**
+ * When an inbox refused us, and for how long to leave it alone.
+ *
+ * Instagram's conversations edge refuses this studio's inbox outright —
+ * "you have too many conversations" — however small the page. Retrying that
+ * every three minutes achieved nothing except a Graph connection held open
+ * for forty seconds out of every hundred and eighty, and a log nobody could
+ * read past. The webhook is the live path for Instagram and it works; this
+ * is the floor under it, and a floor can afford to be patient.
+ */
+const inboxBackoff = new Map<string, { until: number; failures: number }>();
+
+function inboxIsResting(key: string): boolean {
+  const state = inboxBackoff.get(key);
+  return !!state && Date.now() < state.until;
+}
+
+function noteInboxFailure(key: string): void {
+  const failures = (inboxBackoff.get(key)?.failures ?? 0) + 1;
+  // 3 minutes, then 6, 12, 24, capped at half an hour.
+  const minutes = Math.min(30, 3 * 2 ** Math.min(failures - 1, 4));
+  inboxBackoff.set(key, { until: Date.now() + minutes * 60_000, failures });
+  if (failures === 1 || failures % 5 === 0) {
+    console.warn(`[Facebook] Leaving the ${key} inbox alone for ${minutes} minutes after ${failures} refusal(s)`);
+  }
+}
+
+function noteInboxSuccess(key: string): void {
+  inboxBackoff.delete(key);
 }
 
 async function getShrinking<T>(
@@ -51,15 +94,26 @@ async function getShrinking<T>(
   const start = Number(params?.limit ?? 0);
   let attempt = 0;
   let limit = start;
+  // The whole retry chain has to finish inside the caller's slot. The poll
+  // runs every three minutes, and four retries of a forty-second timeout
+  // takes longer than that — the polls began overlapping, each one holding a
+  // Graph connection open while the next started.
+  const deadline = Date.now() + 90_000;
 
   for (;;) {
     try {
       return await axios.get<T>(url, { params, timeout });
     } catch (error) {
       // Nothing to shrink on a paging URL, which carries its own limit.
-      if (!params || !start || !asksForTooMuch(error) || limit <= 1 || attempt >= 4) throw error;
+      if (!params || !start || !asksForTooMuch(error) || limit <= 1 || attempt >= 3) throw error;
+      if (Date.now() > deadline) {
+        console.warn("[Facebook] Gave up shrinking — out of time before the next poll");
+        throw error;
+      }
       attempt += 1;
-      limit = Math.max(1, Math.floor(limit / 2));
+      // Straight to a quarter rather than a half. Meta has refused every
+      // gentle step so far, and each refusal costs a full timeout.
+      limit = Math.max(1, Math.floor(limit / 4));
       params = { ...params, limit: String(limit) };
       console.warn(`[Facebook] Instagram refused that page — asking for ${limit} instead`);
     }
@@ -149,6 +203,65 @@ export function verifyWebhookSignature(
   return crypto.timingSafeEqual(received, computed);
 }
 
+/** Meta refusing because its 24-hour reply window has closed. */
+function outsideWindow(error: unknown): boolean {
+  const err = (error as { response?: { data?: { error?: { code?: number; error_subcode?: number; message?: string } } } })
+    ?.response?.data?.error;
+  if (!err) return false;
+  return (
+    err.error_subcode === 2018278 ||
+    /outside of allowed window|outside the allowed window|24[- ]hour/i.test(err.message ?? "")
+  );
+}
+
+/**
+ * A Graph refusal to send, said in a sentence the studio can act on.
+ *
+ * This one matters more than the others: a failure here means a customer
+ * asked something and got nothing back, and the studio believed otherwise.
+ */
+export function explainSendFailure(raw: string): string {
+  if (/outside of allowed window|outside the allowed window|2018278/i.test(raw)) {
+    return (
+      "Meta wouldn't deliver this: it's been more than 7 days since they last messaged, " +
+      "which is as long as Meta lets a business reply. Answer them from the Messenger or " +
+      "Instagram app instead — the draft is still here to copy."
+    );
+  }
+  if (/Session has expired|access token/i.test(raw)) {
+    return (
+      "The Facebook token has expired, so nothing can be sent. Paste a fresh one in " +
+      "Settings → Facebook Page and this reply will go through — nothing was lost."
+    );
+  }
+  if (/pages_messaging|instagram_business_manage_messages|Advanced Access/i.test(raw)) {
+    return (
+      "Meta hasn't granted this app permission to send messages yet. It's requested under " +
+      "App Review → Permissions and Features; the draft is kept until it lands."
+    );
+  }
+  if (/does not exist|Unsupported (get|post) request/i.test(raw)) {
+    return "Meta doesn't recognise that conversation any more — the person may have deleted it or blocked the Page.";
+  }
+  return raw.length > 300 ? `${raw.slice(0, 300)}…` : raw;
+}
+
+/**
+ * Send a reply, and be certain it actually went.
+ *
+ * Two things here are load-bearing:
+ *
+ * The HUMAN_AGENT retry. Meta's standard window closes 24 hours after the
+ * customer's last message, and a tattoo studio replying to a three-day-old
+ * enquiry is the normal case, not the edge case. Every reply this app sends
+ * has been read and approved by a person, which is exactly what the Human
+ * Agent tag is for, and it widens the window to seven days. Without it,
+ * approving an older draft failed — and used to fail silently.
+ *
+ * And the message_id check. Graph can answer 200 without having sent
+ * anything; treating that as success is how a reply goes missing with
+ * nothing anywhere to say so.
+ */
 export async function sendMessengerMessage(
   recipientId: string,
   messageText: string,
@@ -157,15 +270,48 @@ export async function sendMessengerMessage(
   const endpoint = await endpointFor(platform);
   if (!endpoint) throw new Error("Facebook is not connected yet");
 
-  await axios.post(
-    `${endpoint.base}/me/messages`,
-    {
+  const post = (body: Record<string, unknown>) =>
+    axios.post(`${endpoint.base}/me/messages`, body, {
+      params: { access_token: endpoint.token },
+      timeout: 15000,
+    });
+
+  const message = { text: messageText };
+  let data: { message_id?: string; error?: { message?: string } };
+
+  try {
+    ({ data } = await post({
       recipient: { id: recipientId },
       messaging_type: "RESPONSE",
-      message: { text: messageText },
-    },
-    { params: { access_token: endpoint.token }, timeout: 15000 }
-  );
+      message,
+    }));
+  } catch (error) {
+    if (!outsideWindow(error)) {
+      throw new Error(explainSendFailure(describeGraphError("send", error)));
+    }
+    // A person read this and approved it, so the Human Agent tag is the
+    // honest description of what is happening as well as the one that works.
+    try {
+      ({ data } = await post({
+        recipient: { id: recipientId },
+        messaging_type: "MESSAGE_TAG",
+        tag: "HUMAN_AGENT",
+        message,
+      }));
+      console.log(`[Facebook] Sent to ${recipientId} under the Human Agent tag — the standard window had closed`);
+    } catch (retryError) {
+      throw new Error(explainSendFailure(describeGraphError("send", retryError)));
+    }
+  }
+
+  if (!data?.message_id) {
+    throw new Error(
+      explainSendFailure(
+        data?.error?.message ??
+          "Meta accepted the request but didn't confirm the message was sent, so it may not have arrived."
+      )
+    );
+  }
 }
 
 export async function sendTypingIndicator(
@@ -465,6 +611,8 @@ export async function fetchInboxParticipants(
     const endpoint = await endpointFor(platform);
     if (!endpoint) continue;
 
+    if (inboxIsResting(`${platform}-names`)) continue;
+
     let url: string | undefined = `${endpoint.base}/me/conversations`;
     let params: Record<string, string> | undefined = {
       // Only graph.facebook.com splits one edge by platform. On Instagram's
@@ -496,11 +644,14 @@ export async function fetchInboxParticipants(
           }
         }
 
+        noteInboxSuccess(`${platform}-names`);
+
         // paging.next is a fully-formed URL with the token already on it.
         url = data.paging?.next;
         params = undefined;
       } catch (error) {
         const detail = describeGraphError("conversations", error);
+        noteInboxFailure(`${platform}-names`);
         // One inbox failing (commonly Instagram, when it isn't linked) must
         // not throw away the names the other one gave us.
         console.error(`[Facebook] ${platform} inbox list failed — ${detail}`);
@@ -621,7 +772,17 @@ export interface ImportedThreads {
  * already answered by hand.
  */
 export async function importExistingConversations(
-  maxThreads = 1000
+  maxThreads = 1000,
+  /**
+   * Ask even if this inbox has just refused us.
+   *
+   * The back-off exists so the three-minute poll stops hammering an inbox
+   * Meta is turning away. It must not apply when a person presses Import —
+   * pressing the button IS the instruction to try now, and a button that
+   * quietly does nothing for the next half hour is worse than one that
+   * fails honestly.
+   */
+  force = false
 ): Promise<ImportedThreads> {
   const { getOrCreateConversation, recordMessage, correctMessageSender, dropDraftsAnsweringOurselves } =
     await import("./db.js");
@@ -655,6 +816,13 @@ export async function importExistingConversations(
       access_token: endpoint.token,
     };
 
+    // An inbox that has just refused us is left alone rather than asked
+    // again ninety seconds later.
+    if (!force && inboxIsResting(`${platform}-import`)) {
+      notes.push(`${platform}: resting after a refusal`);
+      continue;
+    }
+
     let seen = 0;
     let failed = "";
 
@@ -668,6 +836,7 @@ export async function importExistingConversations(
           params,
           platform === "instagram" ? 40000 : 20000
         );
+        noteInboxSuccess(`${platform}-import`);
 
         for (const thread of data.data ?? []) {
           if (seen >= maxThreads) break;
@@ -761,6 +930,7 @@ export async function importExistingConversations(
         params = undefined;
       } catch (error) {
         failed = describeGraphError("conversations", error);
+        noteInboxFailure(`${platform}-import`);
         console.error(`[Facebook] ${platform} import failed — ${failed}`);
         break;
       }

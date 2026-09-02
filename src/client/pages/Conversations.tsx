@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearch } from "wouter";
-import { formatDistanceToNow } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent } from "@/components/ui/card";
@@ -68,6 +68,7 @@ function PendingReplyCard({
     draftText: string;
     isSensitive?: boolean | null;
     llmFailed?: boolean | null;
+    sendError?: string | null;
     createdAt: string | Date | null;
   };
   senderName: string;
@@ -103,6 +104,13 @@ function PendingReplyCard({
   // server-side so this page and the dashboard can't disagree.
   const recentPhotos = draft.photoUrls ?? [];
 
+  // Anything older than a fortnight is almost certainly cold, and quite
+  // possibly answered by hand somewhere this app can't see. Saying so beats
+  // letting the studio send a stranger a reply to something they wrote in
+  // June as though no time had passed.
+  const askedAt = answering?.createdAt ? new Date(answering.createdAt) : null;
+  const isStale = !!askedAt && Date.now() - askedAt.getTime() > 14 * 24 * 3600 * 1000;
+
   // The agent's first answer plus the other angles it offered, as one list to
   // choose between. The first is what it led with.
   const options = [
@@ -115,7 +123,13 @@ function PendingReplyCard({
       toast.success("Sent");
       utils.pendingReplies.list.invalidate();
     },
-    onError: (error) => toast.error(error.message || "Couldn't send that reply."),
+    onError: (error) => {
+      // The draft is put back on the board by the server when a send fails,
+      // so refresh — otherwise the card stays gone on screen and the toast
+      // is the only trace of a customer who never got answered.
+      utils.pendingReplies.list.invalidate();
+      toast.error(error.message || "Couldn't send that reply.", { duration: 10000 });
+    },
   });
   // The model fell over on this one. Asking it again is nearly always faster
   // than typing the reply out, so offer that before the blank box.
@@ -173,6 +187,28 @@ function PendingReplyCard({
           </div>
         )}
 
+        {isStale && askedAt && (
+          <div className="flex items-start gap-2 rounded-xl border border-sepia/40 bg-beige/25 px-3 py-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-sepia" />
+            <p className="text-xs text-charcoal">
+              This is from {format(askedAt, "d MMMM")} — check the thread before sending, in case
+              it was already answered somewhere else.
+            </p>
+          </div>
+        )}
+
+        {/* This one was approved and did NOT reach the customer. The card
+            used to disappear on a failed send, which read as "sent" and left
+            the person waiting on an answer nobody knew hadn't gone. */}
+        {!!draft.sendError && (
+          <div className="flex items-start gap-2 rounded-xl border border-destructive/45 bg-destructive/10 px-3 py-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <p className="text-xs text-destructive">
+              <span className="font-medium">This didn't send.</span> {draft.sendError}
+            </p>
+          </div>
+        )}
+
         <div className="flex items-center justify-between gap-3">
           <button
             onClick={() => onOpenThread(draft.conversationId)}
@@ -190,9 +226,25 @@ function PendingReplyCard({
               {senderName}
             </span>
           </button>
-          {draft.createdAt && (
-            <span className="shrink-0 text-xs text-muted-foreground">
-              {formatDistanceToNow(new Date(draft.createdAt), { addSuffix: true })}
+          {/* When the CUSTOMER wrote, not when the draft was written. A June
+              enquiry showing "less than a minute ago" because the agent had
+              just drafted for it is how an old, already-answered thread came
+              to look like a live one. */}
+          {(answering?.createdAt || draft.createdAt) && (
+            <span
+              className={cn(
+                "shrink-0 text-xs",
+                isStale ? "text-destructive" : "text-muted-foreground"
+              )}
+              title={
+                answering?.createdAt
+                  ? `They wrote this ${format(new Date(answering.createdAt), "d MMM yyyy, HH:mm")}`
+                  : undefined
+              }
+            >
+              {formatDistanceToNow(new Date((answering?.createdAt ?? draft.createdAt) as string), {
+                addSuffix: true,
+              })}
             </span>
           )}
         </div>
@@ -409,12 +461,14 @@ export default function Conversations() {
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-beige/20 px-4 py-3">
         <p className="min-w-0 flex-1 text-xs text-muted-foreground">
           Someone asked a question and never got an answer? This writes a draft for each of
-          them — nothing sends, they all wait for your OK like any other.
+          them from the last fortnight — nothing sends, they all wait for your OK like any
+          other. Older threads are left alone: they've usually been answered by hand somewhere
+          this app can't see.
         </p>
         <Button
           variant="outline"
           size="sm"
-          onClick={() => draftUnanswered.mutate({ limit: 20 })}
+          onClick={() => draftUnanswered.mutate({ limit: 20, withinDays: 14 })}
           disabled={draftUnanswered.isPending}
         >
           <Sparkles

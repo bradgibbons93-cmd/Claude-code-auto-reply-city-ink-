@@ -42,7 +42,12 @@ export async function invokeLLM(
   messages: ChatMessage[],
   opts: { maxTokens?: number; temperature?: number } = {}
 ): Promise<string> {
-  const maxTokens = opts.maxTokens ?? 400;
+  // 400 was far too tight for a current model. A Claude 4.6-or-later model
+  // may reason before it answers, and that reasoning is spent out of the same
+  // budget — so a small ceiling can be used up entirely before a single word
+  // of the actual reply is written, and what comes back has no text in it at
+  // all. That is what "Empty LLM response" was, eight times in one minute.
+  const maxTokens = opts.maxTokens ?? 1024;
   const temperature = opts.temperature ?? 0.6;
 
   if (llmProvider() === "anthropic") {
@@ -68,8 +73,20 @@ export async function invokeLLM(
       }
     );
 
-    const block = data?.content?.find((b: { type: string }) => b.type === "text");
-    if (!block?.text) throw new Error("Empty LLM response");
+    const blocks: { type: string; text?: string }[] = data?.content ?? [];
+    const block = blocks.find((b) => b.type === "text");
+    if (!block?.text) {
+      // Say which of the two this is. "Empty LLM response" was true and
+      // useless: it read as the model being unreachable when in fact it had
+      // answered, and had simply run out of room before the answer began.
+      const kinds = blocks.map((b) => b.type).join(", ") || "nothing at all";
+      const stop = data?.stop_reason ?? "no stop_reason";
+      throw new Error(
+        stop === "max_tokens"
+          ? `The model used its whole ${maxTokens}-token budget before writing any reply (it returned ${kinds}). It needs more room.`
+          : `The model returned no text — ${kinds}, stop_reason ${stop}.`
+      );
+    }
     return block.text as string;
   }
 
@@ -290,7 +307,22 @@ export async function invokeLLMJson<T>(
     // extracted booking fields does not fit in the 400 the plain call
     // defaults to — the answer came back cut off mid-array, failed to parse,
     // and every enquiry landed on the board with no draft at all.
-    const raw = await invokeLLM(messages, { temperature: 0.3, maxTokens: opts.maxTokens ?? 1500 });
+    // Room for the model to think AND answer. A draft, two alternatives and
+    // the extracted booking fields is not a big answer, but on a model that
+    // reasons first the reasoning comes out of the same allowance — at 1500
+    // it was being spent before the reply started, and every enquiry landed
+    // on the board with no draft at all.
+    const budget = opts.maxTokens ?? 4000;
+    let raw: string;
+    try {
+      raw = await invokeLLM(messages, { temperature: 0.3, maxTokens: budget });
+    } catch (firstError) {
+      // Out of room is the one failure worth spending a second call on;
+      // everything else would fail identically however much room it had.
+      if (!/whole \d+-token budget/.test((firstError as Error).message)) throw firstError;
+      console.warn(`[LLM] Ran out of room at ${budget} tokens — asking again with ${budget * 2}`);
+      raw = await invokeLLM(messages, { temperature: 0.3, maxTokens: budget * 2 });
+    }
     const cleaned = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
     const start = cleaned.indexOf("{");
     if (start === -1) {

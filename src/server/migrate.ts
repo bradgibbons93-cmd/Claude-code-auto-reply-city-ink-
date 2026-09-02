@@ -213,6 +213,7 @@ const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "messenger_messages", column: "attachment_urls", ddl: "JSON" },
   { table: "pending_replies", column: "alternatives", ddl: "JSON" },
   { table: "pending_replies", column: "llm_failed", ddl: "BOOLEAN DEFAULT FALSE" },
+  { table: "pending_replies", column: "send_error", ddl: "TEXT" },
   { table: "facebook_config", column: "instagram_access_token", ddl: "TEXT" },
   // Kept in the database, not in memory. Held in a module variable it reset on
   // every deploy, so the delivery panel said "nothing has ever arrived" minutes

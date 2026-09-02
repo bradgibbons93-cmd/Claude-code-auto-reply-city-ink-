@@ -153,6 +153,9 @@ export async function getUnansweredConversations(limit = 20, newerThanMinutes?: 
   const recent = newerThanMinutes
     ? sql` AND c.last_message_at > NOW() - INTERVAL ${newerThanMinutes} MINUTE`
     : sql``;
+  // The last message by when it was said. See getRecentConversations above:
+  // MAX(id) is insert order, which is not the same thing, and the difference
+  // is a thread the studio answered months ago coming back up for a reply.
   const rows = await db.execute(
     sql`SELECT c.conversation_id AS conversationId
           FROM messenger_conversations c
@@ -160,7 +163,10 @@ export async function getUnansweredConversations(limit = 20, newerThanMinutes?: 
             SELECT m1.conversation_id, m1.sender_type
               FROM messenger_messages m1
               JOIN (
-                SELECT conversation_id, MAX(id) AS last_id
+                SELECT conversation_id,
+                       SUBSTRING_INDEX(
+                         GROUP_CONCAT(id ORDER BY created_at DESC, id DESC), ',', 1
+                       ) AS last_id
                   FROM messenger_messages
                  GROUP BY conversation_id
               ) t ON t.last_id = m1.id
@@ -271,12 +277,26 @@ export async function getRecentConversations(limit = 250) {
   // Who spoke last in each thread. That single fact is what separates "they
   // asked something and nobody has answered" from "the ball is in their
   // court", which is the split Brad actually works from.
+  //
+  // By when the message was SAID, not by the order the rows went in.
+  //
+  // MAX(id) is insert order, and insert order is not message order: the
+  // import stores whatever a thread happens to hand over, and a thread
+  // pulled in over two runs can have an older message sitting on a higher
+  // id than a newer one. Every other reader in this file already orders by
+  // created_at — these two didn't, so they disagreed with the thread view
+  // about who had spoken last. That is how a June enquiry the studio had
+  // answered by hand came back up as needing a reply, and how genuinely
+  // unanswered threads sat in "waiting on them" and were never drafted for.
   const ids = rows.map((r) => r.conversationId);
   const [lastRows] = (await db.execute(
     sql`SELECT m.conversation_id AS conversationId, m.sender_type AS senderType
           FROM messenger_messages m
           JOIN (
-            SELECT conversation_id, MAX(id) AS last_id
+            SELECT conversation_id,
+                   SUBSTRING_INDEX(
+                     GROUP_CONCAT(id ORDER BY created_at DESC, id DESC), ',', 1
+                   ) AS last_id
               FROM messenger_messages
              WHERE conversation_id IN ${ids}
              GROUP BY conversation_id
@@ -827,6 +847,28 @@ export async function resolvePendingReply(
     // Kept so the caller can tell whether Brad rewrote it before sending.
     originalDraft: row.draftText,
   };
+}
+
+/**
+ * Put an approved draft back on the board because it never reached anybody.
+ *
+ * Approving claims the draft first, so two taps can't send the same reply
+ * twice. That claim has to be undone when the send fails, or the card is
+ * gone and the customer is simply never answered — which is what happened,
+ * and the studio had no way of knowing.
+ */
+export async function restorePendingReply(id: number, sendError: string): Promise<void> {
+  const db = await getDb();
+  await db
+    .update(pendingReplies)
+    .set({ status: "pending", resolvedAt: null, sendError: sendError.slice(0, 2000) })
+    .where(eq(pendingReplies.id, id));
+}
+
+/** It went. Clear any note from an earlier attempt that didn't. */
+export async function clearSendError(id: number): Promise<void> {
+  const db = await getDb();
+  await db.update(pendingReplies).set({ sendError: null }).where(eq(pendingReplies.id, id));
 }
 
 /* ------------------------------------------------------------------ */

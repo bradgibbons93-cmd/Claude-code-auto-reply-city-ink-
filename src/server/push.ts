@@ -101,12 +101,28 @@ export async function getVapidKeys(): Promise<{ publicKey: string; privateKey: s
 }
 
 /**
- * The address in the VAPID claim has to be a real contact for the push
- * service. The studio's own dashboard is the honest answer; a mailto is
- * accepted by every service and needs no DNS.
+ * The contact in the VAPID claim, which the push service actually checks.
+ *
+ * Apple refuses the whole notification with a bare 403 when this isn't a
+ * routable address — and `.example` is a reserved domain that can never be
+ * one, so every notification to an iPhone was rejected while the dashboard
+ * showed the switch on and the device listed. There was nothing on screen to
+ * suggest which of the two dozen things it might be.
+ *
+ * The dashboard's own URL is the honest answer and is always routable, so it
+ * is the default; VAPID_SUBJECT overrides it if the studio ever wants a
+ * mailbox there instead.
  */
 function contact(): string {
-  return process.env.VAPID_SUBJECT || "mailto:studio@cityinktattoo.example";
+  const configured = process.env.VAPID_SUBJECT?.trim();
+  if (configured) return configured;
+
+  const site = (process.env.PUBLIC_URL || process.env.RAILWAY_PUBLIC_DOMAIN || "").trim();
+  if (site) return site.startsWith("http") ? site : `https://${site}`;
+
+  // Last resort. A real, resolvable domain — never a reserved one, which is
+  // exactly what got every push refused.
+  return "https://claude-code-auto-reply-city-ink-production.up.railway.app";
 }
 
 export async function getNotifySettings(): Promise<NotifySettings> {
@@ -222,6 +238,13 @@ export interface PushMessage {
  * notifying about — an enquiry still has to be stored and drafted even if
  * nobody's phone can be reached.
  */
+/** Why the last attempt didn't land, for the Settings panel to show. */
+let lastSendError: string | null = null;
+
+export function getLastPushError(): string | null {
+  return lastSendError;
+}
+
 export async function sendPush(message: PushMessage): Promise<{ sent: number; dropped: number }> {
   let sent = 0;
   let dropped = 0;
@@ -248,6 +271,7 @@ export async function sendPush(message: PushMessage): Promise<{ sent: number; dr
           { TTL: 60 * 60 * 6 }
         );
         sent += 1;
+        lastSendError = null;
         await db
           .update(pushSubscriptions)
           .set({ lastSentAt: new Date(), failures: 0 })
@@ -267,10 +291,16 @@ export async function sendPush(message: PushMessage): Promise<{ sent: number; dr
           .where(eq(pushSubscriptions.id, sub.id));
         // The message matters as much as the status: a rejection with no
         // status at all is a transport fault, not the push service saying no.
+        // 403 is the push service rejecting our signature, not the device
+        // being gone: the same fault will hit every device, so name it.
+        const why =
+          status === 403
+            ? `signature rejected — the notification contact (${contact()}) has to be a routable https:// or mailto: address`
+            : (error as Error).message;
         console.warn(
-          `[Push] ${sub.label || "a device"} refused a notification` +
-            `${status ? ` (${status})` : ""} — ${(error as Error).message}`
+          `[Push] ${sub.label || "a device"} refused a notification${status ? ` (${status})` : ""} — ${why}`
         );
+        lastSendError = `${status || "no status"}: ${why}`;
       }
     }
   } catch (error) {

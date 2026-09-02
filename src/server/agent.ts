@@ -12,6 +12,8 @@ import {
   createPendingReply,
   supersedePendingReplies,
   resolvePendingReply,
+  restorePendingReply,
+  clearSendError,
   findSimilarExchanges,
   getRecentDraftEdits,
   recordDraftEdit,
@@ -477,6 +479,12 @@ export async function draftForUnanswered(
       );
       if (composed.llmFailed) {
         failed += 1;
+        // The reason is known here and used to be dropped on the floor, so
+        // "8 failed" was all anyone got. It is the difference between a key
+        // that needs replacing and a model that needs more room.
+        console.error(
+          `[Agent] No draft for ${conversationId} — ${getLastLlmError()?.message ?? "the model didn't answer"}`
+        );
         continue;
       }
 
@@ -496,13 +504,18 @@ export async function draftForUnanswered(
     }
   }
 
+  // Whatever the model last objected to, in the sentence the studio sees.
+  // "The AI couldn't write any of them" sent Brad to a Test button to find
+  // out something the server already knew.
+  const why = failed ? getLastLlmError()?.message : undefined;
+
   const detail =
     drafted && failed
-      ? `Drafted ${drafted}. ${failed} the AI couldn't write — try those again in a moment.`
+      ? `Drafted ${drafted}. ${failed} the AI couldn't write${why ? ` — ${why}` : " — try those again in a moment."}`
       : drafted
         ? `Drafted ${drafted} repl${drafted === 1 ? "y" : "ies"} — none sent, they're all waiting for your OK.`
         : failed
-          ? `The AI couldn't write any of them. Settings → AI has a Test button that says why.`
+          ? `The AI couldn't write any of them${why ? ` — ${why}` : ". Settings → AI has a Test button that says why."}`
           : `Nothing new to draft — everyone who's written in already has a reply waiting, or has had one.`;
   void skipped;
 
@@ -720,11 +733,31 @@ export async function approveDraft(id: number, editedText?: string): Promise<voi
   // A reply goes back to the inbox it came from. Sending an Instagram answer
   // down the Messenger pipe reaches nobody.
   const thread = await getConversation(resolved.conversationId);
-  await sendMessengerMessage(
-    resolved.conversationId,
-    resolved.text,
-    thread?.platform === "instagram" ? "instagram" : "facebook"
-  );
+
+  // Resolving first is deliberate — it claims the draft so a double tap
+  // can't send twice — but it means a failed send has to put the card back.
+  // It didn't, so a reply Meta refused vanished from the board looking sent,
+  // and the customer was never answered by anyone.
+  try {
+    await sendMessengerMessage(
+      resolved.conversationId,
+      resolved.text,
+      thread?.platform === "instagram" ? "instagram" : "facebook"
+    );
+  } catch (error) {
+    const detail = (error as Error).message;
+    await restorePendingReply(id, detail).catch(() => undefined);
+    console.error(`[Agent] Reply to ${resolved.conversationId} did NOT send — put back on the board: ${detail}`);
+    await notify("problem", {
+      title: "A reply didn't send",
+      body: detail.slice(0, 160),
+      url: "/messages",
+      tag: `send-fail-${id}`,
+    }).catch(() => undefined);
+    throw new Error(detail);
+  }
+
+  await clearSendError(id).catch(() => undefined);
   await recordMessage(resolved.conversationId, `draft_${id}_sent`, "bot", resolved.text, resolved.text);
 
   // Edits made while testing against your own account aren't real feedback,

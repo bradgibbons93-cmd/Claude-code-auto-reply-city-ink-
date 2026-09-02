@@ -333,6 +333,15 @@ export const pendingReplies = mysqlTable(
     // Other ways of answering the same message. The studio picks one instead
     // of rewriting the only draft it was handed.
     alternatives: json("alternatives").$type<{ label: string; text: string }[]>(),
+    // Why the last attempt to send this one didn't reach the customer.
+    //
+    // Approving used to mark the draft resolved and only then try to send.
+    // When Meta refused — routinely, because its standard messaging window
+    // closes 24 hours after the customer's last message — the card vanished
+    // from the board as though it had gone, and nobody found out that the
+    // customer had never been answered. The draft comes back now, with this
+    // on it.
+    sendError: text("send_error"),
     createdAt: timestamp("created_at").defaultNow(),
     resolvedAt: timestamp("resolved_at"),
   },

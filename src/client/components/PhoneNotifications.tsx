@@ -64,12 +64,30 @@ export default function PhoneNotifications() {
     onError: () => toast.error("Couldn't save that."),
   });
   const test = trpc.push.test.useMutation({
-    onSuccess: (result) =>
-      result.sent
-        ? toast.success(
-            `Sent to ${result.sent} device${result.sent === 1 ? "" : "s"} — check your phone.`
-          )
-        : toast.error("No devices are registered yet. Turn it on here first."),
+    onSuccess: (result) => {
+      if (result.sent) {
+        toast.success(
+          `Sent to ${result.sent} device${result.sent === 1 ? "" : "s"} — check your phone.`
+        );
+        return;
+      }
+      // Three different reasons, and they need three different answers.
+      // One message for all of them is how "turn it on here first" appeared
+      // underneath a device that was already turned on.
+      if (!result.devices) {
+        toast.error("No devices are registered yet. Turn it on here first.");
+      } else if (result.dropped) {
+        toast.error(
+          "That device is no longer reachable — it's been removed. Turn notifications on again here.",
+          { duration: 10000 }
+        );
+      } else {
+        toast.error(result.error || "The push service refused it, and didn't say why.", {
+          duration: 12000,
+        });
+      }
+      status.refetch();
+    },
     onError: () => toast.error("Couldn't send the test."),
   });
 
