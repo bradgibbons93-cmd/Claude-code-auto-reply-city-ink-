@@ -107,6 +107,15 @@ exactly that.
 Stamping `now()` on import made a hundred threads all read the same age and
 destroyed the inbox order.
 
+**The three-minute poll's draft pass must not depend on the import.** It did:
+`if (!messages) return;` sat between them, so drafting ran only when the
+import had found new messages. Messages normally arrive by webhook and are
+already stored by the time the import looks, so it finds nothing and the
+draft pass was skipped on the healthy path — and for Instagram, whose import
+Meta refuses outright, it never ran at all. The one safety net in the app
+only ran when it was least needed. They are two independent jobs now, each
+with its own try/catch.
+
 **The handoff pause must never swallow a new customer message.** Answering
 someone by hand from Meta's own inbox fires an echo, which paused the thread
 for twelve hours — so when the customer wrote back there was no draft, no

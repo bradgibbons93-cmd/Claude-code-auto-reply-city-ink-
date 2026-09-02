@@ -45,18 +45,37 @@ export function startScheduler() {
    * would be rude to an API we depend on.
    */
   cron.schedule("*/3 * * * *", async () => {
+    // Two separate jobs, and the second must not depend on the first.
+    //
+    // It used to: the draft pass ran only when the import had found new
+    // messages. But messages normally arrive by webhook and are already
+    // stored by the time the import looks, so it finds nothing new and the
+    // draft pass was skipped — every time, on the healthy path. The one
+    // safety net in the app only ran when it was least needed, and for
+    // Instagram, whose import Meta refuses outright, it never ran at all.
+    //
+    // So anything that reached the inbox without getting a draft — a thread
+    // that was muted, a model that fell over, a delivery mid-deploy — was
+    // never picked up again by anything.
     try {
       const { conversations, messages } = await importExistingConversations(30);
-      if (!messages) return;
-      console.log(`[Inbox] Pulled ${messages} message(s) across ${conversations} thread(s)`);
-
-      // Draft only for what has just come in. Drafting for everything
-      // unanswered would write replies into threads the studio deliberately
-      // left alone weeks ago.
-      const { drafted } = await draftForUnanswered(10, 30);
-      if (drafted) console.log(`[Inbox] Wrote ${drafted} draft(s) for the new messages`);
+      if (messages) {
+        console.log(`[Inbox] Pulled ${messages} message(s) across ${conversations} thread(s)`);
+      }
     } catch (error) {
       console.error("[Inbox] Poll failed:", (error as Error).message);
+    }
+
+    // Only the recent end: drafting for everything unanswered would write
+    // replies into threads the studio deliberately left alone weeks ago.
+    // Cheap when there is nothing to do — it asks the database one question
+    // and stops, without touching the model.
+    try {
+      const { drafted, failed } = await draftForUnanswered(10, 30);
+      if (drafted) console.log(`[Inbox] Wrote ${drafted} draft(s) for messages that had none`);
+      if (failed) console.warn(`[Inbox] ${failed} draft(s) couldn't be written`);
+    } catch (error) {
+      console.error("[Inbox] Drafting failed:", (error as Error).message);
     }
   });
 
