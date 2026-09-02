@@ -107,6 +107,12 @@ exactly that.
 Stamping `now()` on import made a hundred threads all read the same age and
 destroyed the inbox order.
 
+**The poll drafts for anything unanswered in the last 24 hours, not 30
+minutes.** Half an hour only ever covered the gap between a webhook arriving
+and being handled; as the real safety net it was useless, because a message
+that failed to draft at 10am was out of range before anyone noticed. Ten per
+run, so a backlog trickles onto the board.
+
 **The three-minute poll's draft pass must not depend on the import.** It did:
 `if (!messages) return;` sat between them, so drafting ran only when the
 import had found new messages. Messages normally arrive by webhook and are

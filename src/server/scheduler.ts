@@ -66,12 +66,22 @@ export function startScheduler() {
       console.error("[Inbox] Poll failed:", (error as Error).message);
     }
 
-    // Only the recent end: drafting for everything unanswered would write
-    // replies into threads the studio deliberately left alone weeks ago.
-    // Cheap when there is nothing to do — it asks the database one question
-    // and stops, without touching the model.
+    // A day, not half an hour.
+    //
+    // Thirty minutes was right when this was only meant to cover the gap
+    // between a webhook arriving and being handled. As the actual safety net
+    // it was far too tight: a message that failed to get a draft at ten in
+    // the morning — because the thread was muted, or the model fell over —
+    // was already out of range by the time anyone noticed, and nothing ever
+    // went back for it.
+    //
+    // Still bounded, because drafting for EVERYTHING unanswered would write
+    // replies into threads the studio deliberately left alone weeks ago. Ten
+    // at a time, so a quiet backlog trickles onto the board rather than
+    // arriving all at once. Cheap when there is nothing to do: one question
+    // to the database, and it stops without touching the model.
     try {
-      const { drafted, failed } = await draftForUnanswered(10, 30);
+      const { drafted, failed } = await draftForUnanswered(10, 24 * 60);
       if (drafted) console.log(`[Inbox] Wrote ${drafted} draft(s) for messages that had none`);
       if (failed) console.warn(`[Inbox] ${failed} draft(s) couldn't be written`);
     } catch (error) {
