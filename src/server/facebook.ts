@@ -4,7 +4,7 @@ import { signAssetPath } from "./auth.js";
 import { cacheAttachments } from "./attachments.js";
 import {
   getFacebookConfig,
-  getConversationsMissingNames,
+  getConversationsMissingNamesWithPlatform,
   setConversationName,
   updatePageIdentity,
   realName,
@@ -442,11 +442,15 @@ export async function getSenderProfile(
   // A refusal that names a permission is about the app, not this person, so
   // asking again for the next eleven people will get the same answer.
   if (profileRefusalIsPermanent(lastDetail)) {
-    const first = !profileLookupBlocked.has(platform);
-    profileLookupBlocked.set(platform, { until: Date.now() + 60 * 60 * 1000, why: lastDetail });
+    // Trust the error over the caller. A refusal naming an Instagram
+    // permission belongs to Instagram however it was asked for — recording
+    // it against Facebook would silence Messenger's lookups, which work.
+    const blame: Platform = /instagram/i.test(lastDetail) ? "instagram" : platform;
+    const first = !profileLookupBlocked.has(blame);
+    profileLookupBlocked.set(blame, { until: Date.now() + 60 * 60 * 1000, why: lastDetail });
     if (first) {
       console.warn(
-        `[Facebook] ${platform} won't name anyone to this app yet — not asking again for an hour. ${lastDetail}`
+        `[Facebook] ${blame} won't name anyone to this app yet — not asking again for an hour. ${lastDetail}`
       );
     }
     return null;
@@ -1071,7 +1075,7 @@ export async function backfillCustomerNames(limit = 50): Promise<{
     return { checked: 0, named: 0, detail: "Facebook isn't connected yet." };
   }
 
-  const missing = await getConversationsMissingNames(limit);
+  const missing = await getConversationsMissingNamesWithPlatform(limit);
   if (missing.length === 0) {
     return { checked: 0, named: 0, detail: "Every thread already has a name." };
   }
@@ -1079,22 +1083,25 @@ export async function backfillCustomerNames(limit = 50): Promise<{
   const { names: inbox, error: inboxError } = await fetchInboxParticipants();
 
   let named = 0;
-  const stillMissing: string[] = [];
-  for (const conversationId of missing) {
-    const fromInbox = inbox.get(conversationId);
+  const stillMissing: { conversationId: string; platform: Platform }[] = [];
+  for (const thread of missing) {
+    const fromInbox = inbox.get(thread.conversationId);
     if (fromInbox) {
-      await setConversationName(conversationId, fromInbox);
+      await setConversationName(thread.conversationId, fromInbox);
       named += 1;
     } else {
-      stillMissing.push(conversationId);
+      stillMissing.push(thread);
     }
   }
 
-  // Anyone the inbox list didn't cover — try them one at a time.
-  for (const conversationId of stillMissing) {
-    const profile = await getSenderProfile(conversationId);
+  // Anyone the inbox list didn't cover — try them one at a time, down the
+  // path their own inbox belongs to. Asking Instagram threads over the
+  // Messenger route was how an Instagram permission error came to be
+  // recorded against Facebook.
+  for (const thread of stillMissing) {
+    const profile = await getSenderProfile(thread.conversationId, thread.platform);
     if (profile?.name) {
-      await setConversationName(conversationId, profile.name);
+      await setConversationName(thread.conversationId, profile.name);
       named += 1;
     }
   }

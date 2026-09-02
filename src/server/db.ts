@@ -133,6 +133,30 @@ export async function getConversationsMissingNames(limit = 50) {
 }
 
 /**
+ * The same threads, with the inbox each one belongs to.
+ *
+ * The name backfill looked these up without saying which platform they were
+ * from, so every Instagram thread was asked for down the Messenger path.
+ * Meta answered with an Instagram permission error, which then got recorded
+ * against Facebook — and Facebook's name lookups, which do work, were
+ * silenced along with Instagram's.
+ */
+export async function getConversationsMissingNamesWithPlatform(limit = 50) {
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(messengerConversations)
+    .orderBy(desc(messengerConversations.lastMessageAt))
+    .limit(limit);
+  return rows
+    .filter((row) => isPlaceholderName(row.senderName))
+    .map((row) => ({
+      conversationId: row.conversationId,
+      platform: (row.platform ?? "facebook") as "facebook" | "instagram",
+    }));
+}
+
+/**
  * Threads where the customer spoke last and nobody has answered.
  *
  * An imported conversation gets no draft — importing deliberately writes

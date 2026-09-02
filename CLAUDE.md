@@ -136,6 +136,14 @@ separates the two cases: `handoff` lifts the moment the customer speaks again,
 makes the same distinction, and `liftStaleHandoffPauses()` releases threads
 already stuck, once, on boot — those messages have no second webhook coming.
 
+**Ask for a name down the inbox the thread actually came from.** The backfill
+called `getSenderProfile(conversationId)` with no platform, so every Instagram
+thread was asked for over the Messenger path — and the Instagram permission
+error that came back was then recorded against Facebook, whose lookups do
+work. `getConversationsMissingNamesWithPlatform()` carries the inbox, and the
+refusal is filed by what the error names rather than by what the caller
+claimed.
+
 **Meta will not name anyone to this app on Instagram, and asking costs three
 calls per person.** Twelve unnamed threads made three dozen guaranteed
 failures every couple of minutes, and the real faults were unreadable in the
