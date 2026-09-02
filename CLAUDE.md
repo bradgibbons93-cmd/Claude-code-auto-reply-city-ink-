@@ -172,6 +172,21 @@ vanished looking exactly like a reply that had gone and the customer was never
 answered by anyone. `restorePendingReply` puts it back with `send_error` on it,
 and the card says so in red.
 
+**Under Standard Access Meta lets the app message only people who have a role
+on it.** The studio's own account has one, so testing on yourself sends
+perfectly and the first real customer is refused with
+`(#200) … does not have Advanced Access … and recipient user does not have
+role on app`. That is why sending "worked earlier and doesn't now" — it had
+never once reached a customer. `explainSendFailure()` says so in those terms,
+because "no permission to send" leaves someone certain it worked yesterday.
+The unlock is the same App Review already submitted. Until then the draft card
+has a Copy button, and the reply gets pasted into Instagram by hand.
+
+**Log Graph's raw words next to every explanation.** The send path logged only
+the sentence built from the error, which is precisely the mistake that put
+three days into the wrong permission before — the guess was all anyone could
+see. Both, always.
+
 **Meta's standard reply window closes 24 hours after the customer's last
 message**, which for a tattoo studio is the normal case, not the edge case.
 Every reply here is read and approved by a person, so a refused send is retried

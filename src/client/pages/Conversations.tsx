@@ -19,6 +19,8 @@ import {
   Instagram,
   Facebook,
   RefreshCw,
+  Copy,
+  Check,
 } from "lucide-react";
 
 function isPaused(until: string | Date | null | undefined) {
@@ -77,6 +79,7 @@ function PendingReplyCard({
 }) {
   const utils = trpc.useUtils();
   const [text, setText] = useState(draft.draftText);
+  const [copied, setCopied] = useState(false);
 
   // A retry rewrites the draft underneath this box. Without this the new
   // wording arrives on the server and the studio keeps staring at the empty
@@ -315,6 +318,32 @@ function PendingReplyCard({
         </div>
 
         <div className="flex flex-wrap gap-2">
+          {/* Until Meta lets the app message customers, the reply still has
+              to reach them somehow — and retyping a draft into Instagram is
+              the fastest way to stop using the draft at all. One tap, then
+              paste. Shown always, because copying is useful even when
+              sending works. */}
+          <Button
+            variant="outline"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(text);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              } catch {
+                toast.error("Couldn't copy — select the text and copy it by hand.");
+              }
+            }}
+            disabled={!text.trim()}
+            title="Copy this reply, then paste it into Instagram or Messenger"
+          >
+            {copied ? (
+              <Check className="mr-2 h-3.5 w-3.5" />
+            ) : (
+              <Copy className="mr-2 h-3.5 w-3.5" />
+            )}
+            {copied ? "Copied" : "Copy"}
+          </Button>
           <Button
             onClick={() => approve.mutate({ id: draft.id, editedText: text })}
             disabled={busy || !text.trim()}

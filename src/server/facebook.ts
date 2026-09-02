@@ -234,10 +234,24 @@ export function explainSendFailure(raw: string): string {
       "Settings → Facebook Page and this reply will go through — nothing was lost."
     );
   }
-  if (/pages_messaging|instagram_business_manage_messages|Advanced Access/i.test(raw)) {
+  // The one that explains why it "used to work". Under Standard Access Meta
+  // lets an app message only people who have a role on it — the studio's own
+  // account does, so testing on yourself sends perfectly, and the first real
+  // customer is refused. Saying only "no permission to send" leaves someone
+  // certain it worked yesterday and is broken today.
+  if (/does not have role on app|role on the app/i.test(raw)) {
+    return (
+      "Meta won't let this app message customers yet. Until App Review grants Advanced " +
+      "Access it can only message people with a role on the app — which is why replies to " +
+      "your own account go through and this one won't. Answer them from Instagram or " +
+      "Messenger for now; the draft stays here to copy."
+    );
+  }
+  if (/pages_messaging|instagram_business_manage_messages|instagram_manage_messages|Advanced Access/i.test(raw)) {
     return (
       "Meta hasn't granted this app permission to send messages yet. It's requested under " +
-      "App Review → Permissions and Features; the draft is kept until it lands."
+      "App Review → Permissions and Features; the draft is kept until it lands. Answer them " +
+      "from Instagram or Messenger in the meantime — the draft is here to copy."
     );
   }
   if (/does not exist|Unsupported (get|post) request/i.test(raw)) {
@@ -287,7 +301,12 @@ export async function sendMessengerMessage(
     }));
   } catch (error) {
     if (!outsideWindow(error)) {
-      throw new Error(explainSendFailure(describeGraphError("send", error)));
+      // Graph's own words, always, next to the sentence built from them.
+      // Logging only the explanation is exactly how three days went on the
+      // wrong permission once already: the guess was all anyone could see.
+      const raw = describeGraphError("send", error);
+      console.error(`[Facebook] Send to ${recipientId} (${platform}) refused — ${raw}`);
+      throw new Error(explainSendFailure(raw));
     }
     // A person read this and approved it, so the Human Agent tag is the
     // honest description of what is happening as well as the one that works.
@@ -300,7 +319,11 @@ export async function sendMessengerMessage(
       }));
       console.log(`[Facebook] Sent to ${recipientId} under the Human Agent tag — the standard window had closed`);
     } catch (retryError) {
-      throw new Error(explainSendFailure(describeGraphError("send", retryError)));
+      const raw = describeGraphError("send", retryError);
+      console.error(
+        `[Facebook] Send to ${recipientId} (${platform}) refused under the Human Agent tag too — ${raw}`
+      );
+      throw new Error(explainSendFailure(raw));
     }
   }
 
