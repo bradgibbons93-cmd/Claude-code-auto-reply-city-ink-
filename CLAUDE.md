@@ -262,7 +262,25 @@ artists reach it by QR code on the studio wall), `/health`.
 
 Submitted, pending. Requested: `instagram_business_basic`,
 `instagram_business_manage_messages`, `pages_messaging`, `pages_show_list`,
-Human Agent. The submission says this is an internal tool for one studio and
+Human Agent.
+
+**Check that the Instagram messaging permission on the submission is the one
+Meta actually names in the refusals — they do not currently match.** The live
+error, on both names and sending, is:
+
+> `(#200) App does not have Advanced Access to instagram_manage_messages`
+
+but the submission above asks for `instagram_business_manage_messages`. Those
+are two different permissions belonging to Meta's two different Instagram
+flows — the same fault line as the token trap further up this file.
+`instagram_manage_messages` is the **Messenger API for Instagram** (Page
+token, `graph.facebook.com`), which is what this studio's setup uses.
+`instagram_business_manage_messages` is the newer **Instagram API with
+Instagram Login** (`graph.instagram.com`), which it does not.
+
+If that is right, the approval being waited on will not unblock sending, and
+the wait is for nothing. Verify it in App Review → Permissions and Features
+against the exact string in the error before assuming approval fixes this. The submission says this is an internal tool for one studio and
 is not sold to other businesses — **that must stay true**, or the approval is
 at risk. Selling it to other studios needs multi-tenant work and the Instagram
 Business Login OAuth flow first.
