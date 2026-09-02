@@ -19,6 +19,7 @@ import {
   recordDraftEdit,
   getConversationMessages,
   pauseBot,
+  resumeBot,
   getConversation,
   getPendingReply,
   replacePendingReplyDraft,
@@ -616,9 +617,32 @@ export async function handleCustomerMessage(
   await notifyOfCustomerMessage(senderId, senderName, text, keptPhotos.length, platform);
 
   // BUG FIX #7 — a human took this thread over, so stay out of it.
-  if (conversation?.botPausedUntil && new Date(conversation.botPausedUntil) > new Date()) {
-    console.log(`[Agent] Paused on ${senderId} — a person is handling this one`);
-    return;
+  //
+  // But "stay out of it" has to end when the customer speaks again, and it
+  // didn't. The studio answers plenty of people by hand from Meta's own
+  // inbox; each of those replies muted the thread for twelve hours, so when
+  // the customer wrote back there was no draft, the board said "All caught
+  // up", and the phone stayed quiet while Meta showed the message unread.
+  //
+  // Nothing in this app reaches a customer without approval, so holding the
+  // draft back bought nothing at all — it only took away the help. A new
+  // customer message means they are waiting on an answer, which is exactly
+  // when a draft is wanted, so the automatic pause lifts here.
+  //
+  // A pause the studio set by hand is a different thing: that one is an
+  // instruction and is obeyed until it runs out.
+  const pausedUntil = conversation?.botPausedUntil
+    ? new Date(conversation.botPausedUntil)
+    : null;
+  if (pausedUntil && pausedUntil > new Date()) {
+    if (conversation?.botPauseReason === "manual") {
+      console.log(`[Agent] Paused on ${senderId} by hand — leaving it alone until ${pausedUntil.toISOString()}`);
+      return;
+    }
+    await resumeBot(senderId).catch(() => undefined);
+    console.log(
+      `[Agent] ${senderId} was handed over earlier, but they've written again — drafting`
+    );
   }
 
   // Self-registration for booking alerts: send this exact phrase from your
@@ -810,7 +834,9 @@ export async function handleEcho(
     console.log(`[Agent] ${recipientId} was answered elsewhere — dropped ${dropped} draft(s)`);
   }
 
-  const until = await pauseBot(recipientId, HANDOFF_HOURS);
+  // Labelled "handoff", so a new message from the customer lifts it. A pause
+  // the studio set by hand is not overridden that way.
+  const until = await pauseBot(recipientId, HANDOFF_HOURS, "handoff");
   console.log(`[Agent] Human replied to ${recipientId} — paused until ${until.toISOString()}`);
 }
 

@@ -107,6 +107,26 @@ exactly that.
 Stamping `now()` on import made a hundred threads all read the same age and
 destroyed the inbox order.
 
+**The handoff pause must never swallow a new customer message.** Answering
+someone by hand from Meta's own inbox fires an echo, which paused the thread
+for twelve hours — so when the customer wrote back there was no draft, no
+notification, and a dashboard reading "All caught up" over an Instagram inbox
+with three unread. Brad works his inbox by hand all day, so this muted
+essentially every live conversation.
+
+Nothing in this app reaches a customer without approval, so withholding the
+*draft* bought nothing and only removed the help. `bot_pause_reason` now
+separates the two cases: `handoff` lifts the moment the customer speaks again,
+`manual` (the Pause button) is obeyed until it expires. `getUnansweredConversations`
+makes the same distinction, and `liftStaleHandoffPauses()` releases threads
+already stuck, once, on boot — those messages have no second webhook coming.
+
+**Meta will not name anyone to this app on Instagram, and asking costs three
+calls per person.** Twelve unnamed threads made three dozen guaranteed
+failures every couple of minutes, and the real faults were unreadable in the
+red. `getSenderProfile` believes a permission refusal for an hour, per
+platform, and says so once. It recovers by itself when Advanced Access lands.
+
 **Who spoke last is decided by when a message was SAID, never by row id.**
 `MAX(id)` is insert order, and insert order is not message order — a thread
 pulled in across two imports can have an older message on a higher id. Two

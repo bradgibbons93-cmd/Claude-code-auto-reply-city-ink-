@@ -42,6 +42,18 @@ export const messengerConversations = mysqlTable(
     // inbox a thread is really in.
     platform: mysqlEnum("platform", ["facebook", "instagram"]).default("facebook"),
     botPausedUntil: timestamp("bot_paused_until"),
+    // WHY the agent is muted here, because the two reasons deserve opposite
+    // treatment when the customer writes again.
+    //
+    // "manual" is Brad pressing Pause on a thread — an instruction, and it
+    // is obeyed until it expires. "handoff" is set automatically when a
+    // studio reply arrives from Meta's own inbox, and it used to mute the
+    // thread for twelve hours: so a customer who answered that reply got no
+    // draft, the board read "All caught up", and the studio's phone stayed
+    // quiet while the Meta inbox showed unread messages. Nothing in this app
+    // ever sends without approval, so withholding the draft bought nothing
+    // and cost the reply.
+    botPauseReason: varchar("bot_pause_reason", { length: 16 }),
     lastCustomerMessageAt: timestamp("last_customer_message_at"),
     lastMessageAt: timestamp("last_message_at").defaultNow(),
     createdAt: timestamp("created_at").defaultNow(),

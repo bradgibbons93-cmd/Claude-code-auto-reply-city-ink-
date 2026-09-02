@@ -373,12 +373,34 @@ export function getLastProfileError() {
   return lastProfileError;
 }
 
+/**
+ * When Meta has told us a whole platform's profile lookups are off limits.
+ *
+ * Instagram answers every one of these with "(#200) App does not have
+ * Advanced Access to instagram_manage_messages" — for every person, for
+ * every field combination, three calls each. With a dozen unnamed threads
+ * that is three dozen guaranteed failures every couple of minutes, and a log
+ * so full of red that the real faults in it were unreadable.
+ *
+ * Nothing about that is fixable from here; it is granted by App Review. So
+ * ask once, believe the answer for an hour, and let it recover on its own
+ * when approval lands.
+ */
+const profileLookupBlocked = new Map<Platform, { until: number; why: string }>();
+
+function profileRefusalIsPermanent(detail: string): boolean {
+  return /Advanced Access|does not have the capability|\(#3\)/i.test(detail);
+}
+
 export async function getSenderProfile(
   senderId: string,
   platform: Platform = "facebook"
 ): Promise<{ name?: string } | null> {
   const endpoint = await endpointFor(platform);
   if (!endpoint) return null;
+
+  const blocked = profileLookupBlocked.get(platform);
+  if (blocked && Date.now() < blocked.until) return null;
 
   // Facebook is inconsistent about which name fields a Page token may read,
   // and it varies with how the app was reviewed. Try the split fields, then
@@ -416,6 +438,20 @@ export async function getSenderProfile(
   }
 
   lastProfileError = { message: lastDetail, at: new Date().toISOString() };
+
+  // A refusal that names a permission is about the app, not this person, so
+  // asking again for the next eleven people will get the same answer.
+  if (profileRefusalIsPermanent(lastDetail)) {
+    const first = !profileLookupBlocked.has(platform);
+    profileLookupBlocked.set(platform, { until: Date.now() + 60 * 60 * 1000, why: lastDetail });
+    if (first) {
+      console.warn(
+        `[Facebook] ${platform} won't name anyone to this app yet — not asking again for an hour. ${lastDetail}`
+      );
+    }
+    return null;
+  }
+
   console.error(`[Facebook] No name for ${senderId} — ${lastDetail}`);
   return null;
 }

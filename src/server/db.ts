@@ -172,7 +172,16 @@ export async function getUnansweredConversations(limit = 20, newerThanMinutes?: 
               ) t ON t.last_id = m1.id
           ) last ON last.conversation_id = c.conversation_id
          WHERE last.sender_type = 'customer'
-           AND (c.bot_paused_until IS NULL OR c.bot_paused_until < NOW())
+           -- Only a pause the studio set by hand hides a thread from here.
+           -- The automatic handoff pause must not: the customer having
+           -- spoken last IS the condition it should lift on, and excluding
+           -- them here is the same fault as ignoring them on arrival.
+           AND (
+             c.bot_paused_until IS NULL
+             OR c.bot_paused_until < NOW()
+             OR c.bot_pause_reason IS NULL
+             OR c.bot_pause_reason <> 'manual'
+           )
            AND NOT EXISTS (
              SELECT 1 FROM pending_replies p
               WHERE p.conversation_id = c.conversation_id AND p.status = 'pending'
@@ -443,13 +452,24 @@ export async function dropDraftsAnsweringOurselves(): Promise<number> {
   return Number(result?.affectedRows ?? 0);
 }
 
-/** Human handoff: mute the agent on this thread for a while. */
-export async function pauseBot(conversationId: string, hours: number) {
+/**
+ * Mute the agent on this thread for a while.
+ *
+ * The reason is stored because the two kinds are not the same instruction.
+ * "manual" is the studio pressing Pause and means what it says. "handoff" is
+ * set automatically when a reply arrives from Meta's own inbox, and it lifts
+ * the moment the customer writes again — see handleCustomerMessage.
+ */
+export async function pauseBot(
+  conversationId: string,
+  hours: number,
+  reason: "manual" | "handoff" = "manual"
+) {
   const db = await getDb();
   const until = new Date(Date.now() + hours * 60 * 60 * 1000);
   await db
     .update(messengerConversations)
-    .set({ botPausedUntil: until })
+    .set({ botPausedUntil: until, botPauseReason: reason })
     .where(eq(messengerConversations.conversationId, conversationId));
   return until;
 }
@@ -458,7 +478,7 @@ export async function resumeBot(conversationId: string) {
   const db = await getDb();
   await db
     .update(messengerConversations)
-    .set({ botPausedUntil: null })
+    .set({ botPausedUntil: null, botPauseReason: null })
     .where(eq(messengerConversations.conversationId, conversationId));
 }
 

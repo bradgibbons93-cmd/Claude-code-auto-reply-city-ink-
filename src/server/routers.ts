@@ -174,7 +174,9 @@ export const appRouter = t.router({
       .query(({ input }) => getConversationMessages(input.conversationId)),
     pause: publicProcedure
       .input(z.object({ conversationId: z.string(), hours: z.number().default(12) }))
-      .mutation(({ input }) => pauseBot(input.conversationId, input.hours)),
+      // Pressed by a person, so it is obeyed even when the customer writes
+      // back — unlike the automatic handoff pause, which lifts.
+      .mutation(({ input }) => pauseBot(input.conversationId, input.hours, "manual")),
     resume: publicProcedure
       .input(z.object({ conversationId: z.string() }))
       .mutation(({ input }) => resumeBot(input.conversationId)),
