@@ -236,6 +236,15 @@ One buzz per thread, claimed in the database (`claimNotificationSlot`), not in
 memory — four reference photos is one enquiry, and four buzzes is how someone
 learns to swipe the buzz away without reading it.
 
+**When the AI provider stops answering, the phone gets told.** Brad switched
+`LLM_PROVIDER` to OpenRouter and the account ran out of credit; every enquiry
+from that moment landed with an empty box and nothing said so — the poll
+retried every three minutes for forty minutes with a customer waiting. The
+failed-draft card now prints the actual reason instead of sending someone to
+Settings to press a Test button, and `draftForUnanswered` fires a `notifyOnce`
+alert when everything failed and nothing was drafted. `clearAlert("llm")` on
+the next success re-arms it for the following outage.
+
 **An empty draft is deliberate when `llmFailed` is set.** The card appears
 with an empty box so the studio writes the reply themselves; a placeholder
 there would be worse, because a placeholder can be approved by accident.

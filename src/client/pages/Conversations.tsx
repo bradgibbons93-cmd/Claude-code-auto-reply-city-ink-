@@ -81,6 +81,14 @@ function PendingReplyCard({
   const [text, setText] = useState(draft.draftText);
   const [copied, setCopied] = useState(false);
 
+  // Why the model couldn't write this one. Only read when a draft actually
+  // failed, so a healthy board never asks.
+  const { data: llmStatus } = trpc.llm.status.useQuery(undefined, {
+    enabled: !!draft.llmFailed,
+    staleTime: 60000,
+  });
+  const llmError = llmStatus?.lastError?.message;
+
   // A retry rewrites the draft underneath this box. Without this the new
   // wording arrives on the server and the studio keeps staring at the empty
   // box it replaced. Keyed on the text itself, so the twenty-second poll
@@ -184,8 +192,20 @@ function PendingReplyCard({
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
             <p className="text-xs text-destructive">
               Nothing wrong with this message — the AI didn't finish a draft for it, so there's
-              nothing to approve. Write the reply yourself. Settings → AI has a Test button that
-              says why.
+              nothing to approve.{" "}
+              {/* The reason, here, rather than "Settings → AI has a Test button
+                  that says why". The server already knows: sending someone to
+                  go and press a button to be told something we could have
+                  printed is a trip for nothing, and every message will land
+                  like this until the cause is fixed. */}
+              {llmError ? (
+                <>
+                  <span className="font-medium">{llmError}</span> Write the reply yourself in the
+                  meantime.
+                </>
+              ) : (
+                <>Write the reply yourself. Settings → AI has a Test button that says why.</>
+              )}
             </p>
           </div>
         )}

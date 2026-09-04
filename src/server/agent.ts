@@ -34,7 +34,7 @@ import {
   publicUrl,
 } from "./facebook.js";
 import { cacheAttachments } from "./attachments.js";
-import { notify, getNotifySettings } from "./push.js";
+import { notify, notifyOnce, clearAlert, getNotifySettings } from "./push.js";
 
 const HANDOFF_HOURS = Number(process.env.HANDOFF_PAUSE_HOURS || 12);
 
@@ -488,6 +488,7 @@ export async function draftForUnanswered(
         );
         continue;
       }
+      await clearAlert("llm").catch(() => undefined);
 
       const queued = await createPendingReply(
         conversationId,
@@ -521,6 +522,22 @@ export async function draftForUnanswered(
   void skipped;
 
   console.log(`[Agent] Bulk draft: ${drafted} written, ${failed} failed`);
+
+  // Tell the phone, once a day. When the AI provider stops answering — an
+  // account out of credit, a key revoked — every enquiry from that moment on
+  // lands with an empty box, and nothing said so: the studio found out by
+  // noticing that the drafts had quietly stopped being written. The alert is
+  // held to one a day by notifyOnce, because the poll retries every three
+  // minutes and forty buzzes is the same as none.
+  if (failed && !drafted && why) {
+    await notifyOnce("llm", {
+      title: "City Ink — the AI has stopped drafting",
+      body: `${why} Messages are still arriving and waiting for you.`,
+      url: "/settings",
+      tag: "llm",
+    }).catch(() => undefined);
+  }
+
   return { drafted, failed, detail };
 }
 
