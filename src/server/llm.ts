@@ -172,6 +172,55 @@ function keyBelongsElsewhere(): string | null {
   return null;
 }
 
+/**
+ * Ask the provider which models this key can actually use.
+ *
+ * "The provider doesn't recognise the model X" is true and leaves the next
+ * move to guesswork — and guessing a name has already cost this project a
+ * round trip through a phone. The key that just failed is the same key that
+ * can answer the question, so ask it.
+ *
+ * Best effort by definition: a self-hosted endpoint need not offer the model
+ * list at all, and a failure here must never replace the real diagnosis.
+ */
+export async function listModels(): Promise<string[]> {
+  const headers: Record<string, string> =
+    llmProvider() === "anthropic"
+      ? {
+          "x-api-key": process.env.LLM_API_KEY || "",
+          "anthropic-version": "2023-06-01",
+          ...anthropicWorkspaceHeader(),
+        }
+      : { Authorization: `Bearer ${process.env.LLM_API_KEY || ""}` };
+
+  const { data } = await axios.get(endpoint("models"), { headers, timeout: 15000 });
+  const rows: { id?: string }[] = data?.data ?? [];
+  return rows.map((r) => r.id).filter((id): id is string => typeof id === "string" && !!id);
+}
+
+/** Marks the one diagnosis worth spending a second call on. */
+const UNKNOWN_MODEL = "doesn't recognise the model";
+
+/**
+ * Turns "it doesn't recognise that name" into "here are the names it does".
+ * Only for that one failure — every other one would learn nothing from a
+ * model list, and a customer is waiting on the call that just failed.
+ */
+async function withAvailableModels(detail: string): Promise<string> {
+  if (!detail.includes(UNKNOWN_MODEL)) return detail;
+  try {
+    const models = await listModels();
+    if (!models.length) return detail;
+    const shown = models.slice(0, 12).join(", ");
+    return (
+      `${detail.split(". Copy the exact name")[0]}. Your key can use: ${shown}` +
+      `${models.length > 12 ? ", …" : ""}. Put one of those in LLM_MODEL.`
+    );
+  } catch {
+    return detail; // The list is a nicety; the diagnosis is the point.
+  }
+}
+
 function diagnose(error: unknown, model: string, baseUrl: string): string {
   const err = error as {
     code?: string;
@@ -220,7 +269,7 @@ function diagnose(error: unknown, model: string, baseUrl: string): string {
     );
   }
   if (status === 404 || (status === 400 && /model/i.test(body))) {
-    return `The provider doesn't recognise the model "${model}". Copy the exact name from its model list into LLM_MODEL.`;
+    return `The provider ${UNKNOWN_MODEL} "${model}". Copy the exact name from its model list into LLM_MODEL.`;
   }
   if (status) return `The provider returned HTTP ${status}: ${body.slice(0, 200)}`;
   // A JSON syntax error means the provider answered fine and we couldn't read
@@ -425,9 +474,14 @@ export async function invokeLLMJson<T>(
   } catch (error) {
     // Same diagnosis the Settings test uses, so a failure mid-conversation
     // and a failure on the test button read identically.
-    const detail = diagnose(error, llmModel(), llmBaseUrl());
+    const detail = await withAvailableModels(diagnose(error, llmModel(), llmBaseUrl()));
     lastError = { message: detail, at: new Date().toISOString() };
     console.error(`[LLM] Call failed — ${detail}`);
+    // The provider's own words, alongside. Printing only the sentence built
+    // from an error is exactly how three days went into the wrong Meta
+    // permission — the guess was all anyone could see. Both, always.
+    const raw = (error as { response?: { data?: unknown } }).response?.data;
+    if (raw) console.error(`[LLM] Provider said: ${JSON.stringify(raw).slice(0, 400)}`);
     return { data: fallback, ok: false, error: detail };
   }
 }
