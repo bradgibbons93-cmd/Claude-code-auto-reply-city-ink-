@@ -394,6 +394,37 @@ two inboxes apart by that parameter will see everything as Instagram. Tell
 them apart by the `fields` they ask for instead (Messenger takes 100 messages
 a thread, Instagram 10).
 
+**Not every `.mjs` in the scratchpad is a suite, and running them all reports
+failures that aren't.** `stubs.mjs` is a stand-in server meant to stay
+running, `clickretry.mjs` is a hand-driven probe, five `shot*.mjs` only take
+screenshots, and `live.mjs` drives the real production URL, which the sandbox
+proxy blocks. Running the lot reported fourteen failures and none of them was
+one. `run-all.sh` knows the difference; add a new non-suite to its list.
+
+**The browser suites expect a dashboard already listening on a fixed port** —
+3114, 3115, 3120, 3140 (that one wants `DASHBOARD_PASSWORD`), 3150, 3151,
+3152. They don't start one. After a container restart nothing is listening
+and they fail with `ERR_CONNECTION_REFUSED`, which reads like a broken app;
+the header comment in `run-all.sh` has the loop that starts them.
+
+**`npm install --no-save X` removes anything else installed with
+`--no-save`.** Playwright is not a dependency, so installing `nock` on its own
+silently deleted it and six suites then failed to import a browser. Install
+them together: `npm install --no-save playwright nock`.
+
+**A suite must create the rows it asserts about, and ask only about its own.**
+`verify.mjs` asserted that a conversation starts with no name — true only the
+very first time it ever ran — and counted `getPendingReplies()` across the
+whole board, which every other suite leaves drafts on. It passed alone, it
+passed once, and it failed in the full run. That is the same mistake twice
+now; it is the first thing to suspect when a suite is green by itself and red
+in the run.
+
+**`batche2e.mjs` and `sendfail.mjs` are intermittently flaky in a full run**
+and pass reliably alone. Not yet chased down; the shared test database and
+seven dashboard servers each running their own scheduler over it are the
+obvious suspects. Re-run before believing either of them.
+
 **`pkill -f "dist/server/index.js"` kills your own shell**, because the
 pattern matches the very command line that contains it. Cost half an hour of
 tool calls returning exit 1 with no output. Start each run on a fresh port
