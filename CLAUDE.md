@@ -256,6 +256,37 @@ and the `anthropic-workspace-id` header goes with every call. The header is
 only sent when there is something to send, so a normal workspace key is not
 handed a blank one.
 
+**Newer Claude models refuse a `temperature`, and Anthropic says so in a 400
+that mentions the model.** This cost a whole morning. The panel read
+
+> The provider doesn't recognise the model "claude-sonnet-5". Copy the exact
+> name from its model list into LLM_MODEL.
+
+and the name was correct. Brad was sent to change a setting that was already
+right, twice, while what Anthropic actually said —
+
+    `temperature` is deprecated for this model.
+
+— never reached the screen at all, because `diagnose()` matched the bare word
+"model" anywhere in a 400 body and returned its own guess instead. That is
+precisely the mistake this file warns about for Graph, made again one file
+over. An unknown model must now be a 404 or say so in words; everything else
+falls through to the provider's own sentence, and the raw body is logged
+beside every explanation.
+
+The fix for the temperature itself is to ask rather than keep a list of which
+models take one: send it, and if the refusal names it, drop it and ask again,
+remembering the answer for the life of the process. Any other 400 is not
+retried — it would fail twice and keep a customer waiting longer.
+
+**Being on `/v1/models` is not the same as working.** The list said
+`claude-sonnet-5` was available while every real call was refused. So the boot
+check makes one tiny real call and logs `Model "X" answered a real call — the
+agent can draft`, or the refusal with Anthropic's raw body next to it. That
+line is the fastest way to know whether the AI is alive, and it is why the
+morning above ended in minutes rather than another round of screenshots. A
+model that isn't on the list costs no call at all.
+
 **Switching provider is two changes — the endpoint and the key.** Doing only
 the first leaves a perfectly good key being offered to a company that never
 issued it, and the 401 that comes back said "check it was copied in full",
