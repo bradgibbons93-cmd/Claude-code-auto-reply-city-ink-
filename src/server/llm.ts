@@ -46,6 +46,21 @@ function anthropicWorkspaceHeader(): Record<string, string> {
 }
 
 /**
+ * Models that have told us they won't take a `temperature`, learned at run
+ * time rather than kept as a list that goes stale the week it is written.
+ */
+const rejectsTemperature = new Set<string>();
+
+function saysTemperatureUnwanted(error: unknown): boolean {
+  const res = (error as { response?: { status?: number; data?: unknown } }).response;
+  if (res?.status !== 400) return false;
+  const body = res.data ? JSON.stringify(res.data) : "";
+  return /temperature[^"]{0,40}(deprecated|not supported|unsupported)|(deprecated|unsupported)[^"]{0,40}temperature/i.test(
+    body
+  );
+}
+
+/**
  * One function, two providers. Set LLM_PROVIDER=anthropic or =openai.
  * "openai" also covers anything OpenAI-compatible (OpenRouter, Groq, Together,
  * Google's compatibility endpoint) — just point LLM_BASE_URL at it.
@@ -65,26 +80,39 @@ export async function invokeLLM(
   if (llmProvider() === "anthropic") {
     const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
     const rest = messages.filter((m) => m.role !== "system");
+    const model = llmModel();
 
-    const { data } = await axios.post(
-      endpoint("messages"),
-      {
-        model: llmModel(),
-        max_tokens: maxTokens,
-        temperature,
-        system: system || undefined,
-        messages: rest.map((m) => ({ role: m.role, content: m.content })),
-      },
-      {
-        headers: {
-          "x-api-key": process.env.LLM_API_KEY || "",
-          "anthropic-version": "2023-06-01",
-          "content-type": "application/json",
-          ...anthropicWorkspaceHeader(),
-        },
+    const body = (withTemperature: boolean) => ({
+      model,
+      max_tokens: maxTokens,
+      ...(withTemperature ? { temperature } : {}),
+      system: system || undefined,
+      messages: rest.map((m) => ({ role: m.role, content: m.content })),
+    });
+    const headers = {
+      "x-api-key": process.env.LLM_API_KEY || "",
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+      ...anthropicWorkspaceHeader(),
+    };
+
+    let data: { content?: { type: string; text?: string }[]; stop_reason?: string };
+    try {
+      ({ data } = await axios.post(endpoint("messages"), body(!rejectsTemperature.has(model)), {
+        headers,
         timeout: 20000,
-      }
-    );
+      }));
+    } catch (error) {
+      // Newer Claude models refuse `temperature` outright, and the refusal is
+      // a 400 that mentions the model — which is how this surfaced as "the
+      // provider doesn't recognise claude-sonnet-5" while the name was fine.
+      // Rather than keep a list of which models take it, ask, and remember
+      // the answer for the life of the process so it costs one call once.
+      if (!saysTemperatureUnwanted(error) || rejectsTemperature.has(model)) throw error;
+      console.warn(`[LLM] ${model} doesn't take a temperature — asking again without it`);
+      rejectsTemperature.add(model);
+      ({ data } = await axios.post(endpoint("messages"), body(false), { headers, timeout: 20000 }));
+    }
 
     const blocks: { type: string; text?: string }[] = data?.content ?? [];
     const block = blocks.find((b) => b.type === "text");
