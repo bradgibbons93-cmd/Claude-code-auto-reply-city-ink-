@@ -220,13 +220,30 @@ export async function reportModelAvailability(): Promise<void> {
     return;
   }
   if (!models.length) return;
-  if (models.includes(wanted)) {
-    console.log(`[LLM] Model "${wanted}" is available on this key`);
+  if (!models.includes(wanted)) {
+    console.error(
+      `[LLM] LLM_MODEL is "${wanted}", which this key cannot use. It can use: ${models.join(", ")}`
+    );
     return;
   }
-  console.error(
-    `[LLM] LLM_MODEL is "${wanted}", which this key cannot use. It can use: ${models.join(", ")}`
-  );
+
+  // Being on the list is not the same as being usable. The list said
+  // claude-sonnet-5 was available while every real call was refused — which
+  // is exactly the sort of "looks green, is broken" this app keeps being bitten
+  // by. So make one real, tiny call and report what actually comes back,
+  // Anthropic's own words included.
+  try {
+    await invokeLLM([{ role: "user", content: "Say OK." }], { maxTokens: 64, temperature: 0 });
+    console.log(`[LLM] Model "${wanted}" answered a real call — the agent can draft`);
+  } catch (error) {
+    const res = (error as { response?: { status?: number; data?: unknown } }).response;
+    if (!res) {
+      console.log(`[LLM] Boot check on "${wanted}" was inconclusive: ${(error as Error).message}`);
+      return;
+    }
+    console.error(`[LLM] Model "${wanted}" is listed but refused a real call — ${diagnose(error, wanted, llmBaseUrl())}`);
+    console.error(`[LLM] Provider said: HTTP ${res.status} ${JSON.stringify(res.data).slice(0, 400)}`);
+  }
 }
 
 /** Marks the one diagnosis worth spending a second call on. */
@@ -299,7 +316,18 @@ function diagnose(error: unknown, model: string, baseUrl: string): string {
       "workspace id in LLM_WORKSPACE_ID."
     );
   }
-  if (status === 404 || (status === 400 && /model/i.test(body))) {
+  // Only when the provider actually says the name is unknown. Matching the
+  // bare word "model" anywhere in a 400 body was far too loose: Anthropic
+  // mentions the model in plenty of errors that have nothing to do with its
+  // name, and every one of them was being reported as "doesn't recognise the
+  // model claude-sonnet-5" — sending someone to change a setting that was
+  // correct, while the real refusal never reached the screen. A model name
+  // that is genuinely wrong comes back 404, or says so in words.
+  const saysUnknownModel =
+    /not[ _]?found|does not exist|unknown model|invalid model|model.{0,20}not (found|available|recognized|recognised)/i.test(
+      body
+    );
+  if (status === 404 || (status === 400 && saysUnknownModel)) {
     return `The provider ${UNKNOWN_MODEL} "${model}". Copy the exact name from its model list into LLM_MODEL.`;
   }
   if (status) return `The provider returned HTTP ${status}: ${body.slice(0, 200)}`;
