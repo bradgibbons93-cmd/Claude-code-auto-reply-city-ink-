@@ -34,6 +34,18 @@ function endpoint(suffix: string): string {
 }
 
 /**
+ * A key made under "identity federation" belongs to the person rather than to
+ * one workspace, so Anthropic can't tell which workspace to bill and refuses
+ * the call outright until it is told. A key made against a workspace carries
+ * that already and needs none of this, which is why the header is only sent
+ * when there is something to send.
+ */
+function anthropicWorkspaceHeader(): Record<string, string> {
+  const id = (process.env.LLM_WORKSPACE_ID || "").trim();
+  return id ? { "anthropic-workspace-id": id } : {};
+}
+
+/**
  * One function, two providers. Set LLM_PROVIDER=anthropic or =openai.
  * "openai" also covers anything OpenAI-compatible (OpenRouter, Groq, Together,
  * Google's compatibility endpoint) — just point LLM_BASE_URL at it.
@@ -68,6 +80,7 @@ export async function invokeLLM(
           "x-api-key": process.env.LLM_API_KEY || "",
           "anthropic-version": "2023-06-01",
           "content-type": "application/json",
+          ...anthropicWorkspaceHeader(),
         },
         timeout: 20000,
       }
@@ -191,6 +204,20 @@ function diagnose(error: unknown, model: string, baseUrl: string): string {
   }
   if (status === 429) {
     return "Rate limited, or the free allowance is used up for now. Wait a minute and try again.";
+  }
+  // Anthropic's own words for this are accurate and unusable on a phone:
+  // "anthropic-workspace-id is required when authenticating with an
+  // identity-linked API key". It is not a bad key, not a spent account and
+  // not a wrong model — it is a key that belongs to a person instead of to a
+  // workspace, and there are two different ways out of it. Both, plainly.
+  if (status === 400 && /anthropic-workspace-id/i.test(body)) {
+    return (
+      "That Anthropic key is linked to your login rather than to one workspace, " +
+      "so Anthropic won't run it until it's told which workspace to bill. " +
+      "Easiest fix: at console.anthropic.com \u2192 API keys, create a key on a " +
+      "workspace and put that in LLM_API_KEY. Or keep this key and put the " +
+      "workspace id in LLM_WORKSPACE_ID."
+    );
   }
   if (status === 404 || (status === 400 && /model/i.test(body))) {
     return `The provider doesn't recognise the model "${model}". Copy the exact name from its model list into LLM_MODEL.`;

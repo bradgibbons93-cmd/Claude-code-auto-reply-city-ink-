@@ -236,6 +236,26 @@ One buzz per thread, claimed in the database (`claimNotificationSlot`), not in
 memory — four reference photos is one enquiry, and four buzzes is how someone
 learns to swipe the buzz away without reading it.
 
+**An Anthropic key made under "identity federation" belongs to a person, not
+to a workspace, and Anthropic refuses it until it is told which workspace to
+bill.** Brad put credit on the account, pasted the new key in, and said "so it
+should be all done. Right?" — and every three minutes the live server answered
+
+    [Agent] No draft for 630621959928364 — The provider returned HTTP 400:
+    {"type":"error","error":{"type":"invalid_request_error","message":
+    "anthropic-workspace-id is required when authenticating with an
+    identity-linked API key; send the id of the workspace this request act
+
+with a real customer's message on the board underneath it. Nothing was wrong
+with the key or the balance. That sentence is accurate and unreadable on a
+phone, and it was being printed on the card verbatim, truncated mid-word — the
+same shape as every other dead end here, where a wrong key, a spent account
+and a wrong model all looked identical. `diagnose()` now names it and gives
+both ways out: make the key on a workspace instead, or set `LLM_WORKSPACE_ID`
+and the `anthropic-workspace-id` header goes with every call. The header is
+only sent when there is something to send, so a normal workspace key is not
+handed a blank one.
+
 **Switching provider is two changes — the endpoint and the key.** Doing only
 the first leaves a perfectly good key being offered to a company that never
 issued it, and the 401 that comes back said "check it was copied in full",
