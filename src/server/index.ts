@@ -13,7 +13,7 @@ import { readAttachment, saveImageBytes, UnsupportedImage } from "./attachments.
 import { saveArtistUpload, readArtistUpload, UploadRejected } from "./uploads.js";
 import { syncFeed, countFeed } from "./feed.js";
 import QRCode from "qrcode";
-import { getLastLlmError, llmProvider, llmModel, llmBaseUrl } from "./llm.js";
+import { getLastLlmError, llmProvider, llmModel, llmBaseUrl, reportModelAvailability } from "./llm.js";
 import { mountAuth, requireStudio, requireStudioOrSignedLink } from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -259,6 +259,11 @@ app.listen(port, async () => {
   countFeed()
     .then((count) => (count === 0 ? syncFeed() : undefined))
     .catch((error) => console.error("[Feed] Backfill failed:", (error as Error).message));
+
+  // Say now whether the configured model is one this key can actually use.
+  // Finding that out from an empty draft box with a customer waiting is how
+  // it went the first time.
+  reportModelAvailability().catch(() => undefined);
 
   startScheduler();
 });

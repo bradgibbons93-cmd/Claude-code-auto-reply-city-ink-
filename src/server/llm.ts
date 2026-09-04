@@ -198,6 +198,37 @@ export async function listModels(): Promise<string[]> {
   return rows.map((r) => r.id).filter((id): id is string => typeof id === "string" && !!id);
 }
 
+/**
+ * Says on the way up whether the configured model is one this key can use.
+ *
+ * `LLM_MODEL` was set to a name the account had no access to, and nothing
+ * anywhere said so until a customer wrote in and the draft came back empty.
+ * The check costs one call at boot and turns a silent misconfiguration into
+ * a line in the log with the working alternatives next to it.
+ *
+ * Never throws and never blocks the boot: a provider that won't list its
+ * models is not a reason to refuse to start, and the model may well work.
+ */
+export async function reportModelAvailability(): Promise<void> {
+  if (!process.env.LLM_API_KEY) return;
+  const wanted = llmModel();
+  let models: string[];
+  try {
+    models = await listModels();
+  } catch (error) {
+    console.log(`[LLM] Couldn't list models (${(error as Error).message}) — carrying on with "${wanted}"`);
+    return;
+  }
+  if (!models.length) return;
+  if (models.includes(wanted)) {
+    console.log(`[LLM] Model "${wanted}" is available on this key`);
+    return;
+  }
+  console.error(
+    `[LLM] LLM_MODEL is "${wanted}", which this key cannot use. It can use: ${models.join(", ")}`
+  );
+}
+
 /** Marks the one diagnosis worth spending a second call on. */
 const UNKNOWN_MODEL = "doesn't recognise the model";
 
