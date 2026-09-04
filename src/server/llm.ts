@@ -129,6 +129,36 @@ export interface LlmTestResult {
  * a wrong model name, a spent balance and a typo'd URL all surfaced as the
  * same silence — so the whole point here is to tell them apart.
  */
+/**
+ * Whether the saved key is for a different provider than the one configured.
+ *
+ * Switching provider is two changes — the endpoint and the key — and doing
+ * only the first leaves a valid key being offered to a company that has
+ * never issued it. Anthropic keys start `sk-ant-`, OpenRouter's `sk-or-`,
+ * OpenAI's `sk-` with neither prefix. Unknown shapes say nothing rather than
+ * guess, because a self-hosted or proxied endpoint can use any format.
+ */
+function keyBelongsElsewhere(): string | null {
+  const key = (process.env.LLM_API_KEY || "").trim();
+  if (!key) return null;
+  const provider = llmProvider();
+
+  if (provider === "anthropic" && !key.startsWith("sk-ant-")) {
+    const looksLike = key.startsWith("sk-or-") ? "OpenRouter" : "another provider";
+    return (
+      `That key is for ${looksLike}, not Anthropic — Anthropic's own keys start "sk-ant-". ` +
+      "Create one at console.anthropic.com → API keys and put it in LLM_API_KEY."
+    );
+  }
+  if (provider !== "anthropic" && key.startsWith("sk-ant-")) {
+    return (
+      "That is an Anthropic key, but the app is pointed at a different provider. " +
+      "Either set LLM_PROVIDER to anthropic, or paste the key for the provider in LLM_BASE_URL."
+    );
+  }
+  return null;
+}
+
 function diagnose(error: unknown, model: string, baseUrl: string): string {
   const err = error as {
     code?: string;
@@ -148,6 +178,12 @@ function diagnose(error: unknown, model: string, baseUrl: string): string {
     return "The provider didn't answer in time. Usually temporary — try again.";
   }
   if (status === 401 || status === 403) {
+    // A key from the wrong provider is the commonest way to land here, and
+    // "check it was copied in full" sends someone hunting for a typo in a
+    // key that is perfectly intact and simply belongs somewhere else. The
+    // prefixes are unambiguous, so say which one it is.
+    const mismatch = keyBelongsElsewhere();
+    if (mismatch) return mismatch;
     return "The provider rejected the key. Check LLM_API_KEY was copied in full, with no spaces.";
   }
   if (status === 402) {

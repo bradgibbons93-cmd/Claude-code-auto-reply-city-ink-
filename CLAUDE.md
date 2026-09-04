@@ -236,6 +236,14 @@ One buzz per thread, claimed in the database (`claimNotificationSlot`), not in
 memory — four reference photos is one enquiry, and four buzzes is how someone
 learns to swipe the buzz away without reading it.
 
+**Switching provider is two changes — the endpoint and the key.** Doing only
+the first leaves a perfectly good key being offered to a company that never
+issued it, and the 401 that comes back said "check it was copied in full",
+sending someone hunting for a typo that isn't there. `keyBelongsElsewhere()`
+compares the key's prefix to the configured provider (`sk-ant-` Anthropic,
+`sk-or-` OpenRouter) and names the mismatch. An unrecognised shape says
+nothing rather than guess — a self-hosted endpoint can use any format.
+
 **When the AI provider stops answering, the phone gets told.** Brad switched
 `LLM_PROVIDER` to OpenRouter and the account ran out of credit; every enquiry
 from that moment landed with an empty box and nothing said so — the poll
