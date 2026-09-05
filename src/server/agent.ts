@@ -502,6 +502,23 @@ export async function draftForUnanswered(
         console.error(
           `[Agent] No draft for ${conversationId} — ${getLastLlmError()?.message ?? "the model didn't answer"}`
         );
+        // But the person is still waiting, and this used to `continue` —
+        // no card, no name on the board, nothing. The AI having a bad minute
+        // is not a reason for a customer to vanish from the studio's screen.
+        //
+        // Brad's rule, in his words: "if there's a new message that is
+        // unrequited within the last twenty four hours, it will show." So the
+        // card goes up with an empty box and the reason on it, exactly as the
+        // webhook path has always done, and he writes that one himself.
+        await supersedePendingReplies(conversationId).catch(() => undefined);
+        await createPendingReply(
+          conversationId,
+          answering.messageId,
+          "",
+          composed.sensitive,
+          undefined,
+          true
+        ).catch(() => undefined);
         continue;
       }
       await clearAlert("llm").catch(() => undefined);

@@ -221,6 +221,14 @@ export async function getUnansweredConversations(limit = 20, newerThanMinutes?: 
              SELECT 1 FROM pending_replies p
               WHERE p.conversation_id = c.conversation_id
                 AND p.status = 'pending'
+                -- An empty card put up because the AI fell over is a
+                -- placeholder for the customer, not an answer to them. It
+                -- must not stop the AI trying again when it recovers — that
+                -- left the studio to notice and press a button, which is the
+                -- opposite of a safety net. Only while it is still empty:
+                -- the moment anything is typed into it, it is Brad's reply
+                -- and nothing may overwrite it.
+                AND NOT (p.llm_failed = 1 AND TRIM(p.draft_text) = '')
                 AND NOT EXISTS (
                   SELECT 1 FROM messenger_messages r
                    WHERE r.conversation_id = c.conversation_id

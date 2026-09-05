@@ -402,6 +402,25 @@ Settings to press a Test button, and `draftForUnanswered` fires a `notifyOnce`
 alert when everything failed and nothing was drafted. `clearAlert("llm")` on
 the next success re-arms it for the following outage.
 
+**A waiting customer always gets a card, even when the AI can't write one.**
+Brad's rule, in his words:
+
+> make a all around the rule that no matter what, if there's a new message
+> that is unrequited within the last twenty four hours, it will show
+
+The poll used to log the model's failure and `continue` — no row, no card, no
+name on the board. The customer simply vanished from the studio's screen
+because the AI had a bad minute, which is the same shape as every other bug
+that has cost this studio a message. `draftForUnanswered` now puts the card up
+with an empty box and the `llmFailed` flag, exactly as the webhook path always
+has.
+
+Two rules hold that together, and both are tested. An empty failed card does
+NOT count as "a draft is waiting", so the AI fills it in by itself on the next
+pass instead of leaving the studio to notice and press a button. And the
+moment anything is typed into it, `replacePendingReplyDraft` clears the flag,
+so a half-written reply is Brad's and nothing may overwrite it.
+
 **An empty draft is deliberate when `llmFailed` is set.** The card appears
 with an empty box so the studio writes the reply themselves; a placeholder
 there would be worse, because a placeholder can be approved by accident.
@@ -665,7 +684,11 @@ instead, or keep the PID.
 
 **Suites that assert on notifications must pin the quiet hours.** The defaults
 are 22:00–07:00, so a test written in the afternoon passes and the same test
-fails at one in the morning. One did.
+fails at one in the morning. One did — and then `quiethours.mjs`, written to
+prove the quiet-hours fix, walked into it too: quiet hours short-circuit
+`notify()` before the no-device branch is reached, so it passed all afternoon
+and failed at half past ten at night. Pin the window open (`00:00`–`00:00`)
+for anything that is not itself about quiet hours.
 
 **web-push always speaks https**, whatever the endpoint's scheme says, so a
 stand-in push service has to be a TLS server with a self-signed certificate
