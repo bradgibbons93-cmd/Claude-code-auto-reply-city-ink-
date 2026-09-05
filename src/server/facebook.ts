@@ -87,6 +87,12 @@ function noteInboxSuccess(key: string): void {
 }
 
 async function getShrinking<T>(
+  // Which inbox is being asked, because the log line used to say "Instagram
+  // refused that page" whichever inbox it was — and the numbers in it
+  // (12, from a page of fifty) could only have come from Messenger. Reading
+  // a log and being told the wrong inbox is how three days went into the
+  // wrong permission once already.
+  who: string,
   url: string,
   params: Record<string, string> | undefined,
   timeout: number
@@ -115,7 +121,7 @@ async function getShrinking<T>(
       // gentle step so far, and each refusal costs a full timeout.
       limit = Math.max(1, Math.floor(limit / 4));
       params = { ...params, limit: String(limit) };
-      console.warn(`[Facebook] Instagram refused that page — asking for ${limit} instead`);
+      console.warn(`[Facebook] ${who} refused that page — asking for ${limit} instead`);
     }
   }
 }
@@ -693,6 +699,7 @@ export async function fetchInboxParticipants(
     for (let page = 0; page < maxPages && url; page += 1) {
       try {
         const { data }: { data: InboxPage } = await getShrinking(
+          platform,
           url,
           params,
           platform === "instagram" ? 30000 : 12000
@@ -811,6 +818,130 @@ interface ThreadPage {
   paging?: { next?: string };
 }
 
+/** One thread as the importer stores it, however it was fetched. */
+type InboxThread = NonNullable<ThreadPage["data"]>[number];
+
+/**
+ * Instagram's thread list, asked for as cheaply as Graph will allow.
+ *
+ * The old shape asked `/me/conversations` for the threads AND the messages
+ * on them AND the attachments on those, in one request, and shrank the page
+ * when Instagram refused. Shrinking the page never worked, because the page
+ * size was never the expensive part: at one conversation Meta was still
+ * being asked to assemble ten messages with their attachment blobs, and it
+ * still answered
+ *
+ *   HTTP 500 "Please reduce the amount of data you're asking for"
+ *   HTTP 400 (2534084) "your query has timed out since you have too many
+ *                       conversations with users"
+ *
+ * — the second of which is Meta saying, in as many words, that walking the
+ * edge is what timed out. So ask the edge for nothing but ids and names, and
+ * let the messages be fetched thread by thread afterwards.
+ *
+ * If even that is refused after shrinking, and nothing at all came back, try
+ * once more without `participants`, the only remaining field with a sub-edge
+ * behind it. A partial list is never thrown away for that — some threads are
+ * worth more than a tidier request.
+ */
+async function listInstagramThreads(
+  endpoint: { base: string; token: string },
+  maxThreads: number
+): Promise<{ threads: InboxThread[]; failed?: string }> {
+  let threads: InboxThread[] = [];
+  let failed: string | undefined;
+
+  for (const fields of ["id,participants", "id"]) {
+    const found: InboxThread[] = [];
+    let url: string | undefined = `${endpoint.base}/me/conversations`;
+    let params: Record<string, string> | undefined = {
+      // Only graph.facebook.com splits one edge by platform. On Instagram's
+      // own host the conversations edge is already Instagram's.
+      ...(endpoint.base === IG_GRAPH ? {} : { platform: inboxParam("instagram") }),
+      fields,
+      // Ten ids is a small ask, and getShrinking is still behind it in case
+      // this inbox grows past what Instagram will enumerate at once.
+      limit: "10",
+      access_token: endpoint.token,
+    };
+
+    failed = undefined;
+    let tooMuch = false;
+
+    while (url && found.length < maxThreads) {
+      try {
+        const { data }: { data: ThreadPage } = await getShrinking(
+          "instagram",
+          url,
+          params,
+          30000
+        );
+        for (const thread of data.data ?? []) {
+          if (found.length >= maxThreads) break;
+          if (thread.id) found.push(thread);
+        }
+        url = data.paging?.next;
+        params = undefined;
+      } catch (error) {
+        failed = describeGraphError("conversations", error);
+        tooMuch = asksForTooMuch(error);
+        break;
+      }
+    }
+
+    if (found.length > threads.length) threads = found;
+    // Retry without participants only when the size is what was refused and
+    // the attempt produced nothing. A permission refusal reads the same
+    // however few fields are asked for.
+    if (!failed || !tooMuch || threads.length > 0) break;
+  }
+
+  return { threads, failed };
+}
+
+/**
+ * The messages on one Instagram thread, asked for on their own.
+ *
+ * One small request per thread is far less work for Graph than one request
+ * that makes it assemble every thread at once, and it degrades one thread at
+ * a time instead of losing the lot. Ten messages is plenty of history for a
+ * draft; if even that is refused, ask for fewer.
+ *
+ * The attachments stay on every attempt. Dropping them is the obvious next
+ * thing to shrink and it is the wrong thing to shrink here: a photo with no
+ * words is the commonest enquiry this studio gets, and without the
+ * attachment field such a message has no text and no picture, so it is
+ * indistinguishable from nothing and would be silently skipped. Asking for
+ * fewer messages saves the same work and loses nothing.
+ */
+async function fetchInstagramThread(
+  endpoint: { base: string; token: string },
+  threadId: string
+): Promise<{ thread?: InboxThread; failed?: string }> {
+  let failed: string | undefined;
+
+  for (const limit of [10, 3, 1]) {
+    try {
+      const { data } = await axios.get<InboxThread>(`${endpoint.base}/${threadId}`, {
+        params: {
+          fields: `participants,messages.limit(${limit}){id,message,created_time,from,attachments{image_data,file_url,mime_type}}`,
+          access_token: endpoint.token,
+        },
+        timeout: 20000,
+      });
+      return { thread: data };
+    } catch (error) {
+      failed = describeGraphError(`thread ${threadId}`, error);
+      // Anything that isn't "that was too much to assemble" comes back the
+      // same however little is asked for, so asking again only costs time a
+      // customer is waiting through.
+      if (!asksForTooMuch(error)) break;
+    }
+  }
+
+  return { failed };
+}
+
 export interface ImportedThreads {
   conversations: number;
   messages: number;
@@ -833,6 +964,13 @@ export interface ImportedThreads {
  * draft replies: writing to fifty people at once off the back of a button
  * press is not something anyone wants, and half these conversations were
  * already answered by hand.
+ *
+ * Messenger is read in one request per page of threads with the messages
+ * nested on it, which is what it has always done and what works. Instagram
+ * refuses that shape on this studio's inbox at every page size, so it lists
+ * the threads first and fetches each one after — see listInstagramThreads.
+ * Both end up in storeThread, so the two ways in cannot drift apart on who
+ * said what, or on being idempotent per message id.
  */
 export async function importExistingConversations(
   maxThreads = 1000,
@@ -855,29 +993,101 @@ export async function importExistingConversations(
   let messages = 0;
   let corrected = 0;
 
+  /**
+   * Store one thread the way a live delivery would.
+   *
+   * False for a thread with nobody in it but us — the Page talking to
+   * itself, which has nothing to answer.
+   */
+  async function storeThread(thread: InboxThread, platform: Platform): Promise<boolean> {
+    // Whoever isn't us.
+    const customer = (thread.participants?.data ?? []).find(
+      (p) => p.id && p.id !== identity?.id
+    );
+    if (!customer?.id) return false;
+
+    await getOrCreateConversation(customer.id, realName(customer.name), platform);
+    conversations += 1;
+
+    // Oldest first, so the stored thread reads in the order it happened.
+    const turns = [...(thread.messages?.data ?? [])].reverse();
+    // The newest timestamp seen so far in this thread, for the rare message
+    // Graph hands over without one.
+    let lastKnownTime: Date | undefined;
+    for (const turn of turns) {
+      if (!turn.id) continue;
+
+      // A message with no words is still a message. Half this studio's
+      // enquiries are a photo of what someone wants and nothing else —
+      // skipping them imported the thread as a name with no conversation in
+      // it, which is exactly how it looked.
+      const photos = (turn.attachments?.data ?? [])
+        .filter((a) => !a.mime_type || a.mime_type.startsWith("image/"))
+        .map((a) => a.image_data?.url || a.file_url)
+        .filter((u): u is string => !!u);
+
+      const text = turn.message?.trim();
+      if (!text && !photos.length) continue;
+
+      // Anyone who isn't the customer is us — the Page, an admin replying by
+      // hand, or Meta's own instant reply. Comparing against the Page
+      // identity instead meant a greeting the studio sent came back labelled
+      // as the customer's own words, which is worse than useless: it's what
+      // the agent reads as history. Anything not positively from the
+      // customer is treated as ours. Graph attaches a sender to every real
+      // message; the ones without are system lines like "Brad Potter replied
+      // to an ad." Putting those in the customer's mouth is the worse
+      // mistake — the agent reads this back as the conversation and would
+      // sit there trying to answer a status line.
+      const fromId = turn.from?.id;
+      const fromUs = fromId !== customer.id;
+      // Keep when it was actually said. Stamping the whole thread "now"
+      // leaves it with no real order, and these turns are what the agent
+      // reads back as the conversation.
+      // Graph occasionally omits created_time. Letting that fall through to
+      // "now" stamps a months-old message with today, and the thread leaps
+      // to the top of the inbox past conversations that really are more
+      // recent. Carry the last known time forward instead — these arrive in
+      // order.
+      const parsed = turn.created_time ? new Date(turn.created_time) : undefined;
+      const said = parsed && !Number.isNaN(parsed.getTime()) ? parsed : lastKnownTime;
+      if (said) lastKnownTime = said;
+      // Keep the picture itself — Meta's links expire, and a blank box where
+      // the reference photo should be is no use when the whole point is
+      // pricing the tattoo in it.
+      const kept = photos.length ? await cacheAttachments(photos, customer.id, turn.id) : [];
+
+      const stored = await recordMessage(
+        customer.id,
+        turn.id,
+        fromUs ? "manual" : "customer",
+        text || "(sent a photo)",
+        undefined,
+        kept,
+        said
+      );
+      if (stored) {
+        messages += 1;
+      } else {
+        // Already stored — but possibly stored wrong. Threads imported
+        // before the sender attribution was fixed have the studio's own
+        // replies recorded as the customer's, which is what had the agent
+        // drafting answers to its own sentences. Pressing Import again is
+        // how that gets put right.
+        const wanted = fromUs ? "manual" : "customer";
+        if (await correctMessageSender(turn.id, wanted)) corrected += 1;
+      }
+    }
+
+    return true;
+  }
+
   for (const platform of ["facebook", "instagram"] as const) {
     const endpoint = await endpointFor(platform);
     if (!endpoint) {
       notes.push(`${platform}: not connected`);
       continue;
     }
-
-    let url: string | undefined = `${endpoint.base}/me/conversations`;
-    let params: Record<string, string> | undefined = {
-      ...(endpoint.base === IG_GRAPH ? {} : { platform: inboxParam(platform) }),
-      // Instagram answered this with HTTP 500 "Please reduce the amount of
-      // data you're asking for" — fifty threads of a hundred messages each,
-      // with attachments, is more than that edge will assemble. Messenger
-      // handles it fine, so only Instagram pays for it.
-      fields:
-        platform === "instagram"
-          ? "participants,messages.limit(10){id,message,created_time,from,attachments{image_data,file_url,mime_type}}"
-          : "participants,messages.limit(100){id,message,created_time,from,attachments{image_data,file_url,mime_type}}",
-      // Same refusal as the participants list, and for the same reason: this
-      // edge assembles far less for Instagram than it will for Messenger.
-      limit: platform === "instagram" ? "5" : "50",
-      access_token: endpoint.token,
-    };
 
     // An inbox that has just refused us is left alone rather than asked
     // again ninety seconds later.
@@ -888,115 +1098,91 @@ export async function importExistingConversations(
 
     let seen = 0;
     let failed = "";
+    let aside = "";
 
-    while (url && seen < maxThreads) {
-      try {
-        // Instagram's edge is consistently slower than Messenger's, and it
-        // refuses a page it thinks is too big — so let it name the size
-        // rather than guessing another number that also gets refused.
-        const { data }: { data: ThreadPage } = await getShrinking(
-          url,
-          params,
-          platform === "instagram" ? 40000 : 20000
-        );
-        noteInboxSuccess(`${platform}-import`);
+    if (platform === "instagram") {
+      /* ---- two phases, because Instagram will not do it in one ---- */
 
-        for (const thread of data.data ?? []) {
-          if (seen >= maxThreads) break;
-          // Whoever isn't us. A thread with nobody else in it is the Page
-          // talking to itself and there's nothing to answer.
-          const customer = (thread.participants?.data ?? []).find(
-            (p) => p.id && p.id !== identity?.id
-          );
-          if (!customer?.id) continue;
-          seen += 1;
+      const listed = await listInstagramThreads(endpoint, maxThreads);
 
-          await getOrCreateConversation(customer.id, realName(customer.name), platform);
-          conversations += 1;
+      // The whole pass has to finish inside the three minutes between polls,
+      // or the polls start overlapping and each holds a Graph connection
+      // open while the next begins. Meta hands the threads back
+      // most-recently-active first, so a short run still gets the ones that
+      // matter and the rest come round on the next poll.
+      const deadline = Date.now() + 100_000;
+      let unopened = 0;
+      let lastThreadError = "";
+      let ranShort = false;
 
-          // Oldest first, so the stored thread reads in the order it happened.
-          const turns = [...(thread.messages?.data ?? [])].reverse();
-          // The newest timestamp seen so far in this thread, for the rare
-          // message Graph hands over without one.
-          let lastKnownTime: Date | undefined;
-          for (const turn of turns) {
-            if (!turn.id) continue;
-
-            // A message with no words is still a message. Half this studio's
-            // enquiries are a photo of what someone wants and nothing else —
-            // skipping them imported the thread as a name with no
-            // conversation in it, which is exactly how it looked.
-            const photos = (turn.attachments?.data ?? [])
-              .filter((a) => !a.mime_type || a.mime_type.startsWith("image/"))
-              .map((a) => a.image_data?.url || a.file_url)
-              .filter((u): u is string => !!u);
-
-            const text = turn.message?.trim();
-            if (!text && !photos.length) continue;
-
-            // Anyone who isn't the customer is us — the Page, an admin
-            // replying by hand, or Meta's own instant reply. Comparing
-            // against the Page identity instead meant a greeting the studio
-            // sent came back labelled as the customer's own words, which is
-            // worse than useless: it's what the agent reads as history.
-            // Anything not positively from the customer is treated as ours.
-            // Graph attaches a sender to every real message; the ones without
-            // are system lines like "Brad Potter replied to an ad." Putting
-            // those in the customer's mouth is the worse mistake — the agent
-            // reads this back as the conversation and would sit there trying
-            // to answer a status line.
-            const fromId = turn.from?.id;
-            const fromUs = fromId !== customer.id;
-            // Keep when it was actually said. Stamping the whole thread
-            // "now" leaves it with no real order, and these turns are what
-            // the agent reads back as the conversation.
-            // Graph occasionally omits created_time. Letting that fall
-            // through to "now" stamps a months-old message with today, and
-            // the thread leaps to the top of the inbox past conversations
-            // that really are more recent. Carry the last known time
-            // forward instead — these arrive in order.
-            const parsed = turn.created_time ? new Date(turn.created_time) : undefined;
-            const said =
-              parsed && !Number.isNaN(parsed.getTime()) ? parsed : lastKnownTime;
-            if (said) lastKnownTime = said;
-            // Keep the picture itself — Meta's links expire, and a blank
-            // box where the reference photo should be is no use when the
-            // whole point is pricing the tattoo in it.
-            const kept = photos.length
-              ? await cacheAttachments(photos, customer.id, turn.id)
-              : [];
-
-            const stored = await recordMessage(
-              customer.id,
-              turn.id,
-              fromUs ? "manual" : "customer",
-              text || "(sent a photo)",
-              undefined,
-              kept,
-              said
-            );
-            if (stored) {
-              messages += 1;
-            } else {
-              // Already stored — but possibly stored wrong. Threads imported
-              // before the sender attribution was fixed have the studio's own
-              // replies recorded as the customer's, which is what had the
-              // agent drafting answers to its own sentences. Pressing Import
-              // again is how that gets put right.
-              const wanted = fromUs ? "manual" : "customer";
-              if (await correctMessageSender(turn.id, wanted)) corrected += 1;
-            }
-          }
+      for (const stub of listed.threads) {
+        if (Date.now() > deadline) {
+          ranShort = true;
+          break;
         }
-
-        url = data.paging?.next;
-        params = undefined;
-      } catch (error) {
-        failed = describeGraphError("conversations", error);
-        noteInboxFailure(`${platform}-import`);
-        console.error(`[Facebook] ${platform} import failed — ${failed}`);
-        break;
+        const got = await fetchInstagramThread(endpoint, stub.id!);
+        if (!got.thread) {
+          // One thread refusing must not cost the others — that is the whole
+          // reason for asking one at a time.
+          unopened += 1;
+          lastThreadError = got.failed ?? "";
+          console.error(`[Facebook] instagram thread ${stub.id} wouldn't open — ${got.failed}`);
+          continue;
+        }
+        // Participants come back on the thread itself; fall back to the ones
+        // the list gave, for the run where the list had to drop them.
+        const participants = got.thread.participants?.data?.length
+          ? got.thread.participants
+          : stub.participants;
+        if (await storeThread({ ...got.thread, participants }, platform)) seen += 1;
       }
+
+      if (listed.failed && listed.threads.length === 0) {
+        failed = listed.failed;
+      } else if (unopened && seen === 0) {
+        // The list came back and not one thread would open. That is the
+        // inbox refusing us, not one thread being odd, and it earns the rest.
+        failed = lastThreadError;
+      } else {
+        if (listed.failed) aside += ", and the list stopped early";
+        if (unopened) aside += `, ${unopened} wouldn't open`;
+        if (ranShort) aside += ", stopped on time and will carry on next run";
+      }
+    } else {
+      /* ---- Messenger, one request per page of threads, as it always was ---- */
+
+      let url: string | undefined = `${endpoint.base}/me/conversations`;
+      let params: Record<string, string> | undefined = {
+        ...(endpoint.base === IG_GRAPH ? {} : { platform: inboxParam(platform) }),
+        fields:
+          "participants,messages.limit(100){id,message,created_time,from,attachments{image_data,file_url,mime_type}}",
+        limit: "50",
+        access_token: endpoint.token,
+      };
+
+      while (url && seen < maxThreads) {
+        try {
+          const { data }: { data: ThreadPage } = await getShrinking(platform, url, params, 20000);
+
+          for (const thread of data.data ?? []) {
+            if (seen >= maxThreads) break;
+            if (await storeThread(thread, platform)) seen += 1;
+          }
+
+          url = data.paging?.next;
+          params = undefined;
+        } catch (error) {
+          failed = describeGraphError("conversations", error);
+          break;
+        }
+      }
+    }
+
+    if (failed) {
+      noteInboxFailure(`${platform}-import`);
+      console.error(`[Facebook] ${platform} import failed — ${failed}`);
+    } else {
+      noteInboxSuccess(`${platform}-import`);
     }
 
     notes.push(
@@ -1006,7 +1192,7 @@ export async function importExistingConversations(
         // quietly at a round number and letting it look complete.
         : `${platform}: ${seen} thread${seen === 1 ? "" : "s"}${
             seen >= maxThreads ? " (stopped at the limit — press again for the rest)" : ""
-          }`
+          }${aside}`
     );
   }
 
