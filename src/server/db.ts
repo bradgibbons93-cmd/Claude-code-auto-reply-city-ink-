@@ -682,6 +682,25 @@ export async function supersedePendingReplies(conversationId: string): Promise<n
   return stale.length;
 }
 
+/**
+ * Whether this exact customer message has already been drafted for — in any
+ * state, pending, approved or discarded.
+ *
+ * `customerMessageId` is unique across the table, so one row means this
+ * message has been through the agent once already and must not go again.
+ * Storing it a second time is fine and is deduplicated; drafting for it a
+ * second time would replace a draft the studio may already have edited.
+ */
+export async function hasDraftForMessage(customerMessageId: string): Promise<boolean> {
+  const db = await getDb();
+  const [row] = await db
+    .select({ id: pendingReplies.id })
+    .from(pendingReplies)
+    .where(eq(pendingReplies.customerMessageId, customerMessageId))
+    .limit(1);
+  return !!row;
+}
+
 export async function createPendingReply(
   conversationId: string,
   customerMessageId: string,

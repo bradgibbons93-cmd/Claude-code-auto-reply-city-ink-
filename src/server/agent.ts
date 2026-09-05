@@ -24,6 +24,7 @@ import {
   getPendingReply,
   replacePendingReplyDraft,
   getUnansweredConversations,
+  hasDraftForMessage
 } from "./db.js";
 import { invokeLLMJson, getLastLlmError, type ChatMessage } from "./llm.js";
 import { availabilityForPrompt } from "./calendar.js";
@@ -642,8 +643,29 @@ export async function handleCustomerMessage(
     keptPhotos
   );
   if (!isNew) {
-    console.log(`[Agent] Duplicate delivery ignored: ${messageId}`);
-    return;
+    // Stored already — but stored is NOT handled, and treating the two as the
+    // same thing lost a real customer's message.
+    //
+    // Maureen wrote at 17:35. The three-minute Messenger import reached her
+    // message a few seconds before Facebook's webhook did and stored it, so
+    // when the webhook arrived the insert hit the unique index and this
+    // returned — before the phone was buzzed, before the handoff pause from
+    // the studio's own earlier reply was lifted, and before anything was
+    // drafted. The message sat in the database, the board said nothing was
+    // waiting, and the poll skipped the thread because it was still paused.
+    // Every part working exactly as written, and a customer ignored.
+    //
+    // A genuine Facebook retry still has to stop here, or approving a draft
+    // and then getting the same delivery again would throw away the version
+    // the studio had edited. The test for that is whether this message has
+    // ever been drafted for — not whether its text is in the table.
+    if (await hasDraftForMessage(messageId)) {
+      console.log(`[Agent] Duplicate delivery ignored: ${messageId}`);
+      return;
+    }
+    console.log(
+      `[Agent] ${messageId} was already stored (the inbox poll got there first) but never handled — handling it now`
+    );
   }
 
   // Brad's phone, not the dashboard tab nobody has open. Deliberately before

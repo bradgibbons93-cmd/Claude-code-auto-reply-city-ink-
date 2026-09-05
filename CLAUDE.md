@@ -178,6 +178,36 @@ it", "thank you", hearts — is a thank-you. Offering to book them reads as
 though nobody read it. The prompt says so in those words now, and still
 treats an actual question (a price, a date, another piece) as a real enquiry.
 
+**Stored is not handled. The webhook must not return just because the poll
+got there first.** Brad: *"why is maureens message not showing up?"* — a real
+customer, a real question, on the board nowhere. The live log, 17:36:
+
+    [Agent] Message from 9182505141836612 (Maureen Lopez), conversation row 45
+    [Agent] Duplicate delivery ignored: m_RmTk1WxbzhYK5CMs6afGh…
+
+The three-minute Messenger import reached her message a few seconds before
+Facebook's webhook did and stored it. So when the webhook arrived the insert
+hit the unique index on `message_id`, `handleCustomerMessage` returned — and
+everything downstream of that line never ran: the phone was not buzzed, the
+`handoff` pause from the studio's own earlier reply was never lifted, and
+nothing was drafted. The poll then skipped the thread because it was still
+paused, and `draftForUnanswered` reported nothing to do.
+
+Every part behaved exactly as written. The message was in the database the
+whole time and the dashboard said everyone had been answered.
+
+The dedupe now only decides whether to STORE. Whether to HANDLE is a separate
+question, answered by `hasDraftForMessage()` — has this exact message ever
+been drafted for, in any state. A genuine Facebook retry still stops (or
+approving a draft and receiving the delivery again would throw away the
+version the studio edited); a message that was merely stored early is picked
+up and handled.
+
+This is the third time on this project that the fast path and the safety net
+have each assumed the other did the work. When something is missing from the
+board, check whether it is missing from the *database* before assuming it
+never arrived — it usually did.
+
 **The studio answers plenty of messages from Meta's own inbox, where this app
 cannot see them.** Echoes cover it going forward; anything older is only known
 if it was imported. So "Draft the unanswered" is bounded to a fortnight — it
