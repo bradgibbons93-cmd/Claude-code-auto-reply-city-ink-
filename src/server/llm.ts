@@ -34,6 +34,33 @@ function endpoint(suffix: string): string {
 }
 
 /**
+ * A key made under "identity federation" belongs to the person rather than to
+ * one workspace, so Anthropic can't tell which workspace to bill and refuses
+ * the call outright until it is told. A key made against a workspace carries
+ * that already and needs none of this, which is why the header is only sent
+ * when there is something to send.
+ */
+function anthropicWorkspaceHeader(): Record<string, string> {
+  const id = (process.env.LLM_WORKSPACE_ID || "").trim();
+  return id ? { "anthropic-workspace-id": id } : {};
+}
+
+/**
+ * Models that have told us they won't take a `temperature`, learned at run
+ * time rather than kept as a list that goes stale the week it is written.
+ */
+const rejectsTemperature = new Set<string>();
+
+function saysTemperatureUnwanted(error: unknown): boolean {
+  const res = (error as { response?: { status?: number; data?: unknown } }).response;
+  if (res?.status !== 400) return false;
+  const body = res.data ? JSON.stringify(res.data) : "";
+  return /temperature[^"]{0,40}(deprecated|not supported|unsupported)|(deprecated|unsupported)[^"]{0,40}temperature/i.test(
+    body
+  );
+}
+
+/**
  * One function, two providers. Set LLM_PROVIDER=anthropic or =openai.
  * "openai" also covers anything OpenAI-compatible (OpenRouter, Groq, Together,
  * Google's compatibility endpoint) — just point LLM_BASE_URL at it.
@@ -42,34 +69,65 @@ export async function invokeLLM(
   messages: ChatMessage[],
   opts: { maxTokens?: number; temperature?: number } = {}
 ): Promise<string> {
-  const maxTokens = opts.maxTokens ?? 400;
+  // 400 was far too tight for a current model. A Claude 4.6-or-later model
+  // may reason before it answers, and that reasoning is spent out of the same
+  // budget — so a small ceiling can be used up entirely before a single word
+  // of the actual reply is written, and what comes back has no text in it at
+  // all. That is what "Empty LLM response" was, eight times in one minute.
+  const maxTokens = opts.maxTokens ?? 1024;
   const temperature = opts.temperature ?? 0.6;
 
   if (llmProvider() === "anthropic") {
     const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
     const rest = messages.filter((m) => m.role !== "system");
+    const model = llmModel();
 
-    const { data } = await axios.post(
-      endpoint("messages"),
-      {
-        model: llmModel(),
-        max_tokens: maxTokens,
-        temperature,
-        system: system || undefined,
-        messages: rest.map((m) => ({ role: m.role, content: m.content })),
-      },
-      {
-        headers: {
-          "x-api-key": process.env.LLM_API_KEY || "",
-          "anthropic-version": "2023-06-01",
-          "content-type": "application/json",
-        },
+    const body = (withTemperature: boolean) => ({
+      model,
+      max_tokens: maxTokens,
+      ...(withTemperature ? { temperature } : {}),
+      system: system || undefined,
+      messages: rest.map((m) => ({ role: m.role, content: m.content })),
+    });
+    const headers = {
+      "x-api-key": process.env.LLM_API_KEY || "",
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+      ...anthropicWorkspaceHeader(),
+    };
+
+    let data: { content?: { type: string; text?: string }[]; stop_reason?: string };
+    try {
+      ({ data } = await axios.post(endpoint("messages"), body(!rejectsTemperature.has(model)), {
+        headers,
         timeout: 20000,
-      }
-    );
+      }));
+    } catch (error) {
+      // Newer Claude models refuse `temperature` outright, and the refusal is
+      // a 400 that mentions the model — which is how this surfaced as "the
+      // provider doesn't recognise claude-sonnet-5" while the name was fine.
+      // Rather than keep a list of which models take it, ask, and remember
+      // the answer for the life of the process so it costs one call once.
+      if (!saysTemperatureUnwanted(error) || rejectsTemperature.has(model)) throw error;
+      console.warn(`[LLM] ${model} doesn't take a temperature — asking again without it`);
+      rejectsTemperature.add(model);
+      ({ data } = await axios.post(endpoint("messages"), body(false), { headers, timeout: 20000 }));
+    }
 
-    const block = data?.content?.find((b: { type: string }) => b.type === "text");
-    if (!block?.text) throw new Error("Empty LLM response");
+    const blocks: { type: string; text?: string }[] = data?.content ?? [];
+    const block = blocks.find((b) => b.type === "text");
+    if (!block?.text) {
+      // Say which of the two this is. "Empty LLM response" was true and
+      // useless: it read as the model being unreachable when in fact it had
+      // answered, and had simply run out of room before the answer began.
+      const kinds = blocks.map((b) => b.type).join(", ") || "nothing at all";
+      const stop = data?.stop_reason ?? "no stop_reason";
+      throw new Error(
+        stop === "max_tokens"
+          ? `The model used its whole ${maxTokens}-token budget before writing any reply (it returned ${kinds}). It needs more room.`
+          : `The model returned no text — ${kinds}, stop_reason ${stop}.`
+      );
+    }
     return block.text as string;
   }
 
@@ -112,6 +170,133 @@ export interface LlmTestResult {
  * a wrong model name, a spent balance and a typo'd URL all surfaced as the
  * same silence — so the whole point here is to tell them apart.
  */
+/**
+ * Whether the saved key is for a different provider than the one configured.
+ *
+ * Switching provider is two changes — the endpoint and the key — and doing
+ * only the first leaves a valid key being offered to a company that has
+ * never issued it. Anthropic keys start `sk-ant-`, OpenRouter's `sk-or-`,
+ * OpenAI's `sk-` with neither prefix. Unknown shapes say nothing rather than
+ * guess, because a self-hosted or proxied endpoint can use any format.
+ */
+function keyBelongsElsewhere(): string | null {
+  const key = (process.env.LLM_API_KEY || "").trim();
+  if (!key) return null;
+  const provider = llmProvider();
+
+  if (provider === "anthropic" && !key.startsWith("sk-ant-")) {
+    const looksLike = key.startsWith("sk-or-") ? "OpenRouter" : "another provider";
+    return (
+      `That key is for ${looksLike}, not Anthropic — Anthropic's own keys start "sk-ant-". ` +
+      "Create one at console.anthropic.com → API keys and put it in LLM_API_KEY."
+    );
+  }
+  if (provider !== "anthropic" && key.startsWith("sk-ant-")) {
+    return (
+      "That is an Anthropic key, but the app is pointed at a different provider. " +
+      "Either set LLM_PROVIDER to anthropic, or paste the key for the provider in LLM_BASE_URL."
+    );
+  }
+  return null;
+}
+
+/**
+ * Ask the provider which models this key can actually use.
+ *
+ * "The provider doesn't recognise the model X" is true and leaves the next
+ * move to guesswork — and guessing a name has already cost this project a
+ * round trip through a phone. The key that just failed is the same key that
+ * can answer the question, so ask it.
+ *
+ * Best effort by definition: a self-hosted endpoint need not offer the model
+ * list at all, and a failure here must never replace the real diagnosis.
+ */
+export async function listModels(): Promise<string[]> {
+  const headers: Record<string, string> =
+    llmProvider() === "anthropic"
+      ? {
+          "x-api-key": process.env.LLM_API_KEY || "",
+          "anthropic-version": "2023-06-01",
+          ...anthropicWorkspaceHeader(),
+        }
+      : { Authorization: `Bearer ${process.env.LLM_API_KEY || ""}` };
+
+  const { data } = await axios.get(endpoint("models"), { headers, timeout: 15000 });
+  const rows: { id?: string }[] = data?.data ?? [];
+  return rows.map((r) => r.id).filter((id): id is string => typeof id === "string" && !!id);
+}
+
+/**
+ * Says on the way up whether the configured model is one this key can use.
+ *
+ * `LLM_MODEL` was set to a name the account had no access to, and nothing
+ * anywhere said so until a customer wrote in and the draft came back empty.
+ * The check costs one call at boot and turns a silent misconfiguration into
+ * a line in the log with the working alternatives next to it.
+ *
+ * Never throws and never blocks the boot: a provider that won't list its
+ * models is not a reason to refuse to start, and the model may well work.
+ */
+export async function reportModelAvailability(): Promise<void> {
+  if (!process.env.LLM_API_KEY) return;
+  const wanted = llmModel();
+  let models: string[];
+  try {
+    models = await listModels();
+  } catch (error) {
+    console.log(`[LLM] Couldn't list models (${(error as Error).message}) — carrying on with "${wanted}"`);
+    return;
+  }
+  if (!models.length) return;
+  if (!models.includes(wanted)) {
+    console.error(
+      `[LLM] LLM_MODEL is "${wanted}", which this key cannot use. It can use: ${models.join(", ")}`
+    );
+    return;
+  }
+
+  // Being on the list is not the same as being usable. The list said
+  // claude-sonnet-5 was available while every real call was refused — which
+  // is exactly the sort of "looks green, is broken" this app keeps being bitten
+  // by. So make one real, tiny call and report what actually comes back,
+  // Anthropic's own words included.
+  try {
+    await invokeLLM([{ role: "user", content: "Say OK." }], { maxTokens: 64, temperature: 0 });
+    console.log(`[LLM] Model "${wanted}" answered a real call — the agent can draft`);
+  } catch (error) {
+    const res = (error as { response?: { status?: number; data?: unknown } }).response;
+    if (!res) {
+      console.log(`[LLM] Boot check on "${wanted}" was inconclusive: ${(error as Error).message}`);
+      return;
+    }
+    console.error(`[LLM] Model "${wanted}" is listed but refused a real call — ${diagnose(error, wanted, llmBaseUrl())}`);
+    console.error(`[LLM] Provider said: HTTP ${res.status} ${JSON.stringify(res.data).slice(0, 400)}`);
+  }
+}
+
+/** Marks the one diagnosis worth spending a second call on. */
+const UNKNOWN_MODEL = "doesn't recognise the model";
+
+/**
+ * Turns "it doesn't recognise that name" into "here are the names it does".
+ * Only for that one failure — every other one would learn nothing from a
+ * model list, and a customer is waiting on the call that just failed.
+ */
+async function withAvailableModels(detail: string): Promise<string> {
+  if (!detail.includes(UNKNOWN_MODEL)) return detail;
+  try {
+    const models = await listModels();
+    if (!models.length) return detail;
+    const shown = models.slice(0, 12).join(", ");
+    return (
+      `${detail.split(". Copy the exact name")[0]}. Your key can use: ${shown}` +
+      `${models.length > 12 ? ", …" : ""}. Put one of those in LLM_MODEL.`
+    );
+  } catch {
+    return detail; // The list is a nicety; the diagnosis is the point.
+  }
+}
+
 function diagnose(error: unknown, model: string, baseUrl: string): string {
   const err = error as {
     code?: string;
@@ -131,6 +316,12 @@ function diagnose(error: unknown, model: string, baseUrl: string): string {
     return "The provider didn't answer in time. Usually temporary — try again.";
   }
   if (status === 401 || status === 403) {
+    // A key from the wrong provider is the commonest way to land here, and
+    // "check it was copied in full" sends someone hunting for a typo in a
+    // key that is perfectly intact and simply belongs somewhere else. The
+    // prefixes are unambiguous, so say which one it is.
+    const mismatch = keyBelongsElsewhere();
+    if (mismatch) return mismatch;
     return "The provider rejected the key. Check LLM_API_KEY was copied in full, with no spaces.";
   }
   if (status === 402) {
@@ -139,8 +330,33 @@ function diagnose(error: unknown, model: string, baseUrl: string): string {
   if (status === 429) {
     return "Rate limited, or the free allowance is used up for now. Wait a minute and try again.";
   }
-  if (status === 404 || (status === 400 && /model/i.test(body))) {
-    return `The provider doesn't recognise the model "${model}". Copy the exact name from its model list into LLM_MODEL.`;
+  // Anthropic's own words for this are accurate and unusable on a phone:
+  // "anthropic-workspace-id is required when authenticating with an
+  // identity-linked API key". It is not a bad key, not a spent account and
+  // not a wrong model — it is a key that belongs to a person instead of to a
+  // workspace, and there are two different ways out of it. Both, plainly.
+  if (status === 400 && /anthropic-workspace-id/i.test(body)) {
+    return (
+      "That Anthropic key is linked to your login rather than to one workspace, " +
+      "so Anthropic won't run it until it's told which workspace to bill. " +
+      "Easiest fix: at console.anthropic.com \u2192 API keys, create a key on a " +
+      "workspace and put that in LLM_API_KEY. Or keep this key and put the " +
+      "workspace id in LLM_WORKSPACE_ID."
+    );
+  }
+  // Only when the provider actually says the name is unknown. Matching the
+  // bare word "model" anywhere in a 400 body was far too loose: Anthropic
+  // mentions the model in plenty of errors that have nothing to do with its
+  // name, and every one of them was being reported as "doesn't recognise the
+  // model claude-sonnet-5" — sending someone to change a setting that was
+  // correct, while the real refusal never reached the screen. A model name
+  // that is genuinely wrong comes back 404, or says so in words.
+  const saysUnknownModel =
+    /not[ _]?found|does not exist|unknown model|invalid model|model.{0,20}not (found|available|recognized|recognised)/i.test(
+      body
+    );
+  if (status === 404 || (status === 400 && saysUnknownModel)) {
+    return `The provider ${UNKNOWN_MODEL} "${model}". Copy the exact name from its model list into LLM_MODEL.`;
   }
   if (status) return `The provider returned HTTP ${status}: ${body.slice(0, 200)}`;
   // A JSON syntax error means the provider answered fine and we couldn't read
@@ -290,7 +506,22 @@ export async function invokeLLMJson<T>(
     // extracted booking fields does not fit in the 400 the plain call
     // defaults to — the answer came back cut off mid-array, failed to parse,
     // and every enquiry landed on the board with no draft at all.
-    const raw = await invokeLLM(messages, { temperature: 0.3, maxTokens: opts.maxTokens ?? 1500 });
+    // Room for the model to think AND answer. A draft, two alternatives and
+    // the extracted booking fields is not a big answer, but on a model that
+    // reasons first the reasoning comes out of the same allowance — at 1500
+    // it was being spent before the reply started, and every enquiry landed
+    // on the board with no draft at all.
+    const budget = opts.maxTokens ?? 4000;
+    let raw: string;
+    try {
+      raw = await invokeLLM(messages, { temperature: 0.3, maxTokens: budget });
+    } catch (firstError) {
+      // Out of room is the one failure worth spending a second call on;
+      // everything else would fail identically however much room it had.
+      if (!/whole \d+-token budget/.test((firstError as Error).message)) throw firstError;
+      console.warn(`[LLM] Ran out of room at ${budget} tokens — asking again with ${budget * 2}`);
+      raw = await invokeLLM(messages, { temperature: 0.3, maxTokens: budget * 2 });
+    }
     const cleaned = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
     const start = cleaned.indexOf("{");
     if (start === -1) {
@@ -330,9 +561,14 @@ export async function invokeLLMJson<T>(
   } catch (error) {
     // Same diagnosis the Settings test uses, so a failure mid-conversation
     // and a failure on the test button read identically.
-    const detail = diagnose(error, llmModel(), llmBaseUrl());
+    const detail = await withAvailableModels(diagnose(error, llmModel(), llmBaseUrl()));
     lastError = { message: detail, at: new Date().toISOString() };
     console.error(`[LLM] Call failed — ${detail}`);
+    // The provider's own words, alongside. Printing only the sentence built
+    // from an error is exactly how three days went into the wrong Meta
+    // permission — the guess was all anyone could see. Both, always.
+    const raw = (error as { response?: { data?: unknown } }).response?.data;
+    if (raw) console.error(`[LLM] Provider said: ${JSON.stringify(raw).slice(0, 400)}`);
     return { data: fallback, ok: false, error: detail };
   }
 }

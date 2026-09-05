@@ -3,6 +3,7 @@ import axios from "axios";
 import { eq } from "drizzle-orm";
 import { getDb } from "./db.js";
 import { messageAttachments } from "../drizzle/schema.js";
+import { shrinkPhoto, INBOX_PHOTO, STUDIO_PHOTO } from "./images.js";
 
 /**
  * Keeping the photo, not the link to it.
@@ -13,6 +14,10 @@ import { messageAttachments } from "../drizzle/schema.js";
  * tattoo enquiry usually IS the picture and you can't quote what you can't
  * see. So the bytes are pulled down as the message arrives and served from
  * this app instead, where they stay put.
+ *
+ * Kept, but not at the size they arrived at. Nothing here ever shrank an
+ * image and nothing ever deleted one, so the database only grew — see
+ * images.ts for what is traded away and what isn't.
  */
 
 /** Big enough for a phone photo, small enough not to bloat the database. */
@@ -47,8 +52,14 @@ export async function cacheAttachment(
       return undefined;
     }
 
-    const bytes = Buffer.from(response.data);
-    if (!bytes.length || bytes.length > MAX_BYTES) return undefined;
+    const downloaded = Buffer.from(response.data);
+    if (!downloaded.length || downloaded.length > MAX_BYTES) return undefined;
+
+    // Re-encoded before it is stored, never after: the id below is the hash
+    // of what actually goes in the row, so the same photo arriving twice
+    // still lands on the same id and is still stored once.
+    const shrunk = await shrinkPhoto(downloaded, contentType, INBOX_PHOTO);
+    const bytes = shrunk.bytes;
 
     // Content-addressed, so the same photo sent twice is stored once and a
     // retried webhook delivery can't create a duplicate row.
@@ -57,7 +68,14 @@ export async function cacheAttachment(
     const db = await getDb();
     await db
       .insert(messageAttachments)
-      .values({ id, conversationId, messageId, contentType, bytes, sourceUrl })
+      .values({
+        id,
+        conversationId,
+        messageId,
+        contentType: shrunk.contentType,
+        bytes,
+        sourceUrl,
+      })
       .onDuplicateKeyUpdate({ set: { messageId } });
 
     return `/api/attachments/${id}`;
@@ -107,12 +125,23 @@ export async function saveImageBytes(
     throw new UnsupportedImage("That photo is over 8MB — try one straight from the camera roll.");
   }
 
-  const id = crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 40);
+  // Bound for the Page, so it keeps the more generous of the two profiles.
+  const shrunk = await shrinkPhoto(bytes, type, STUDIO_PHOTO);
+  if (!shrunk.original) console.log(`[Attachments] Post photo ${shrunk.detail}`);
+
+  const stored = shrunk.bytes;
+  const id = crypto.createHash("sha256").update(stored).digest("hex").slice(0, 40);
   const db = await getDb();
   await db
     .insert(messageAttachments)
-    .values({ id, conversationId: label, messageId: `${label}_${id}`, contentType: type, bytes })
-    .onDuplicateKeyUpdate({ set: { contentType: type } });
+    .values({
+      id,
+      conversationId: label,
+      messageId: `${label}_${id}`,
+      contentType: shrunk.contentType,
+      bytes: stored,
+    })
+    .onDuplicateKeyUpdate({ set: { contentType: shrunk.contentType } });
 
   return { id, url: `/api/attachments/${id}` };
 }

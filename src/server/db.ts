@@ -133,6 +133,30 @@ export async function getConversationsMissingNames(limit = 50) {
 }
 
 /**
+ * The same threads, with the inbox each one belongs to.
+ *
+ * The name backfill looked these up without saying which platform they were
+ * from, so every Instagram thread was asked for down the Messenger path.
+ * Meta answered with an Instagram permission error, which then got recorded
+ * against Facebook — and Facebook's name lookups, which do work, were
+ * silenced along with Instagram's.
+ */
+export async function getConversationsMissingNamesWithPlatform(limit = 50) {
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(messengerConversations)
+    .orderBy(desc(messengerConversations.lastMessageAt))
+    .limit(limit);
+  return rows
+    .filter((row) => isPlaceholderName(row.senderName))
+    .map((row) => ({
+      conversationId: row.conversationId,
+      platform: (row.platform ?? "facebook") as "facebook" | "instagram",
+    }));
+}
+
+/**
  * Threads where the customer spoke last and nobody has answered.
  *
  * An imported conversation gets no draft — importing deliberately writes
@@ -141,8 +165,21 @@ export async function getConversationsMissingNames(limit = 50) {
  * Excludes anything already waiting in the queue, and anything the studio
  * has muted.
  */
-export async function getUnansweredConversations(limit = 20) {
+/**
+ * Threads where the customer spoke last and no draft is waiting.
+ *
+ * `newerThanMinutes` narrows it to messages that have just arrived, which is
+ * what the automatic poll wants: drafting for everything unanswered would
+ * write replies to threads the studio deliberately left alone months ago.
+ */
+export async function getUnansweredConversations(limit = 20, newerThanMinutes?: number) {
   const db = await getDb();
+  const recent = newerThanMinutes
+    ? sql` AND c.last_message_at > NOW() - INTERVAL ${newerThanMinutes} MINUTE`
+    : sql``;
+  // The last message by when it was said. See getRecentConversations above:
+  // MAX(id) is insert order, which is not the same thing, and the difference
+  // is a thread the studio answered months ago coming back up for a reply.
   const rows = await db.execute(
     sql`SELECT c.conversation_id AS conversationId
           FROM messenger_conversations c
@@ -150,22 +187,126 @@ export async function getUnansweredConversations(limit = 20) {
             SELECT m1.conversation_id, m1.sender_type
               FROM messenger_messages m1
               JOIN (
-                SELECT conversation_id, MAX(id) AS last_id
+                SELECT conversation_id,
+                       SUBSTRING_INDEX(
+                         GROUP_CONCAT(id ORDER BY created_at DESC, id DESC), ',', 1
+                       ) AS last_id
                   FROM messenger_messages
                  GROUP BY conversation_id
               ) t ON t.last_id = m1.id
           ) last ON last.conversation_id = c.conversation_id
          WHERE last.sender_type = 'customer'
-           AND (c.bot_paused_until IS NULL OR c.bot_paused_until < NOW())
+           -- Only a pause the studio set by hand hides a thread from here.
+           -- The automatic handoff pause must not: the customer having
+           -- spoken last IS the condition it should lift on, and excluding
+           -- them here is the same fault as ignoring them on arrival.
+           AND (
+             c.bot_paused_until IS NULL
+             OR c.bot_paused_until < NOW()
+             OR c.bot_pause_reason IS NULL
+             OR c.bot_pause_reason <> 'manual'
+           )
+           -- "A draft is already waiting" has to mean the same thing here as
+           -- it does on the board, and it didn't.
+           --
+           -- getPendingReplies hides a draft once the studio has said
+           -- something in that thread after it was written — the reply was
+           -- given by hand, so the draft is stale. But the row stays
+           -- 'pending' forever, and this query counted it. So when the
+           -- customer wrote back, the poll saw "she already has a draft" and
+           -- wrote nothing, while the board hid the stale one it was
+           -- pointing at. She was invisible from both directions at once.
+           -- That is exactly what happened to Maureen Lopez.
            AND NOT EXISTS (
              SELECT 1 FROM pending_replies p
-              WHERE p.conversation_id = c.conversation_id AND p.status = 'pending'
-           )
+              WHERE p.conversation_id = c.conversation_id
+                AND p.status = 'pending'
+                -- An empty card put up because the AI fell over is a
+                -- placeholder for the customer, not an answer to them. It
+                -- must not stop the AI trying again when it recovers — that
+                -- left the studio to notice and press a button, which is the
+                -- opposite of a safety net. Only while it is still empty:
+                -- the moment anything is typed into it, it is Brad's reply
+                -- and nothing may overwrite it.
+                AND NOT (p.llm_failed = 1 AND TRIM(p.draft_text) = '')
+                AND NOT EXISTS (
+                  SELECT 1 FROM messenger_messages r
+                   WHERE r.conversation_id = c.conversation_id
+                     AND r.sender_type IN ('bot', 'manual')
+                     AND r.created_at > p.created_at
+                )
+           )${recent}
          ORDER BY c.last_message_at DESC
          LIMIT ${limit}`
   );
   const list = (rows as unknown as [{ conversationId: string }[]])[0] ?? [];
   return list.map((r) => r.conversationId);
+}
+
+/**
+ * Why a thread the studio can see is not on the board.
+ *
+ * `draftForUnanswered` returning "everyone has had a reply" is only useful
+ * when it is true. When a customer's message is plainly sitting in Meta's
+ * inbox and the board says nothing is waiting, the difference between the
+ * two is one of four things, and guessing which cost a whole evening. So
+ * ask the database directly, per thread, and print the answer.
+ */
+export async function explainNotUnanswered(limit = 5) {
+  const db = await getDb();
+  const rows = await db.execute(
+    sql`SELECT c.conversation_id AS conversationId,
+               c.sender_name     AS senderName,
+               c.last_message_at AS lastMessageAt,
+               c.bot_paused_until AS pausedUntil,
+               c.bot_pause_reason AS pauseReason,
+               last.sender_type  AS lastSender,
+               (SELECT COUNT(*) FROM pending_replies p
+                 WHERE p.conversation_id = c.conversation_id AND p.status = 'pending') AS pendingCount,
+               (SELECT COUNT(*) FROM pending_replies p
+                 WHERE p.conversation_id = c.conversation_id
+                   AND p.status = 'pending'
+                   AND NOT EXISTS (
+                     SELECT 1 FROM messenger_messages r
+                      WHERE r.conversation_id = c.conversation_id
+                        AND r.sender_type IN ('bot', 'manual')
+                        AND r.created_at > p.created_at
+                   )) AS liveDraftCount
+          FROM messenger_conversations c
+          JOIN (
+            SELECT m1.conversation_id, m1.sender_type
+              FROM messenger_messages m1
+              JOIN (
+                SELECT conversation_id,
+                       SUBSTRING_INDEX(
+                         GROUP_CONCAT(id ORDER BY created_at DESC, id DESC), ',', 1
+                       ) AS last_id
+                  FROM messenger_messages
+                 GROUP BY conversation_id
+              ) t ON t.last_id = m1.id
+          ) last ON last.conversation_id = c.conversation_id
+         ORDER BY c.last_message_at DESC
+         LIMIT ${limit}`
+  );
+  const list = (rows as unknown as [Record<string, unknown>[]])[0] ?? [];
+  return list.map((r) => {
+    const reasons: string[] = [];
+    if (r.lastSender !== "customer") reasons.push(`the last word was ours (${r.lastSender})`);
+    if (Number(r.liveDraftCount) > 0) reasons.push("a draft is already waiting");
+    if (Number(r.pendingCount) > 0 && Number(r.liveDraftCount) === 0) {
+      reasons.push("only a stale draft, superseded by our own reply — a fresh one is due");
+    }
+    if (r.pausedUntil && new Date(r.pausedUntil as string) > new Date() && r.pauseReason === "manual") {
+      reasons.push("paused by hand");
+    }
+    return {
+      conversationId: String(r.conversationId),
+      name: (r.senderName as string) || "(unnamed)",
+      lastMessageAt: r.lastMessageAt,
+      lastSender: r.lastSender,
+      excludedBecause: reasons.length ? reasons.join("; ") : "nothing — it should be drafted for",
+    };
+  });
 }
 
 /** One thread as it stands, without creating it if it isn't there. */
@@ -192,6 +333,63 @@ export async function setConversationName(conversationId: string, senderName: st
  * silently hid two thirds of the studio's customers, and someone looking for
  * a name they could see in Meta's inbox concluded the app had lost them.
  */
+/**
+ * Find a customer, or the thing they said.
+ *
+ * The search box in the header did nothing at all — a control on every page
+ * that looks like it works and doesn't. Searching by name alone would have
+ * been half of it: the studio remembers "the bloke who wanted the koi on his
+ * forearm" far more often than it remembers his name, so the message text is
+ * searched too and the matching line is what comes back.
+ *
+ * LIKE rather than the FULLTEXT index deliberately. The index on this table
+ * would ignore a word appearing in more than half the rows — "tattoo",
+ * "booking", "price", the words a tattoo studio actually searches for — and
+ * it went stale and scored an exact term at zero once already.
+ */
+export async function searchInbox(query: string, limit = 8) {
+  const term = query.trim();
+  if (term.length < 2) return [];
+  const like = `%${term}%`;
+
+  const db = await getDb();
+  const [rows] = (await db.execute(
+    sql`SELECT c.conversation_id AS conversationId,
+               c.sender_name    AS senderName,
+               c.platform       AS platform,
+               c.last_message_at AS lastMessageAt,
+               (SELECT m.content FROM messenger_messages m
+                 WHERE m.conversation_id = c.conversation_id
+                   AND m.content LIKE ${like}
+                 ORDER BY m.id DESC LIMIT 1) AS snippet
+          FROM messenger_conversations c
+         WHERE c.sender_name LIKE ${like}
+            OR EXISTS (SELECT 1 FROM messenger_messages m
+                        WHERE m.conversation_id = c.conversation_id
+                          AND m.content LIKE ${like})
+         ORDER BY c.last_message_at DESC
+         LIMIT ${limit}`
+  )) as unknown as [
+    {
+      conversationId: string;
+      senderName: string | null;
+      platform: string | null;
+      lastMessageAt: string | null;
+      snippet: string | null;
+    }[],
+  ];
+
+  return (rows ?? []).map((row) => ({
+    conversationId: row.conversationId,
+    senderName: row.senderName,
+    platform: (row.platform ?? "facebook") as "facebook" | "instagram",
+    lastMessageAt: row.lastMessageAt,
+    // Trimmed here rather than in the browser, so a customer who pasted an
+    // essay doesn't arrive as a thousand characters for a one-line row.
+    snippet: row.snippet ? row.snippet.replace(/\s+/g, " ").trim().slice(0, 160) : null,
+  }));
+}
+
 export async function getRecentConversations(limit = 250) {
   const db = await getDb();
   const rows = await db
@@ -204,12 +402,26 @@ export async function getRecentConversations(limit = 250) {
   // Who spoke last in each thread. That single fact is what separates "they
   // asked something and nobody has answered" from "the ball is in their
   // court", which is the split Brad actually works from.
+  //
+  // By when the message was SAID, not by the order the rows went in.
+  //
+  // MAX(id) is insert order, and insert order is not message order: the
+  // import stores whatever a thread happens to hand over, and a thread
+  // pulled in over two runs can have an older message sitting on a higher
+  // id than a newer one. Every other reader in this file already orders by
+  // created_at — these two didn't, so they disagreed with the thread view
+  // about who had spoken last. That is how a June enquiry the studio had
+  // answered by hand came back up as needing a reply, and how genuinely
+  // unanswered threads sat in "waiting on them" and were never drafted for.
   const ids = rows.map((r) => r.conversationId);
   const [lastRows] = (await db.execute(
     sql`SELECT m.conversation_id AS conversationId, m.sender_type AS senderType
           FROM messenger_messages m
           JOIN (
-            SELECT conversation_id, MAX(id) AS last_id
+            SELECT conversation_id,
+                   SUBSTRING_INDEX(
+                     GROUP_CONCAT(id ORDER BY created_at DESC, id DESC), ',', 1
+                   ) AS last_id
               FROM messenger_messages
              WHERE conversation_id IN ${ids}
              GROUP BY conversation_id
@@ -356,13 +568,24 @@ export async function dropDraftsAnsweringOurselves(): Promise<number> {
   return Number(result?.affectedRows ?? 0);
 }
 
-/** Human handoff: mute the agent on this thread for a while. */
-export async function pauseBot(conversationId: string, hours: number) {
+/**
+ * Mute the agent on this thread for a while.
+ *
+ * The reason is stored because the two kinds are not the same instruction.
+ * "manual" is the studio pressing Pause and means what it says. "handoff" is
+ * set automatically when a reply arrives from Meta's own inbox, and it lifts
+ * the moment the customer writes again — see handleCustomerMessage.
+ */
+export async function pauseBot(
+  conversationId: string,
+  hours: number,
+  reason: "manual" | "handoff" = "manual"
+) {
   const db = await getDb();
   const until = new Date(Date.now() + hours * 60 * 60 * 1000);
   await db
     .update(messengerConversations)
-    .set({ botPausedUntil: until })
+    .set({ botPausedUntil: until, botPauseReason: reason })
     .where(eq(messengerConversations.conversationId, conversationId));
   return until;
 }
@@ -371,7 +594,7 @@ export async function resumeBot(conversationId: string) {
   const db = await getDb();
   await db
     .update(messengerConversations)
-    .set({ botPausedUntil: null })
+    .set({ botPausedUntil: null, botPauseReason: null })
     .where(eq(messengerConversations.conversationId, conversationId));
 }
 
@@ -414,6 +637,38 @@ export async function markBookingNotified(conversationId: string) {
     .update(messengerConversations)
     .set({ bookingNotifiedAt: new Date() })
     .where(eq(messengerConversations.conversationId, conversationId));
+}
+
+/**
+ * Whether this thread is allowed to set off a phone notification, and if so,
+ * claim the slot in the same breath.
+ *
+ * A customer sending four reference photos is one enquiry. Four buzzes for
+ * it is how somebody learns to swipe the buzz away without reading it, which
+ * is worse than no notification at all. The claim is the update itself, so
+ * two deliveries arriving together can't both decide they're first.
+ */
+export async function claimNotificationSlot(
+  conversationId: string,
+  throttleMinutes: number
+): Promise<boolean> {
+  const db = await getDb();
+  const rows = await db
+    .select({ lastNotifiedAt: messengerConversations.lastNotifiedAt })
+    .from(messengerConversations)
+    .where(eq(messengerConversations.conversationId, conversationId))
+    .limit(1);
+  if (!rows.length) return false;
+
+  const last = rows[0].lastNotifiedAt ? new Date(rows[0].lastNotifiedAt).getTime() : 0;
+  const window = Math.max(0, throttleMinutes) * 60_000;
+  if (last && Date.now() - last < window) return false;
+
+  await db
+    .update(messengerConversations)
+    .set({ lastNotifiedAt: new Date() })
+    .where(eq(messengerConversations.conversationId, conversationId));
+  return true;
 }
 
 export async function setOwnerPsid(psid: string) {
@@ -519,6 +774,25 @@ export async function supersedePendingReplies(conversationId: string): Promise<n
   return stale.length;
 }
 
+/**
+ * Whether this exact customer message has already been drafted for — in any
+ * state, pending, approved or discarded.
+ *
+ * `customerMessageId` is unique across the table, so one row means this
+ * message has been through the agent once already and must not go again.
+ * Storing it a second time is fine and is deduplicated; drafting for it a
+ * second time would replace a draft the studio may already have edited.
+ */
+export async function hasDraftForMessage(customerMessageId: string): Promise<boolean> {
+  const db = await getDb();
+  const [row] = await db
+    .select({ id: pendingReplies.id })
+    .from(pendingReplies)
+    .where(eq(pendingReplies.customerMessageId, customerMessageId))
+    .limit(1);
+  return !!row;
+}
+
 export async function createPendingReply(
   conversationId: string,
   customerMessageId: string,
@@ -527,6 +801,19 @@ export async function createPendingReply(
   alternatives?: { label: string; text: string }[],
   llmFailed = false
 ): Promise<boolean> {
+  // An empty draft with nothing explaining it is a card on the board with a
+  // heading and nothing under it — unreadable, unapprovable, and it makes the
+  // count at the top of the dashboard a lie.
+  //
+  // An empty draft flagged llmFailed is a different thing and is deliberate:
+  // the card appears with an empty box and a note that the AI couldn't write
+  // it, so the studio writes the reply themselves. A placeholder there would
+  // be worse, because a placeholder can be approved by accident.
+  if (!draftText.trim() && !llmFailed) {
+    console.warn(`[Agent] Refused to queue an empty draft for ${conversationId}`);
+    return false;
+  }
+
   const db = await getDb();
   try {
     await db.insert(pendingReplies).values({
@@ -717,6 +1004,28 @@ export async function resolvePendingReply(
   };
 }
 
+/**
+ * Put an approved draft back on the board because it never reached anybody.
+ *
+ * Approving claims the draft first, so two taps can't send the same reply
+ * twice. That claim has to be undone when the send fails, or the card is
+ * gone and the customer is simply never answered — which is what happened,
+ * and the studio had no way of knowing.
+ */
+export async function restorePendingReply(id: number, sendError: string): Promise<void> {
+  const db = await getDb();
+  await db
+    .update(pendingReplies)
+    .set({ status: "pending", resolvedAt: null, sendError: sendError.slice(0, 2000) })
+    .where(eq(pendingReplies.id, id));
+}
+
+/** It went. Clear any note from an earlier attempt that didn't. */
+export async function clearSendError(id: number): Promise<void> {
+  const db = await getDb();
+  await db.update(pendingReplies).set({ sendError: null }).where(eq(pendingReplies.id, id));
+}
+
 /* ------------------------------------------------------------------ */
 /* Scheduled posts                                                     */
 /* ------------------------------------------------------------------ */
@@ -793,10 +1102,83 @@ export async function getFacebookConfig() {
   return result[0];
 }
 
+/**
+ * Remember that Facebook delivered something.
+ *
+ * Never throws: a webhook has already been acknowledged by the time this runs,
+ * and losing the record of a delivery is not a reason to lose the delivery.
+ */
+export async function recordWebhookDelivery(kind: string): Promise<void> {
+  try {
+    const db = await getDb();
+    await db
+      .update(facebookConfig)
+      .set({ lastDeliveryAt: new Date(), lastDeliveryKind: kind.slice(0, 64) });
+  } catch (error) {
+    console.warn(`[DB] Couldn't record the webhook delivery: ${(error as Error).message}`);
+  }
+}
+
+/**
+ * Facebook delivered something and we refused it. Counted, because one
+ * rejection is a curiosity and forty in an afternoon is the whole problem.
+ */
+export async function recordWebhookRejection(detail?: string): Promise<void> {
+  try {
+    const db = await getDb();
+    await db.update(facebookConfig).set({
+      lastRejectedAt: new Date(),
+      rejectedCount: sql`COALESCE(${facebookConfig.rejectedCount}, 0) + 1`,
+      ...(detail ? { lastRejectionDetail: detail.slice(0, 255) } : {}),
+    });
+  } catch (error) {
+    console.warn(`[DB] Couldn't record the rejection: ${(error as Error).message}`);
+  }
+}
+
+/** Clear the tally once deliveries are being accepted again. */
+export async function clearWebhookRejections(): Promise<void> {
+  try {
+    const db = await getDb();
+    await db
+      .update(facebookConfig)
+      .set({ rejectedCount: 0, lastRejectedAt: null, lastRejectionDetail: null });
+  } catch {
+    /* never worth failing a webhook over */
+  }
+}
+
+export async function getWebhookRejections(): Promise<{
+  at: string;
+  count: number;
+  detail: string | null;
+} | null> {
+  const config = await getFacebookConfig().catch(() => undefined);
+  if (!config?.lastRejectedAt || !config.rejectedCount) return null;
+  return {
+    at: new Date(config.lastRejectedAt).toISOString(),
+    count: config.rejectedCount,
+    detail: config.lastRejectionDetail ?? null,
+  };
+}
+
+export async function getStoredWebhookDelivery(): Promise<{ at: string; kind: string } | null> {
+  const config = await getFacebookConfig().catch(() => undefined);
+  if (!config?.lastDeliveryAt) return null;
+  return {
+    at: new Date(config.lastDeliveryAt).toISOString(),
+    kind: config.lastDeliveryKind ?? "unknown",
+  };
+}
+
 export async function setFacebookConfig(input: {
   pageId: string;
   pageAccessToken: string;
   instagramAccessToken?: string;
+  /** Which Meta host that token belongs to — see the schema comment. */
+  instagramTokenHost?: "facebook" | "instagram";
+  /** Instagram signs its own webhooks — see the schema comment. */
+  instagramAppSecret?: string;
   appId: string;
   appSecret: string;
   webhookVerifyToken: string;
@@ -813,12 +1195,29 @@ export async function setFacebookConfig(input: {
         ...input,
         pageAccessToken: input.pageAccessToken || existing.pageAccessToken,
         instagramAccessToken: input.instagramAccessToken || existing.instagramAccessToken,
-        appSecret: input.appSecret || existing.appSecret,
+        // A blank Instagram box keeps the saved token, so it must keep the
+        // saved host too — otherwise saving anything else would quietly
+        // re-route Instagram to the wrong Meta server.
+        instagramTokenHost: input.instagramAccessToken
+          ? (input.instagramTokenHost ?? null)
+          : existing.instagramTokenHost,
+        // Trimmed, always. Copying the App secret out of Meta's dashboard
+        // picks up a trailing space or newline easily, and every other use of
+        // it tolerates that — debug_token is a URL parameter and Meta strips
+        // it. The webhook HMAC does not: one invisible character and every
+        // real customer message is refused, with nothing to see anywhere.
+        appSecret: input.appSecret.trim() || existing.appSecret,
+        instagramAppSecret:
+          input.instagramAppSecret?.trim() || existing.instagramAppSecret,
         isConfigured: true,
       })
       .where(eq(facebookConfig.id, existing.id));
   } else {
-    await db.insert(facebookConfig).values({ ...input, isConfigured: true });
+    await db.insert(facebookConfig).values({
+      ...input,
+      appSecret: input.appSecret.trim(),
+      isConfigured: true,
+    });
   }
 }
 
@@ -980,6 +1379,55 @@ function fingerprint(customerMessage: string, studioReply: string): string {
     .slice(0, 64);
 }
 
+/**
+ * Mine the studio's own inbox for examples, instead of only learning from
+ * files someone thought to upload.
+ *
+ * The app is already holding thousands of real messages — every thread it has
+ * imported — and each customer question followed by the studio's own answer is
+ * exactly the example the drafter wants. Uploading Facebook's JSON export was
+ * the only way in, which meant the app knew far less about how the studio
+ * talks than it was sitting on.
+ *
+ * Only replies the studio actually typed count. Messages sent by the agent are
+ * marked "bot", and feeding those back in would teach it from its own drafts —
+ * its habits would harden instead of matching Brad's. Only the immediately
+ * following message is taken, so a reply is never paired with a question it
+ * wasn't answering. Duplicates are dropped on the fingerprint, so this is safe
+ * to run as often as you like and safe to mix with uploaded files.
+ */
+export async function learnFromStoredChats(): Promise<{
+  imported: number;
+  skipped: number;
+  found: number;
+}> {
+  const db = await getDb();
+  const rows = await db.execute(
+    sql`SELECT c.content AS customerMessage, r.content AS studioReply
+          FROM messenger_messages c
+          JOIN messenger_messages r
+            ON r.conversation_id = c.conversation_id
+           AND r.id = (
+             SELECT MIN(m.id) FROM messenger_messages m
+              WHERE m.conversation_id = c.conversation_id AND m.id > c.id
+           )
+         WHERE c.sender_type = 'customer'
+           AND r.sender_type = 'manual'
+           AND CHAR_LENGTH(TRIM(c.content)) > 3
+           AND CHAR_LENGTH(TRIM(r.content)) > 9`
+  );
+  const pairs = (rows as unknown as [Array<{ customerMessage: string; studioReply: string }>])[0] ?? [];
+
+  // "(sent a photo)" and friends are what the app writes when a message had
+  // no words. They're real messages but they teach nothing.
+  const usable = pairs.filter(
+    (p) => !/^\(/.test(p.customerMessage.trim()) && !/^\(/.test(p.studioReply.trim())
+  );
+
+  const { imported, skipped } = await importExampleExchanges(usable, "the studio's own inbox");
+  return { imported, skipped, found: usable.length };
+}
+
 export async function importExampleExchanges(
   pairs: Array<{ customerMessage: string; studioReply: string }>,
   source?: string
@@ -1049,10 +1497,41 @@ export async function findSimilarExchanges(query: string, limit = 4) {
 
   if (matched[0]?.length) return matched[0];
 
+  /**
+   * The fulltext index is not to be relied on alone.
+   *
+   * It can go stale and then match nothing at all — proven locally, where an
+   * exact term scored zero until the table was rebuilt — and it fails without
+   * complaining, so hundreds of learned examples would simply stop reaching
+   * the drafter with nothing anywhere to say so.
+   *
+   * The old fallback searched for the whole customer message as one string,
+   * which matches almost nothing, so in practice there was no fallback. This
+   * looks for the words that carry the meaning: the longest few, which for a
+   * tattoo enquiry are the ones worth matching on — "wrist", "sleeve",
+   * "deposit" — rather than "how" and "for".
+   */
+  const words = Array.from(
+    new Set(
+      cleaned
+        .toLowerCase()
+        .split(/[^a-z0-9']+/i)
+        .filter((w) => w.length > 3)
+    )
+  )
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 4);
+
+  if (!words.length) return [];
+
+  const likes = sql.join(
+    words.map((w) => sql`customer_message LIKE ${`%${w}%`}`),
+    sql` OR `
+  );
   const [fallback] = (await db.execute(
     sql`SELECT customer_message AS customerMessage, studio_reply AS studioReply
         FROM example_exchanges
-        WHERE customer_message LIKE ${"%" + cleaned.slice(0, 40) + "%"}
+        WHERE ${likes}
         LIMIT ${limit}`
   )) as unknown as [Array<{ customerMessage: string; studioReply: string }>];
 

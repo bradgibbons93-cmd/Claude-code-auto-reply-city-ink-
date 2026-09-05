@@ -26,7 +26,7 @@ export function useTheme() {
     // Keeps the browser chrome (mobile address bar) in step with the page.
     document
       .querySelector('meta[name="theme-color"]')
-      ?.setAttribute("content", theme === "dark" ? "#0A0810" : "#FFFFFF");
+      ?.setAttribute("content", theme === "dark" ? "#14100E" : "#E9E9EA");
   }, [theme]);
 
   const toggle = useCallback(() => {

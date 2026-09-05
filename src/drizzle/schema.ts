@@ -42,6 +42,18 @@ export const messengerConversations = mysqlTable(
     // inbox a thread is really in.
     platform: mysqlEnum("platform", ["facebook", "instagram"]).default("facebook"),
     botPausedUntil: timestamp("bot_paused_until"),
+    // WHY the agent is muted here, because the two reasons deserve opposite
+    // treatment when the customer writes again.
+    //
+    // "manual" is Brad pressing Pause on a thread — an instruction, and it
+    // is obeyed until it expires. "handoff" is set automatically when a
+    // studio reply arrives from Meta's own inbox, and it used to mute the
+    // thread for twelve hours: so a customer who answered that reply got no
+    // draft, the board read "All caught up", and the studio's phone stayed
+    // quiet while the Meta inbox showed unread messages. Nothing in this app
+    // ever sends without approval, so withholding the draft bought nothing
+    // and cost the reply.
+    botPauseReason: varchar("bot_pause_reason", { length: 16 }),
     lastCustomerMessageAt: timestamp("last_customer_message_at"),
     lastMessageAt: timestamp("last_message_at").defaultNow(),
     createdAt: timestamp("created_at").defaultNow(),
@@ -52,6 +64,10 @@ export const messengerConversations = mysqlTable(
     bookingDates: varchar("booking_dates", { length: 255 }),
     bookingPhotoUrls: json("booking_photo_urls").$type<string[]>(),
     bookingNotifiedAt: timestamp("booking_notified_at"),
+    // When this thread last set off a phone notification. Five photos in a
+    // row is one enquiry, not five, and five buzzes for it is how a person
+    // learns to ignore the buzz.
+    lastNotifiedAt: timestamp("last_notified_at"),
   },
   (t) => ({
     convIdx: uniqueIndex("conv_id_idx").on(t.conversationId),
@@ -194,6 +210,46 @@ export const scheduledPosts = mysqlTable("scheduled_posts", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+/**
+ * Where to send a notification, one row per device that asked for them.
+ *
+ * Brad is on a phone all day with his hands full, and the dashboard is a tab
+ * he isn't looking at. The Messenger ping that existed before only reaches
+ * him inside Facebook's 24-hour window, which closes exactly when a quiet
+ * week means he hasn't messaged the Page — so it went silent precisely when
+ * it mattered least and stayed silent when it mattered most.
+ *
+ * Keyed on a hash of the endpoint rather than the endpoint itself: push
+ * endpoints run past what MySQL will index, and re-subscribing on the same
+ * device should replace the row, not add a second one that double-buzzes.
+ */
+export const pushSubscriptions = mysqlTable("push_subscriptions", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  endpoint: text("endpoint").notNull(),
+  p256dh: varchar("p256dh", { length: 255 }).notNull(),
+  auth: varchar("auth", { length: 255 }).notNull(),
+  /** "iPhone", "Studio iPad" — so a device can be turned off by name. */
+  label: varchar("label", { length: 191 }),
+  lastSentAt: timestamp("last_sent_at"),
+  /** Consecutive failures. A dead endpoint is dropped rather than retried forever. */
+  failures: int("failures").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+/**
+ * Small, boring key/value store.
+ *
+ * Holds the VAPID keypair (generated once on first use, then never again —
+ * regenerating it silently invalidates every subscription) and the
+ * notification preferences. A separate table rather than more columns on
+ * facebook_config, because none of this is Facebook's.
+ */
+export const appSettings = mysqlTable("app_settings", {
+  name: varchar("name", { length: 64 }).primaryKey(),
+  value: text("value"),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
+});
+
 export const facebookConfig = mysqlTable("facebook_config", {
   id: int("id").primaryKey().autoincrement(),
   pageId: varchar("page_id", { length: 191 }).notNull(),
@@ -205,6 +261,17 @@ export const facebookConfig = mysqlTable("facebook_config", {
   // Messenger down with it. Optional: a Page token carrying the Instagram
   // permissions does the job on its own, and then this stays empty.
   instagramAccessToken: text("instagram_access_token"),
+  // Which of Meta's two Instagram flows this token came from, so it gets sent
+  // to the host that will accept it. "facebook" = a Page token carrying the
+  // Instagram permissions (graph.facebook.com); "instagram" = a token from the
+  // Instagram-login flow (graph.instagram.com). Guessing wrong is silent: the
+  // wrong host simply refuses every call.
+  instagramTokenHost: varchar("instagram_token_host", { length: 16 }),
+  // Instagram signs its webhooks with the Instagram app's own secret, which is
+  // a different value from the Facebook app secret even inside one Meta app.
+  // Verifying Instagram deliveries with the Facebook secret refused every DM
+  // the studio received, silently, for days.
+  instagramAppSecret: varchar("instagram_app_secret", { length: 255 }),
   appId: varchar("app_id", { length: 191 }).notNull(),
   appSecret: varchar("app_secret", { length: 255 }).notNull(),
   webhookVerifyToken: varchar("webhook_verify_token", { length: 255 }).notNull(),
@@ -212,6 +279,23 @@ export const facebookConfig = mysqlTable("facebook_config", {
   // Messenger PSID of the studio owner's own account. Set by sending
   // "set owner <verify token>" from that account — see agent.ts.
   ownerPsid: varchar("owner_psid", { length: 191 }),
+  // When Facebook last delivered anything, and what. Stored rather than held
+  // in memory: a module variable resets on every deploy, so the delivery panel
+  // reported "nothing has ever arrived" minutes after a push and made a
+  // healthy webhook look dead.
+  lastDeliveryAt: timestamp("last_delivery_at"),
+  lastDeliveryKind: varchar("last_delivery_kind", { length: 64 }),
+  // Deliveries Facebook made that we threw away because the signature didn't
+  // match. This is the worst possible failure — real customer messages
+  // arriving and being binned — and it was completely silent: a 403 back to
+  // Facebook, one line in a log nobody reads, and a dashboard showing zero
+  // messages with every other panel green.
+  lastRejectedAt: timestamp("last_rejected_at"),
+  rejectedCount: int("rejected_count").default(0),
+  // Why the last one was refused, in a form the settings page can show. The
+  // same facts were going to the hosting logs, which is no use to the person
+  // who can actually see this app.
+  lastRejectionDetail: varchar("last_rejection_detail", { length: 255 }),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
 
@@ -261,6 +345,15 @@ export const pendingReplies = mysqlTable(
     // Other ways of answering the same message. The studio picks one instead
     // of rewriting the only draft it was handed.
     alternatives: json("alternatives").$type<{ label: string; text: string }[]>(),
+    // Why the last attempt to send this one didn't reach the customer.
+    //
+    // Approving used to mark the draft resolved and only then try to send.
+    // When Meta refused — routinely, because its standard messaging window
+    // closes 24 hours after the customer's last message — the card vanished
+    // from the board as though it had gone, and nobody found out that the
+    // customer had never been answered. The draft comes back now, with this
+    // on it.
+    sendError: text("send_error"),
     createdAt: timestamp("created_at").defaultNow(),
     resolvedAt: timestamp("resolved_at"),
   },

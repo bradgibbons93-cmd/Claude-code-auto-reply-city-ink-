@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { formatDistanceToNow } from "date-fns";
+import { useSearch } from "wouter";
+import { format, formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,6 +19,8 @@ import {
   Instagram,
   Facebook,
   RefreshCw,
+  Copy,
+  Check,
 } from "lucide-react";
 
 function isPaused(until: string | Date | null | undefined) {
@@ -67,6 +70,7 @@ function PendingReplyCard({
     draftText: string;
     isSensitive?: boolean | null;
     llmFailed?: boolean | null;
+    sendError?: string | null;
     createdAt: string | Date | null;
   };
   senderName: string;
@@ -75,6 +79,15 @@ function PendingReplyCard({
 }) {
   const utils = trpc.useUtils();
   const [text, setText] = useState(draft.draftText);
+  const [copied, setCopied] = useState(false);
+
+  // Why the model couldn't write this one. Only read when a draft actually
+  // failed, so a healthy board never asks.
+  const { data: llmStatus } = trpc.llm.status.useQuery(undefined, {
+    enabled: !!draft.llmFailed,
+    staleTime: 60000,
+  });
+  const llmError = llmStatus?.lastError?.message;
 
   // A retry rewrites the draft underneath this box. Without this the new
   // wording arrives on the server and the studio keeps staring at the empty
@@ -102,6 +115,13 @@ function PendingReplyCard({
   // server-side so this page and the dashboard can't disagree.
   const recentPhotos = draft.photoUrls ?? [];
 
+  // Anything older than a fortnight is almost certainly cold, and quite
+  // possibly answered by hand somewhere this app can't see. Saying so beats
+  // letting the studio send a stranger a reply to something they wrote in
+  // June as though no time had passed.
+  const askedAt = answering?.createdAt ? new Date(answering.createdAt) : null;
+  const isStale = !!askedAt && Date.now() - askedAt.getTime() > 14 * 24 * 3600 * 1000;
+
   // The agent's first answer plus the other angles it offered, as one list to
   // choose between. The first is what it led with.
   const options = [
@@ -114,7 +134,13 @@ function PendingReplyCard({
       toast.success("Sent");
       utils.pendingReplies.list.invalidate();
     },
-    onError: (error) => toast.error(error.message || "Couldn't send that reply."),
+    onError: (error) => {
+      // The draft is put back on the board by the server when a send fails,
+      // so refresh — otherwise the card stays gone on screen and the toast
+      // is the only trace of a customer who never got answered.
+      utils.pendingReplies.list.invalidate();
+      toast.error(error.message || "Couldn't send that reply.", { duration: 10000 });
+    },
   });
   // The model fell over on this one. Asking it again is nearly always faster
   // than typing the reply out, so offer that before the blank box.
@@ -166,8 +192,42 @@ function PendingReplyCard({
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
             <p className="text-xs text-destructive">
               Nothing wrong with this message — the AI didn't finish a draft for it, so there's
-              nothing to approve. Write the reply yourself. Settings → AI has a Test button that
-              says why.
+              nothing to approve.{" "}
+              {/* The reason, here, rather than "Settings → AI has a Test button
+                  that says why". The server already knows: sending someone to
+                  go and press a button to be told something we could have
+                  printed is a trip for nothing, and every message will land
+                  like this until the cause is fixed. */}
+              {llmError ? (
+                <>
+                  <span className="font-medium">{llmError}</span> Write the reply yourself in the
+                  meantime.
+                </>
+              ) : (
+                <>Write the reply yourself. Settings → AI has a Test button that says why.</>
+              )}
+            </p>
+          </div>
+        )}
+
+        {isStale && askedAt && (
+          <div className="flex items-start gap-2 rounded-xl border border-sepia/40 bg-beige/25 px-3 py-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-sepia" />
+            <p className="text-xs text-charcoal">
+              This is from {format(askedAt, "d MMMM")} — check the thread before sending, in case
+              it was already answered somewhere else.
+            </p>
+          </div>
+        )}
+
+        {/* This one was approved and did NOT reach the customer. The card
+            used to disappear on a failed send, which read as "sent" and left
+            the person waiting on an answer nobody knew hadn't gone. */}
+        {!!draft.sendError && (
+          <div className="flex items-start gap-2 rounded-xl border border-destructive/45 bg-destructive/10 px-3 py-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <p className="text-xs text-destructive">
+              <span className="font-medium">This didn't send.</span> {draft.sendError}
             </p>
           </div>
         )}
@@ -189,9 +249,25 @@ function PendingReplyCard({
               {senderName}
             </span>
           </button>
-          {draft.createdAt && (
-            <span className="shrink-0 text-xs text-muted-foreground">
-              {formatDistanceToNow(new Date(draft.createdAt), { addSuffix: true })}
+          {/* When the CUSTOMER wrote, not when the draft was written. A June
+              enquiry showing "less than a minute ago" because the agent had
+              just drafted for it is how an old, already-answered thread came
+              to look like a live one. */}
+          {(answering?.createdAt || draft.createdAt) && (
+            <span
+              className={cn(
+                "shrink-0 text-xs",
+                isStale ? "text-destructive" : "text-muted-foreground"
+              )}
+              title={
+                answering?.createdAt
+                  ? `They wrote this ${format(new Date(answering.createdAt), "d MMM yyyy, HH:mm")}`
+                  : undefined
+              }
+            >
+              {formatDistanceToNow(new Date((answering?.createdAt ?? draft.createdAt) as string), {
+                addSuffix: true,
+              })}
             </span>
           )}
         </div>
@@ -262,6 +338,32 @@ function PendingReplyCard({
         </div>
 
         <div className="flex flex-wrap gap-2">
+          {/* Until Meta lets the app message customers, the reply still has
+              to reach them somehow — and retyping a draft into Instagram is
+              the fastest way to stop using the draft at all. One tap, then
+              paste. Shown always, because copying is useful even when
+              sending works. */}
+          <Button
+            variant="outline"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(text);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              } catch {
+                toast.error("Couldn't copy — select the text and copy it by hand.");
+              }
+            }}
+            disabled={!text.trim()}
+            title="Copy this reply, then paste it into Instagram or Messenger"
+          >
+            {copied ? (
+              <Check className="mr-2 h-3.5 w-3.5" />
+            ) : (
+              <Copy className="mr-2 h-3.5 w-3.5" />
+            )}
+            {copied ? "Copied" : "Copy"}
+          </Button>
           <Button
             onClick={() => approve.mutate({ id: draft.id, editedText: text })}
             disabled={busy || !text.trim()}
@@ -292,12 +394,24 @@ function PendingReplyCard({
 }
 
 export default function Conversations() {
-  const [selected, setSelected] = useState<string | null>(null);
+  // ?thread=… so a search result, a notification, or a link from the
+  // dashboard opens the right conversation — and survives a refresh, which
+  // a selection held only in React state never did.
+  const [selected, setSelected] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get("thread")
+  );
   const [search, setSearch] = useState("");
   // The split Brad works from: who is waiting on whom. Derived from who
   // spoke last, so there's nothing to keep up to date by hand.
   const [filter, setFilter] = useState<"all" | "needs" | "waiting" | "mine">("all");
   const inboxRef = useReveal<HTMLDivElement>();
+  // Navigating to /messages?thread=… while already on the page doesn't
+  // remount, so the initial state above wouldn't fire a second time.
+  const routeSearch = useSearch();
+  useEffect(() => {
+    const thread = new URLSearchParams(routeSearch).get("thread");
+    if (thread) setSelected(thread);
+  }, [routeSearch]);
   const utils = trpc.useUtils();
 
   const { data: stats } = trpc.stats.useQuery({} as never, { refetchInterval: 30000 });
@@ -308,9 +422,35 @@ export default function Conversations() {
     { conversationId: selected ?? "" },
     { enabled: !!selected, refetchInterval: 10000 }
   );
-  const { data: pendingReplies } = trpc.pendingReplies.list.useQuery(undefined, {
+  const {
+    data: pendingReplies,
+    refetch: refetchPending,
+    isFetching: pendingFetching,
+    dataUpdatedAt: pendingUpdatedAt,
+  } = trpc.pendingReplies.list.useQuery(undefined, {
     refetchInterval: 10000,
   });
+
+  // The board already refreshes itself every ten seconds, but there is no way
+  // to SEE that from the outside — so when a card looked wrong, the honest
+  // question was "is this just old?" and there was nothing on the page that
+  // answered it. Now the page says when it last checked, and there is a
+  // button to check again, so a wrong card is known to be wrong rather than
+  // suspected of being stale.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(tick);
+  }, []);
+  const secondsSincePending = pendingUpdatedAt ? Math.max(0, Math.round((now - pendingUpdatedAt) / 1000)) : null;
+  const updatedLabel =
+    secondsSincePending === null
+      ? "checking…"
+      : secondsSincePending < 10
+        ? "just now"
+        : secondsSincePending < 60
+          ? `${secondsSincePending}s ago`
+          : `${Math.round(secondsSincePending / 60)}m ago`;
 
   // The people who asked something and never got an answer. Importing
   // brought their threads in but deliberately wrote nothing — this is the
@@ -396,12 +536,14 @@ export default function Conversations() {
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-beige/20 px-4 py-3">
         <p className="min-w-0 flex-1 text-xs text-muted-foreground">
           Someone asked a question and never got an answer? This writes a draft for each of
-          them — nothing sends, they all wait for your OK like any other.
+          them from the last fortnight — nothing sends, they all wait for your OK like any
+          other. Older threads are left alone: they've usually been answered by hand somewhere
+          this app can't see.
         </p>
         <Button
           variant="outline"
           size="sm"
-          onClick={() => draftUnanswered.mutate({ limit: 20 })}
+          onClick={() => draftUnanswered.mutate({ limit: 20, withinDays: 14 })}
           disabled={draftUnanswered.isPending}
         >
           <Sparkles
@@ -413,10 +555,27 @@ export default function Conversations() {
 
       {waiting > 0 && (
         <section className="space-y-3">
-          <h2 className="font-display text-lg tracking-[0.1em] text-charcoal">
-            Waiting for your OK
-            <span className="ml-2 text-sepia">({waiting})</span>
-          </h2>
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <h2 className="font-display text-lg tracking-[0.1em] text-charcoal">
+              Waiting for your OK
+              <span className="ml-2 text-sepia">({waiting})</span>
+            </h2>
+            <div className="flex items-center gap-2 text-xs text-sepia">
+              <span>Updated {updatedLabel}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  void refetchPending();
+                  void utils.stats.invalidate();
+                  void utils.conversations.list.invalidate();
+                }}
+                disabled={pendingFetching}
+                className="rounded-full border border-line px-3 py-1 text-xs text-charcoal transition hover:bg-surface disabled:opacity-60"
+              >
+                {pendingFetching ? "Checking…" : "Refresh"}
+              </button>
+            </div>
+          </div>
           <div className="grid items-start gap-3 lg:grid-cols-2">
             {pendingReplies?.map((draft) => (
               <PendingReplyCard
