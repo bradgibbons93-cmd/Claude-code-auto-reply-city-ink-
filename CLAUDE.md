@@ -316,6 +316,56 @@ and the route was `requireStudio` rather than `requireStudioOrSignedLink`, so
 Facebook's own fetch of the picture would have 401'd behind a password. Same
 trap as `/api/attachments/`, one route later.
 
+**Nothing in this app ever deleted or compressed an image, and the MySQL
+volume reached 75%.** Resizing the volume buys time; the only direction it
+ever moved was up. Both halves are fixed now, and both have a trap in them.
+
+Photos are re-encoded on the way in (`images.ts`): 1600px for a customer's
+reference photo, 2048px for the studio's own work, which is what gets
+published. A phone photo goes from around 7MB to about 550KB — 92% — and a
+screenshot rather more. The rules exist to stop it ever making anything worse:
+the aspect ratio is fixed, nothing is enlarged, a photo already under 150KB is
+kept byte for byte, and if the re-encode comes out no smaller the original is
+kept. `.rotate()` is called before the encode on purpose — sharp drops EXIF,
+and without it every portrait photo off an iPhone comes back on its side.
+
+**The hash is taken of the bytes that are stored, not the bytes that
+arrived.** That is what keeps the content-addressing working: the same photo
+sent twice still compresses to the same bytes and still lands on one row.
+Hashing first and compressing after would quietly break that.
+
+**The clear-out (`housekeeping.ts`, nightly at 16:00 UTC — 2am in Geelong)
+only ever deletes rows whose `conversation_id` is 'feed' or 'post'.** A
+customer's reference photo carries its thread's id and can never be selected;
+we have no second copy of one, and Facebook's CDN link died months ago. On top
+of that, nothing is deleted that any message, booking, scheduled post or feed
+post still names. Both guards are needed, because these rows are
+content-addressed: if a customer sends the studio a picture the studio itself
+posted, there is ONE row and the feed may own it.
+
+That reference scan reads ids out of `/api/attachments/…` with a pattern, and
+the first version of it only matched hex. That is fine against real ids and
+silently catastrophic against anything else — an id it doesn't recognise reads
+as "nothing points at this". It matches loosely now: reading one id too many
+protects a photo that was never at risk, reading one too few deletes a photo
+there is no copy of.
+
+**What is deliberately NOT pruned:** the artists' gallery (`artist_uploads`)
+is the studio's own record of its work and the only copy there is; photos on
+posts that were actually published, so the card still shows what went out; and
+anything at all on a conversation. And the images already in the database are
+still at their original size — compression is on ingest only. Recompressing
+what is stored would rewrite customers' photos in place, irreversibly, which
+is the one thing this file says not to risk; it needs Brad's say-so and a dry
+run first.
+
+**The global `express.json({ limit: "5mb" })` was refusing photos before the
+routes that allow 24MB ever saw them.** It is mounted first and runs on
+everything, so an artist photographing a piece on any recent phone got
+Express's own HTML "Payload Too Large" page — while the code underneath
+apologised with "that photo is over 8MB", which was never the reason. The two
+photo routes are stepped over now and keep the limit they declare.
+
 ## The login
 
 Off unless `DASHBOARD_PASSWORD` is set in Railway. Deliberately dormant while
@@ -450,6 +500,13 @@ whole board, which every other suite leaves drafts on. It passed alone, it
 passed once, and it failed in the full run. That is the same mistake twice
 now; it is the first thing to suspect when a suite is green by itself and red
 in the run.
+
+**`prune.mjs` needs the ids it invents to look like the ones the app writes**
+— 40 hex characters off a SHA-256. Its first version used readable names like
+`pt_orphan`, and every assertion about a photo being protected passed for the
+wrong reason: the reference scan didn't recognise the shape, so it read
+"nothing points at this" and deleted the lot. A test whose fixtures don't look
+like production is testing the fixtures.
 
 **`batche2e.mjs` and `sendfail.mjs` are intermittently flaky in a full run**
 and pass reliably alone. Not yet chased down; the shared test database and
