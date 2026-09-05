@@ -14,6 +14,7 @@ import { saveArtistUpload, readArtistUpload, UploadRejected } from "./uploads.js
 import { syncFeed, countFeed } from "./feed.js";
 import QRCode from "qrcode";
 import { getLastLlmError, llmProvider, llmModel, llmBaseUrl, reportModelAvailability } from "./llm.js";
+import { reportPushReadiness } from "./push.js";
 import { mountAuth, requireStudio, requireStudioOrSignedLink } from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -264,6 +265,11 @@ app.listen(port, async () => {
   // Finding that out from an empty draft box with a customer waiting is how
   // it went the first time.
   reportModelAvailability().catch(() => undefined);
+
+  // And whether a notification could reach anyone at all. A customer wrote in,
+  // a draft was written, and the phone stayed silent — findable afterwards
+  // only by the absence of a log line, which is no way to find anything.
+  reportPushReadiness().catch(() => undefined);
 
   startScheduler();
 });

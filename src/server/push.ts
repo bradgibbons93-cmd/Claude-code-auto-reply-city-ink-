@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import webpush from "web-push";
+import { studioMinutesOfDay, studioTimezone } from "./calendar.js";
 import { eq, sql } from "drizzle-orm";
 import { getDb } from "./db.js";
 import { appSettings, pushSubscriptions } from "../drizzle/schema.js";
@@ -208,7 +209,12 @@ export async function countSubscriptions(): Promise<number> {
 
 /** "22:00"→"07:00" wraps midnight, which is the shape a studio's night is. */
 export function inQuietHours(settings: NotifySettings, now = new Date()): boolean {
-  const minutes = now.getHours() * 60 + now.getMinutes();
+  // The studio's clock, not the server's. Railway runs in UTC, and Geelong is
+  // ten or eleven hours ahead of it — so "22:00 to 07:00" was being read as
+  // 08:00 to 17:00 in the shop. Every enquiry through the whole working day
+  // was silenced as "quiet hours", and the ones at two in the morning came
+  // through. Exactly inverted, and nothing said so.
+  const minutes = studioMinutesOfDay(now);
   const parse = (value: string) => {
     const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
     if (!match) return null;
@@ -366,12 +372,64 @@ export async function notify(
         : kind === "draft"
           ? settings.onDraft
           : settings.onProblem;
-  if (!wanted) return { sent: 0, skipped: "turned off" };
+  if (!wanted) {
+    // Every one of these was silent. A phone that doesn't buzz looks identical
+    // whether the switch is off, the hour is wrong, or no device was ever
+    // registered — and the studio has no way to tell those apart from the
+    // outside. Say which one it was, every time.
+    console.log(`[Push] Not sent (${kind}): "${message.title}" — that alert is switched off in Settings`);
+    return { sent: 0, skipped: "turned off" };
+  }
 
   // A booking or a fault is worth waking someone for. A message isn't.
   const urgent = message.urgent ?? (kind === "booking" || kind === "problem");
-  if (!urgent && inQuietHours(settings)) return { sent: 0, skipped: "quiet hours" };
+  if (!urgent && inQuietHours(settings)) {
+    console.log(
+      `[Push] Not sent (${kind}): "${message.title}" — quiet hours ` +
+        `${settings.quietFrom}–${settings.quietTo} on the studio clock (${studioTimezone()})`
+    );
+    return { sent: 0, skipped: "quiet hours" };
+  }
+
+  const devices = await countSubscriptions().catch(() => -1);
+  if (devices === 0) {
+    console.warn(
+      `[Push] Not sent (${kind}): "${message.title}" — no phone is registered. ` +
+        "Open the dashboard on the phone, add it to the home screen, then turn notifications on in Settings."
+    );
+    return { sent: 0, skipped: "no devices" };
+  }
 
   const { sent } = await sendPush(message);
+  if (!sent) {
+    console.warn(`[Push] Nothing landed (${kind}): "${message.title}" — ${getLastPushError() ?? "no reason given"}`);
+  }
   return { sent };
+}
+
+/**
+ * Says on the way up whether a notification could actually reach anyone.
+ *
+ * A customer messaged the studio, a draft was written for her, and the phone
+ * never buzzed — and the only way to find that out afterwards was the absence
+ * of a log line. An absence is not a diagnosis. This is.
+ */
+export async function reportPushReadiness(): Promise<void> {
+  try {
+    const [devices, settings] = await Promise.all([countSubscriptions(), getNotifySettings()]);
+    const clock = `quiet ${settings.quietFrom}–${settings.quietTo} ${studioTimezone()}`;
+    if (!devices) {
+      console.warn(`[Push] No phone registered — nothing will buzz, whatever the switches say (${clock})`);
+      return;
+    }
+    const on = [
+      settings.onMessage && "messages",
+      settings.onBooking && "bookings",
+      settings.onDraft && "drafts",
+      settings.onProblem && "problems",
+    ].filter(Boolean).join(", ") || "nothing";
+    console.log(`[Push] ${devices} device(s) registered — on for: ${on} (${clock})`);
+  } catch (error) {
+    console.warn(`[Push] Couldn't check notification readiness: ${(error as Error).message}`);
+  }
 }

@@ -68,6 +68,30 @@ function offsetMs(at: Date, timeZone: string): number {
   return asUtc - at.getTime();
 }
 
+/**
+ * Minutes since midnight on the studio's wall clock.
+ *
+ * Exported because `push.ts` needs exactly this and got it wrong by reaching
+ * for `Date.getHours()`, which is the server's clock — UTC on Railway. The
+ * same mistake this file's own `offsetMs` comment describes, made again a
+ * month later in another file. One place for it now.
+ */
+export function studioMinutesOfDay(at: Date = new Date()): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: TIMEZONE,
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+  }).formatToParts(at);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  return (get("hour") % 24) * 60 + get("minute");
+}
+
+/** The studio's timezone, so a diagnosis can say which clock it used. */
+export function studioTimezone(): string {
+  return TIMEZONE;
+}
+
 /** The UTC instant matching a wall-clock time in the studio's timezone. */
 function studioTime(
   year: number,
