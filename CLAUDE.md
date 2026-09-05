@@ -270,15 +270,41 @@ vanished looking exactly like a reply that had gone and the customer was never
 answered by anyone. `restorePendingReply` puts it back with `send_error` on it,
 and the card says so in red.
 
-**Under Standard Access Meta lets the app message only people who have a role
-on it.** The studio's own account has one, so testing on yourself sends
-perfectly and the first real customer is refused with
-`(#200) … does not have Advanced Access … and recipient user does not have
-role on app`. That is why sending "worked earlier and doesn't now" — it had
-never once reached a customer. `explainSendFailure()` says so in those terms,
-because "no permission to send" leaves someone certain it worked yesterday.
-The unlock is the same App Review already submitted. Until then the draft card
-has a Copy button, and the reply gets pasted into Instagram by hand.
+**Messenger sending WORKS. Instagram sending is the only thing blocked.**
+Brad, correcting this file after days of it being wrong:
+
+> it's not only users with admin access I can reply to, the reply actually
+> sends to anyone that has messaged in from messenger just not instagram
+
+He is right, and this entry used to say the opposite — that under Standard
+Access no reply had ever reached a customer on either inbox. That framing was
+wrong and it was expensive: it sent days into "why can't we message anyone"
+when the real question was always "why can't we message on Instagram".
+
+What is actually true:
+
+- **Messenger**: Standard Access lets a Page reply to anyone who messaged it
+  first. Replies reach real customers today. Nothing is waiting on approval
+  for Messenger. A Messenger send that fails does so for a *window* reason —
+  more than 24 hours (or 7 with the Human Agent tag) since they last wrote —
+  not a permission one.
+- **Instagram**: refused, every time, on one named permission:
+  `(#200) App does not have Advanced Access to instagram_manage_messages`.
+  That is the whole blocker, and it is the permission the submission does not
+  ask for.
+
+`explainSendFailure()` takes the platform now and says which inbox is
+blocked, and that the other one still works. It used to say the app "can only
+message people with a role on the app", which reads as nothing reaching any
+customer anywhere — the sentence that started the wrong hunt. `sendfail.mjs`
+asserted that wording, so the test was holding the mistake in place; it now
+asserts the opposite, on an Instagram thread, which is what production
+actually does.
+
+**Instagram messages ARRIVE fine.** Brad confirmed this too. Do not conclude
+otherwise from `devtools_webhook_list`, which reported only the `page` topic
+— reading that as "Instagram webhooks were never subscribed" was another
+wrong turn on the same day. The DMs come in; only the replies are refused.
 
 **Log Graph's raw words next to every explanation.** The send path logged only
 the sentence built from the error, which is precisely the mistake that put
@@ -494,6 +520,12 @@ Never guarded: Meta's webhook, `POST /api/uploads` and the `/upload` page (the
 artists reach it by QR code on the studio wall), `/health`.
 
 ## Meta App Review
+
+**What is actually broken: Instagram replies, and nothing else.** Messenger
+sends reach real customers today — see the entry above. So the entire value
+of App Review, for this studio, is one permission:
+`instagram_manage_messages`. Everything below is the state of the submission
+that is meant to grant it.
 
 **Read from Meta's own API on 5 September, through the Meta Social
 Technologies MCP. This replaces every guess above it.**

@@ -226,7 +226,7 @@ function outsideWindow(error: unknown): boolean {
  * This one matters more than the others: a failure here means a customer
  * asked something and got nothing back, and the studio believed otherwise.
  */
-export function explainSendFailure(raw: string): string {
+export function explainSendFailure(raw: string, platform: Platform = "facebook"): string {
   if (/outside of allowed window|outside the allowed window|2018278/i.test(raw)) {
     return (
       "Meta wouldn't deliver this: it's been more than 7 days since they last messaged, " +
@@ -240,24 +240,35 @@ export function explainSendFailure(raw: string): string {
       "Settings → Facebook Page and this reply will go through — nothing was lost."
     );
   }
-  // The one that explains why it "used to work". Under Standard Access Meta
-  // lets an app message only people who have a role on it — the studio's own
-  // account does, so testing on yourself sends perfectly, and the first real
-  // customer is refused. Saying only "no permission to send" leaves someone
-  // certain it worked yesterday and is broken today.
-  if (/does not have role on app|role on the app/i.test(raw)) {
+  // Brad, correcting this after it had been on the card for days:
+  //
+  //   "it's not only users with admin access I can reply to, the reply
+  //    actually sends to anyone that has messaged in from messenger just not
+  //    instagram"
+  //
+  // He is right, and the old wording here was wrong in a way that mattered.
+  // It said the app "can only message people with a role on the app", which
+  // reads as nothing reaching any customer on either inbox — and that sent
+  // days into the wrong question. Messenger works: Standard Access lets a
+  // Page reply to anyone who messaged it first. Instagram is the one that is
+  // blocked, and it is blocked on one named permission.
+  //
+  // So say which inbox, and say the other one is fine.
+  const blocked = /does not have role on app|role on the app/i.test(raw) ||
+    /pages_messaging|instagram_business_manage_messages|instagram_manage_messages|Advanced Access/i.test(raw);
+  if (blocked) {
+    if (platform === "instagram") {
+      return (
+        "Instagram replies are blocked — Meta hasn't granted this app Advanced Access to " +
+        "instagram_manage_messages yet, and Instagram is the only inbox that needs it. " +
+        "Messenger replies still send normally. Answer this one from the Instagram app for " +
+        "now; the draft is here to copy."
+      );
+    }
     return (
-      "Meta won't let this app message customers yet. Until App Review grants Advanced " +
-      "Access it can only message people with a role on the app — which is why replies to " +
-      "your own account go through and this one won't. Answer them from Instagram or " +
-      "Messenger for now; the draft stays here to copy."
-    );
-  }
-  if (/pages_messaging|instagram_business_manage_messages|instagram_manage_messages|Advanced Access/i.test(raw)) {
-    return (
-      "Meta hasn't granted this app permission to send messages yet. It's requested under " +
-      "App Review → Permissions and Features; the draft is kept until it lands. Answer them " +
-      "from Instagram or Messenger in the meantime — the draft is here to copy."
+      "Meta refused this send on a permission. Messenger replies normally go through to " +
+      "anyone who has messaged the Page, so this is worth reading in full: " +
+      `${raw.slice(0, 200)}`
     );
   }
   if (/does not exist|Unsupported (get|post) request/i.test(raw)) {
@@ -312,7 +323,7 @@ export async function sendMessengerMessage(
       // wrong permission once already: the guess was all anyone could see.
       const raw = describeGraphError("send", error);
       console.error(`[Facebook] Send to ${recipientId} (${platform}) refused — ${raw}`);
-      throw new Error(explainSendFailure(raw));
+      throw new Error(explainSendFailure(raw, platform));
     }
     // A person read this and approved it, so the Human Agent tag is the
     // honest description of what is happening as well as the one that works.
@@ -329,7 +340,7 @@ export async function sendMessengerMessage(
       console.error(
         `[Facebook] Send to ${recipientId} (${platform}) refused under the Human Agent tag too — ${raw}`
       );
-      throw new Error(explainSendFailure(raw));
+      throw new Error(explainSendFailure(raw, platform));
     }
   }
 
@@ -337,7 +348,8 @@ export async function sendMessengerMessage(
     throw new Error(
       explainSendFailure(
         data?.error?.message ??
-          "Meta accepted the request but didn't confirm the message was sent, so it may not have arrived."
+          "Meta accepted the request but didn't confirm the message was sent, so it may not have arrived.",
+        platform
       )
     );
   }
