@@ -178,6 +178,31 @@ it", "thank you", hearts — is a thank-you. Offering to book them reads as
 though nobody read it. The prompt says so in those words now, and still
 treats an actual question (a price, a date, another piece) as a real enquiry.
 
+**The poll wrote a new draft and never cleared the old one, so a customer had
+two — and the board showed the wrong one.** Brad, with three screenshots: the
+card dated "1 day ago" carrying the question he had already answered by hand
+at 00:48, with a price drafted against it, while her real message from 17:35
+("Thank you ❤️. I'm thinking roughly same size as this?") was nowhere. He
+assumed the page was stale. It wasn't — **the draft inside the card was
+answering the wrong message.**
+
+`handleCustomerMessage` has always called `supersedePendingReplies` first —
+that is the "Replaced 1 stale draft(s)" line in the log. `draftForUnanswered`
+never did. So a customer drafted for yesterday, answered by hand, and writing
+again got two pending rows, and `getPendingReplies` (one card per person) had
+to pick between them.
+
+Both paths supersede now, and the poll logs which message it is drafting
+against — id, first sixty characters, and when it was said — because "which
+message is this card actually about" was the question that could not be
+answered from the outside.
+
+**A refresh button and "Updated 12s ago" sit above the board.** It already
+refetched every ten seconds; there was simply no way to SEE that, so a wrong
+card was indistinguishable from an old one and the first suspicion was always
+the page rather than the data. Cheap, and it removes a whole category of
+doubt.
+
 **"A draft is already waiting" meant two different things in two queries, and
 a customer fell down the gap.** This is what Brad was actually looking at when
 he asked why Maureen's message wasn't showing.

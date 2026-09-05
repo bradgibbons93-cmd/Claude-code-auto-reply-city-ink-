@@ -506,6 +506,27 @@ export async function draftForUnanswered(
       }
       await clearAlert("llm").catch(() => undefined);
 
+      // Clear whatever was already waiting on this thread first.
+      //
+      // The webhook path has always done this — "Replaced 1 stale draft(s)" —
+      // and this one never did. So a customer who was drafted for yesterday,
+      // answered by hand, and then wrote again ended up with TWO pending
+      // drafts: yesterday's, answering the question Brad had already replied
+      // to himself, and today's, answering what she actually just said. The
+      // board shows one card per person and Brad got the wrong one — a
+      // fortnight-old question with a price against it, while her real
+      // message sat unanswered.
+      //
+      // The newest draft is written against the whole thread, so it is
+      // strictly better than anything it replaces.
+      const dropped = await supersedePendingReplies(conversationId);
+      if (dropped) console.log(`[Agent] Replaced ${dropped} stale draft(s) on ${conversationId}`);
+
+      console.log(
+        `[Agent] Drafting for ${conversationId} against "${answering.content.slice(0, 60)}" ` +
+          `(${answering.messageId}, said ${answering.createdAt ? new Date(answering.createdAt).toISOString() : "unknown"})`
+      );
+
       const queued = await createPendingReply(
         conversationId,
         answering.messageId,

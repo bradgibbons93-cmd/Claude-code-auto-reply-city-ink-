@@ -422,9 +422,35 @@ export default function Conversations() {
     { conversationId: selected ?? "" },
     { enabled: !!selected, refetchInterval: 10000 }
   );
-  const { data: pendingReplies } = trpc.pendingReplies.list.useQuery(undefined, {
+  const {
+    data: pendingReplies,
+    refetch: refetchPending,
+    isFetching: pendingFetching,
+    dataUpdatedAt: pendingUpdatedAt,
+  } = trpc.pendingReplies.list.useQuery(undefined, {
     refetchInterval: 10000,
   });
+
+  // The board already refreshes itself every ten seconds, but there is no way
+  // to SEE that from the outside — so when a card looked wrong, the honest
+  // question was "is this just old?" and there was nothing on the page that
+  // answered it. Now the page says when it last checked, and there is a
+  // button to check again, so a wrong card is known to be wrong rather than
+  // suspected of being stale.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(tick);
+  }, []);
+  const secondsSincePending = pendingUpdatedAt ? Math.max(0, Math.round((now - pendingUpdatedAt) / 1000)) : null;
+  const updatedLabel =
+    secondsSincePending === null
+      ? "checking…"
+      : secondsSincePending < 10
+        ? "just now"
+        : secondsSincePending < 60
+          ? `${secondsSincePending}s ago`
+          : `${Math.round(secondsSincePending / 60)}m ago`;
 
   // The people who asked something and never got an answer. Importing
   // brought their threads in but deliberately wrote nothing — this is the
@@ -529,10 +555,27 @@ export default function Conversations() {
 
       {waiting > 0 && (
         <section className="space-y-3">
-          <h2 className="font-display text-lg tracking-[0.1em] text-charcoal">
-            Waiting for your OK
-            <span className="ml-2 text-sepia">({waiting})</span>
-          </h2>
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <h2 className="font-display text-lg tracking-[0.1em] text-charcoal">
+              Waiting for your OK
+              <span className="ml-2 text-sepia">({waiting})</span>
+            </h2>
+            <div className="flex items-center gap-2 text-xs text-sepia">
+              <span>Updated {updatedLabel}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  void refetchPending();
+                  void utils.stats.invalidate();
+                  void utils.conversations.list.invalidate();
+                }}
+                disabled={pendingFetching}
+                className="rounded-full border border-line px-3 py-1 text-xs text-charcoal transition hover:bg-surface disabled:opacity-60"
+              >
+                {pendingFetching ? "Checking…" : "Refresh"}
+              </button>
+            </div>
+          </div>
           <div className="grid items-start gap-3 lg:grid-cols-2">
             {pendingReplies?.map((draft) => (
               <PendingReplyCard
