@@ -460,6 +460,40 @@ rather than printing Graph's own ungrammatical sentence.
 the documented one, with `feed` as the older equivalent. `syncFeed` tries all
 three. That wasn't the cause here, but it would have been on some Pages.
 
+**Meta cannot enumerate this account's Instagram conversations edge at all,
+and no amount of asking for less has fixed it.** This has now been attempted
+three ways and failed three times, so do not attempt a fourth without reading
+this.
+
+1. Twenty-five threads reduced to eight — still refused.
+2. `getShrinking()` halving the page down to one — still refused.
+3. The nested `messages{...attachments{...}}` sub-query removed entirely, the
+   list asked for as `id,participants` and then `id` alone, ten at a time,
+   with the messages fetched thread by thread afterwards — **still refused**,
+   live, on 5 September:
+
+       HTTP 400 (2534084) "Your query has timed out since you have too many
+       conversations with users"
+       HTTP 500 "Please reduce the amount of data you're asking for"
+
+The third attempt was the right diagnosis of the wrong problem: the nested
+sub-query really was expensive, but the cost that matters is Meta walking the
+edge, which it says in as many words. Page size and field list are not the
+lever. Keep the two-phase fetch — it is strictly cheaper and it is what makes
+Messenger's import fast — but do not expect it to fix Instagram.
+
+**What still works: the webhook.** Instagram DMs arrive live and are drafted
+for. The import is the backfill and the safety net underneath the webhook,
+and for Instagram that net has never existed. Say that plainly rather than
+implying Instagram is broken — it isn't; its history is unreadable.
+
+**The one approach not yet tried** is Meta's own documented answer to 2534084:
+stop enumerating and ask for threads by person, `/me/conversations?user_id=
+<IGSID>`, which returns just that conversation. The app already knows the
+IGSID of everyone who has ever webhooked in, so the set of threads worth
+fetching is already in the database and the edge never has to be walked.
+Untested. Do not describe it as the fix until it has run against production.
+
 **Instagram refuses a page it thinks is too big, and how big is not a fixed
 number.** Twenty-five was reduced to eight and the live server still logged
 `HTTP 500: Please reduce the amount of data you're asking for` every three
