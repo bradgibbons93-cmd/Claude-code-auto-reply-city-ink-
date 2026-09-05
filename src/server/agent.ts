@@ -568,8 +568,21 @@ async function notifyOfCustomerMessage(
     if (config?.ownerPsid && config.ownerPsid === senderId) return;
 
     const settings = await getNotifySettings();
-    if (!settings.onMessage) return;
-    if (!(await claimNotificationSlot(senderId, settings.throttleMinutes))) return;
+    // Two more ways to send nothing and say nothing about it. A studio that
+    // didn't get buzzed cannot tell "switched off" from "already buzzed for
+    // this thread" from "it failed" — and looking for the reason afterwards
+    // meant looking for a line that was never written.
+    if (!settings.onMessage) {
+      console.log(`[Push] Not sent (message): ${senderName || senderId} — new-message alerts are switched off in Settings`);
+      return;
+    }
+    if (!(await claimNotificationSlot(senderId, settings.throttleMinutes))) {
+      console.log(
+        `[Push] Not sent (message): ${senderName || senderId} — this thread was already buzzed ` +
+          `within the last ${settings.throttleMinutes} minutes`
+      );
+      return;
+    }
 
     const who = senderName || (platform === "instagram" ? "An Instagram DM" : "A new enquiry");
     const preview = text.trim()
