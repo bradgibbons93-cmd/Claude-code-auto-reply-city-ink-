@@ -495,94 +495,87 @@ artists reach it by QR code on the studio wall), `/health`.
 
 ## Meta App Review
 
-Submitted, pending. Requested: `instagram_business_basic`,
-`instagram_business_manage_messages`, `pages_messaging`, `pages_show_list`,
-Human Agent.
+**Read from Meta's own API on 5 September, through the Meta Social
+Technologies MCP. This replaces every guess above it.**
 
-**Confirmed live, 5 September: no reply has ever reached a customer.** Brad
-approved two drafts and both came back
+`devtools_app_review` on app **4457207527757824** ("city. nk autoi"):
 
-    (#200) App does not have Advanced Access to instagram_manage_messages
-    permission and recipient user does not have role on app.
+    submission_status: PENDING      submitted 26 August 2026
+    has_been_previously_reviewed: false      submissions: []
 
-He asked, reasonably, "why is it now saying meta won't let it reply, we have
-already sent out messages from this?" — because sends had worked before.
-They worked because those recipients had a role on the app. That is the whole
-of it: under Standard Access the app can message the studio's own accounts
-and nobody else, so testing on yourself passes every time and the first real
-customer is refused. It never once reached a customer.
+**It has never been reviewed.** Every permission reads `REJECTED` with
+`access_level: none`, and every one of them has an EMPTY `rejection_reasons`
+object — that is the default state of a permission that has never been
+granted, not a decision anybody made. Nothing was turned down. Nothing has
+been looked at.
 
-**Check that the Instagram messaging permission on the submission is the one
-Meta actually names in the refusals — they do not currently match.** The live
-error, on both names and sending, is:
+**Every permission in the pending submission is missing its screencast.**
+This is the finding. All seven:
 
-> `(#200) App does not have Advanced Access to instagram_manage_messages`
+    instagram_business_basic            screencast: NOT DONE
+    instagram_business_manage_messages  screencast: NOT DONE
+    pages_show_list                     screencast: NOT DONE
+    pages_messaging                     screencast: NOT DONE   api_precheck: NOT DONE
+    business_management                 screencast: NOT DONE   api_precheck: NOT DONE
+    pages_read_engagement               screencast: NOT DONE   api_precheck: NOT DONE
+    Human Agent                         screencast: NOT DONE
 
-but the submission above asks for `instagram_business_manage_messages`. Those
-are two different permissions belonging to Meta's two different Instagram
-flows — the same fault line as the token trap further up this file.
-`instagram_manage_messages` is the **Messenger API for Instagram** (Page
-token, `graph.facebook.com`), which is what this studio's setup uses.
-`instagram_business_manage_messages` is the newer **Instagram API with
-Instagram Login** (`graph.instagram.com`), which it does not.
+A screencast is mandatory. The submission cannot pass in this state, and it
+has been sitting in the queue since 26 August waiting to fail. Everything
+else is done: use case written, data use checkup complete, privacy policy
+present, business verification passed, test page set.
 
-If that is right, the approval being waited on will not unblock sending, and
-the wait is for nothing. Verify it in App Review → Permissions and Features
-against the exact string in the error before assuming approval fixes this. The submission says this is an internal tool for one studio and
-is not sold to other businesses — **that must stay true**, or the approval is
-at risk. Selling it to other studios needs multi-tenant work and the Instagram
-Business Login OAuth flow first.
+**Two permissions the studio actually needs are NOT in the submission at
+all**, which is what was suspected here for a week and is now confirmed:
 
-**Meta has an MCP server, and Claude Code can connect to it.** Brad found it
-on developers.facebook.com and asked whether I could connect from here; I
-checked the claude.ai connector directory, didn't find it, and answered as if
-that were the whole world. It isn't — the docs give the command outright:
+- **`instagram_manage_messages`** — the exact string in every live refusal
+  (`(#200) App does not have Advanced Access to instagram_manage_messages`).
+  Not requested. The submission asks for `instagram_business_manage_messages`
+  instead, which belongs to Meta's other Instagram flow. Note that Meta's own
+  `Human Agent` prerequisites list BOTH, so both can be requested together.
+- **`pages_manage_posts`** — blocks publishing a scheduled post. Not
+  requested.
+
+`pages_read_engagement` IS in the submission — an earlier note in this file
+said it wasn't, and that was wrong.
+
+**`can_submit: false` — "Cannot submit to App Review while a previous
+submission is in review."** So the pending one has to be cancelled before
+anything can be added to it.
+
+### What has to happen, in order
+
+1. Cancel the pending submission (nothing is lost — it has never been looked
+   at, and it cannot pass without screencasts).
+2. Add `instagram_manage_messages` and `pages_manage_posts`.
+3. Record the screencast and attach it to every permission — one recording
+   showing the real dashboard receiving a customer message, drafting a reply,
+   and Brad approving it covers the messaging permissions.
+4. Complete the API precheck for `pages_messaging`, `business_management` and
+   `pages_read_engagement` (a successful call using each, in dev mode).
+5. Resubmit.
+
+The submission says this is an internal tool for one studio and is not sold to
+other businesses — **that must stay true**, or the approval is at risk.
+Selling it to other studios needs multi-tenant work and the Instagram Business
+Login OAuth flow first.
+
+**Four Meta apps exist on this business.** `4457207527757824` ("city. nk
+autoi", Live) is the one that matters and the one the Page token belongs to —
+confirmed at boot by `reportAppIdentity()`. `27106251185651300` ("City Ink
+Automation - Test1") is active and unused; `2076592893274412` and
+`2019468835368169` are archived.
+
+**Meta has an MCP server and it is how all of the above was read.** The docs
+give the command outright:
 
     claude mcp add --transport http meta_social_technologies https://mcp.facebook.com/devtools
 
-Running that here works and then reports **"Needs authentication"**: the OAuth
-sign-in needs a browser, and a remote cloud session has no way to complete it.
-So it is Claude Desktop (Settings → Connectors → Add custom connector, name
-`Meta Social Technologies`, URL `https://mcp.facebook.com/devtools`) or a local
-Claude Code session, signed in as the account that admins the app.
-
-Worth setting up: it reads app settings, permissions and App Review state —
-the exact things this project has been blind to, and the reason Brad has been
-sent to check the same form by hand three times.
-
-**Two Meta apps exist on this business**, which is why `reportAppIdentity()`
-now runs at boot. `debug_token` has always returned `app_id` and
-`application`; the code discarded both. A Page token issued by the wrong app
-is valid, the right type, carries every scope — and never receives the
-approval, because the approval belongs to the other app. The boot line names
-which app the live token belongs to, and shouts if it isn't the one in
-Settings. Brad has confirmed **4457207527757824 ("city. nk autoi", Live)** is
-the one that has done everything; the second app has been archived.
-
-**`pages_read_engagement` was not in the submission, and the Live feed cannot
-work until it is granted.** This was got wrong once, at length: Brad was told
-three times to regenerate his Page token with the permission ticked. He did,
-correctly, and the feed still returned `(#10) requires 'pages_read_engagement'
-or the 'Page Public Content Access' feature` — with `debug_token` confirming a
-valid Page token carrying the permission.
-
-A permission lives in **two** places. On the token, where the person grants it
-in the login dialog. And on the app, where Meta decides whether the app may use
-it at all (App Review → Permissions and Features). Only the first is visible in
-the Access Token Debugger, and only the first is changed by pasting a new token.
-When a scope is present on a valid token and Graph refuses anyway, it is always
-the second — don't send anyone back to the Graph API Explorer.
-
-**`pages_manage_posts` is missing too, and it blocks publishing.** Same story,
-found later: a scheduled post failed with `(#200) The permission(s)
-pages_manage_posts are not available`. It is on neither the token nor the app.
-Both it and `pages_read_engagement` need requesting under App Review →
-Permissions and Features. `explainPublishFailure()` says so on the post card
-rather than printing Graph's own ungrammatical sentence.
-
-`/me/posts` is also the wrong edge for a Page's own posts; `published_posts` is
-the documented one, with `feed` as the older equivalent. `syncFeed` tries all
-three. That wasn't the cause here, but it would have been on some Pages.
+It needs an interactive OAuth sign-in, so a remote cloud session cannot
+complete it — Claude Desktop (Settings → Connectors → Add custom connector) or
+a local Claude Code session, signed in as an app admin. **Use it before
+guessing at anything to do with permissions again.** A week went into
+inferring from error strings what `devtools_app_review` answers in one call.
 
 **Meta cannot enumerate this account's Instagram conversations edge at all,
 and no amount of asking for less has fixed it.** This has now been attempted
