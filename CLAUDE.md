@@ -159,6 +159,25 @@ already answered by hand came back onto the board as unanswered, and how
 genuinely new ones sat in "waiting on them" and were never drafted for. Both
 symptoms, one cause.
 
+**A reply to a story the studio tagged someone in means they are ALREADY
+tattooed.** Brad, with two screenshots — the draft, and what he replaced it
+with:
+
+> she was already tattooed and she wrote she loved the tattoo from the story
+> that we tagged her in
+
+The customer wrote "I love it! Thank you !!" and the agent answered "let us
+know when your ready and we can look at getting you booked in!" — to someone
+who had just been in the chair. He changed it to "Hope to see you again in
+the future!"
+
+This is the studio's commonest Instagram message and it is not an enquiry.
+The studio posts the finished work to a story and tags the client; the client
+replies to the story. A short warm message with no question in it — "I love
+it", "thank you", hearts — is a thank-you. Offering to book them reads as
+though nobody read it. The prompt says so in those words now, and still
+treats an actual question (a price, a date, another piece) as a real enquiry.
+
 **The studio answers plenty of messages from Meta's own inbox, where this app
 cannot see them.** Echoes cover it going forward; anything older is only known
 if it was imported. So "Draft the unanswered" is bounded to a fortnight — it
@@ -381,6 +400,19 @@ artists reach it by QR code on the studio wall), `/health`.
 Submitted, pending. Requested: `instagram_business_basic`,
 `instagram_business_manage_messages`, `pages_messaging`, `pages_show_list`,
 Human Agent.
+
+**Confirmed live, 5 September: no reply has ever reached a customer.** Brad
+approved two drafts and both came back
+
+    (#200) App does not have Advanced Access to instagram_manage_messages
+    permission and recipient user does not have role on app.
+
+He asked, reasonably, "why is it now saying meta won't let it reply, we have
+already sent out messages from this?" — because sends had worked before.
+They worked because those recipients had a role on the app. That is the whole
+of it: under Standard Access the app can message the studio's own accounts
+and nobody else, so testing on yourself passes every time and the first real
+customer is refused. It never once reached a customer.
 
 **Check that the Instagram messaging permission on the submission is the one
 Meta actually names in the refusals — they do not currently match.** The live
