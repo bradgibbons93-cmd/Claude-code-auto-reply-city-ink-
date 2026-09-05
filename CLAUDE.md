@@ -178,6 +178,30 @@ it", "thank you", hearts — is a thank-you. Offering to book them reads as
 though nobody read it. The prompt says so in those words now, and still
 treats an actual question (a price, a date, another piece) as a real enquiry.
 
+**"A draft is already waiting" meant two different things in two queries, and
+a customer fell down the gap.** This is what Brad was actually looking at when
+he asked why Maureen's message wasn't showing.
+
+`getPendingReplies` (the board) hides a draft once the studio has said
+anything in that thread after it was written — the reply was given by hand,
+so the draft is stale. Correct. But the row stays `status='pending'` for ever.
+
+`getUnansweredConversations` (the poll) counted that same row. So when the
+customer wrote back the next day, the poll saw "she already has a draft
+waiting" and wrote nothing, while the board went on hiding the stale draft it
+was pointing at. **Invisible from both directions at once**, with her message
+sitting in Meta's inbox and the dashboard reading "Waiting for your OK (1)"
+over somebody else.
+
+This hits hardest for exactly this studio, because Brad answers people by hand
+all day: every thread he touches leaves a permanently 'pending' row behind
+that silences the next message on it.
+
+The poll now uses the board's definition — a draft only counts if nothing of
+ours came after it. Both queries agree, and `explainNotUnanswered()` tells the
+two cases apart in the log ("a draft is already waiting" versus "only a stale
+draft, superseded by our own reply").
+
 **Stored is not handled. The webhook must not return just because the poll
 got there first.** Brad: *"why is maureens message not showing up?"* — a real
 customer, a real question, on the board nowhere. The live log, 17:36:

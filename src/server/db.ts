@@ -206,9 +206,27 @@ export async function getUnansweredConversations(limit = 20, newerThanMinutes?: 
              OR c.bot_pause_reason IS NULL
              OR c.bot_pause_reason <> 'manual'
            )
+           -- "A draft is already waiting" has to mean the same thing here as
+           -- it does on the board, and it didn't.
+           --
+           -- getPendingReplies hides a draft once the studio has said
+           -- something in that thread after it was written — the reply was
+           -- given by hand, so the draft is stale. But the row stays
+           -- 'pending' forever, and this query counted it. So when the
+           -- customer wrote back, the poll saw "she already has a draft" and
+           -- wrote nothing, while the board hid the stale one it was
+           -- pointing at. She was invisible from both directions at once.
+           -- That is exactly what happened to Maureen Lopez.
            AND NOT EXISTS (
              SELECT 1 FROM pending_replies p
-              WHERE p.conversation_id = c.conversation_id AND p.status = 'pending'
+              WHERE p.conversation_id = c.conversation_id
+                AND p.status = 'pending'
+                AND NOT EXISTS (
+                  SELECT 1 FROM messenger_messages r
+                   WHERE r.conversation_id = c.conversation_id
+                     AND r.sender_type IN ('bot', 'manual')
+                     AND r.created_at > p.created_at
+                )
            )${recent}
          ORDER BY c.last_message_at DESC
          LIMIT ${limit}`
@@ -236,7 +254,16 @@ export async function explainNotUnanswered(limit = 5) {
                c.bot_pause_reason AS pauseReason,
                last.sender_type  AS lastSender,
                (SELECT COUNT(*) FROM pending_replies p
-                 WHERE p.conversation_id = c.conversation_id AND p.status = 'pending') AS pendingCount
+                 WHERE p.conversation_id = c.conversation_id AND p.status = 'pending') AS pendingCount,
+               (SELECT COUNT(*) FROM pending_replies p
+                 WHERE p.conversation_id = c.conversation_id
+                   AND p.status = 'pending'
+                   AND NOT EXISTS (
+                     SELECT 1 FROM messenger_messages r
+                      WHERE r.conversation_id = c.conversation_id
+                        AND r.sender_type IN ('bot', 'manual')
+                        AND r.created_at > p.created_at
+                   )) AS liveDraftCount
           FROM messenger_conversations c
           JOIN (
             SELECT m1.conversation_id, m1.sender_type
@@ -257,7 +284,10 @@ export async function explainNotUnanswered(limit = 5) {
   return list.map((r) => {
     const reasons: string[] = [];
     if (r.lastSender !== "customer") reasons.push(`the last word was ours (${r.lastSender})`);
-    if (Number(r.pendingCount) > 0) reasons.push("a draft is already waiting");
+    if (Number(r.liveDraftCount) > 0) reasons.push("a draft is already waiting");
+    if (Number(r.pendingCount) > 0 && Number(r.liveDraftCount) === 0) {
+      reasons.push("only a stale draft, superseded by our own reply — a fresh one is due");
+    }
     if (r.pausedUntil && new Date(r.pausedUntil as string) > new Date() && r.pauseReason === "manual") {
       reasons.push("paused by hand");
     }
