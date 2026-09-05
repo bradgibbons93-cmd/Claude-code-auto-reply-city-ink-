@@ -24,7 +24,8 @@ import {
   getPendingReply,
   replacePendingReplyDraft,
   getUnansweredConversations,
-  hasDraftForMessage
+  hasDraftForMessage,
+  explainNotUnanswered
 } from "./db.js";
 import { invokeLLMJson, getLastLlmError, type ChatMessage } from "./llm.js";
 import { availabilityForPrompt } from "./calendar.js";
@@ -452,6 +453,14 @@ export async function draftForUnanswered(
 ): Promise<{ drafted: number; failed: number; detail: string }> {
   const ids = await getUnansweredConversations(limit, newerThanMinutes);
   if (!ids.length) {
+    // "Everyone has had a reply" is only worth saying when it's true, and
+    // when it isn't, the silence is the whole problem — a customer's message
+    // plainly in Meta's inbox and a board reading All caught up. Print the
+    // most recent threads and what the query made of each of them.
+    const why = await explainNotUnanswered(5).catch(() => []);
+    for (const t of why) {
+      console.log(`[Board] ${t.name} (${t.conversationId}) — last word: ${t.lastSender} at ${t.lastMessageAt} — ${t.excludedBecause}`);
+    }
     return { drafted: 0, failed: 0, detail: "Everyone who's written in has a reply waiting or has had one." };
   }
 

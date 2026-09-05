@@ -217,6 +217,60 @@ export async function getUnansweredConversations(limit = 20, newerThanMinutes?: 
   return list.map((r) => r.conversationId);
 }
 
+/**
+ * Why a thread the studio can see is not on the board.
+ *
+ * `draftForUnanswered` returning "everyone has had a reply" is only useful
+ * when it is true. When a customer's message is plainly sitting in Meta's
+ * inbox and the board says nothing is waiting, the difference between the
+ * two is one of four things, and guessing which cost a whole evening. So
+ * ask the database directly, per thread, and print the answer.
+ */
+export async function explainNotUnanswered(limit = 5) {
+  const db = await getDb();
+  const rows = await db.execute(
+    sql`SELECT c.conversation_id AS conversationId,
+               c.sender_name     AS senderName,
+               c.last_message_at AS lastMessageAt,
+               c.bot_paused_until AS pausedUntil,
+               c.bot_pause_reason AS pauseReason,
+               last.sender_type  AS lastSender,
+               (SELECT COUNT(*) FROM pending_replies p
+                 WHERE p.conversation_id = c.conversation_id AND p.status = 'pending') AS pendingCount
+          FROM messenger_conversations c
+          JOIN (
+            SELECT m1.conversation_id, m1.sender_type
+              FROM messenger_messages m1
+              JOIN (
+                SELECT conversation_id,
+                       SUBSTRING_INDEX(
+                         GROUP_CONCAT(id ORDER BY created_at DESC, id DESC), ',', 1
+                       ) AS last_id
+                  FROM messenger_messages
+                 GROUP BY conversation_id
+              ) t ON t.last_id = m1.id
+          ) last ON last.conversation_id = c.conversation_id
+         ORDER BY c.last_message_at DESC
+         LIMIT ${limit}`
+  );
+  const list = (rows as unknown as [Record<string, unknown>[]])[0] ?? [];
+  return list.map((r) => {
+    const reasons: string[] = [];
+    if (r.lastSender !== "customer") reasons.push(`the last word was ours (${r.lastSender})`);
+    if (Number(r.pendingCount) > 0) reasons.push("a draft is already waiting");
+    if (r.pausedUntil && new Date(r.pausedUntil as string) > new Date() && r.pauseReason === "manual") {
+      reasons.push("paused by hand");
+    }
+    return {
+      conversationId: String(r.conversationId),
+      name: (r.senderName as string) || "(unnamed)",
+      lastMessageAt: r.lastMessageAt,
+      lastSender: r.lastSender,
+      excludedBecause: reasons.length ? reasons.join("; ") : "nothing — it should be drafted for",
+    };
+  });
+}
+
 /** One thread as it stands, without creating it if it isn't there. */
 export async function getConversation(conversationId: string) {
   const db = await getDb();
