@@ -15,6 +15,7 @@ import { syncFeed, countFeed } from "./feed.js";
 import QRCode from "qrcode";
 import { getLastLlmError, llmProvider, llmModel, llmBaseUrl, reportModelAvailability } from "./llm.js";
 import { reportPushReadiness } from "./push.js";
+import { reportAppIdentity } from "./token.js";
 import { mountAuth, requireStudio, requireStudioOrSignedLink } from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -285,6 +286,14 @@ app.listen(port, async () => {
   // a draft was written, and the phone stayed silent — findable afterwards
   // only by the absence of a log line, which is no way to find anything.
   reportPushReadiness().catch(() => undefined);
+
+  // And which Meta app the saved Page token actually belongs to. This studio
+  // has two apps; permissions and App Review belong to one of them, and a
+  // token from the wrong one looks perfectly healthy while never receiving
+  // the approval being waited on.
+  getFacebookConfig()
+    .then((c) => reportAppIdentity(c?.pageAccessToken, c?.appId, c?.appSecret))
+    .catch(() => undefined);
 
   startScheduler();
 });

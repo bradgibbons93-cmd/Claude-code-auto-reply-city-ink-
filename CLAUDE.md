@@ -533,6 +533,32 @@ is not sold to other businesses — **that must stay true**, or the approval is
 at risk. Selling it to other studios needs multi-tenant work and the Instagram
 Business Login OAuth flow first.
 
+**Meta has an MCP server, and Claude Code can connect to it.** Brad found it
+on developers.facebook.com and asked whether I could connect from here; I
+checked the claude.ai connector directory, didn't find it, and answered as if
+that were the whole world. It isn't — the docs give the command outright:
+
+    claude mcp add --transport http meta_social_technologies https://mcp.facebook.com/devtools
+
+Running that here works and then reports **"Needs authentication"**: the OAuth
+sign-in needs a browser, and a remote cloud session has no way to complete it.
+So it is Claude Desktop (Settings → Connectors → Add custom connector, name
+`Meta Social Technologies`, URL `https://mcp.facebook.com/devtools`) or a local
+Claude Code session, signed in as the account that admins the app.
+
+Worth setting up: it reads app settings, permissions and App Review state —
+the exact things this project has been blind to, and the reason Brad has been
+sent to check the same form by hand three times.
+
+**Two Meta apps exist on this business**, which is why `reportAppIdentity()`
+now runs at boot. `debug_token` has always returned `app_id` and
+`application`; the code discarded both. A Page token issued by the wrong app
+is valid, the right type, carries every scope — and never receives the
+approval, because the approval belongs to the other app. The boot line names
+which app the live token belongs to, and shouts if it isn't the one in
+Settings. Brad has confirmed **4457207527757824 ("city. nk autoi", Live)** is
+the one that has done everything; the second app has been archived.
+
 **`pages_read_engagement` was not in the submission, and the Live feed cannot
 work until it is granted.** This was got wrong once, at length: Brad was told
 three times to regenerate his Page token with the permission ticked. He did,

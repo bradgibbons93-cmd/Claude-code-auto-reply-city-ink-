@@ -38,6 +38,9 @@ interface Debug {
   scopes: string[];
   expiresAt?: Date;
   valid: boolean;
+  /** Which Meta app issued this token, and what that app is called. */
+  appId?: string;
+  appName?: string;
 }
 
 /** Ask Facebook what a token is, using the app's own credentials. */
@@ -59,10 +62,47 @@ export async function describeToken(
       scopes: Array.isArray(info.scopes) ? (info.scopes as string[]) : [],
       expiresAt: expires > 0 ? new Date(expires * 1000) : undefined,
       valid: info.is_valid !== false,
+      // Which app issued this token. debug_token has always returned it and
+      // this code threw it away — and a studio can easily have more than one
+      // Meta app. If the token comes from one app and the App Review
+      // submission sits on another, the approval never arrives and every
+      // symptom is identical to waiting.
+      appId: info.app_id != null ? String(info.app_id) : undefined,
+      appName: typeof info.application === "string" ? info.application : undefined,
     };
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Says which Meta app the saved token actually belongs to, and shouts if that
+ * is not the app the settings claim.
+ *
+ * A studio can have several apps — this one has two — and permissions,
+ * App Review and Advanced Access all belong to ONE of them. A token from the
+ * wrong app looks completely healthy in the debugger: valid, right type,
+ * every scope present. It just never gets the approval, because the approval
+ * was granted to a different app.
+ */
+export async function reportAppIdentity(
+  token: string | null | undefined,
+  configuredAppId: string | null | undefined,
+  appSecret: string | null | undefined
+): Promise<void> {
+  if (!token || !configuredAppId || !appSecret) return;
+  const facts = await describeToken(token, configuredAppId, appSecret).catch(() => undefined);
+  if (!facts) return;
+  const named = facts.appName ? ` ("${facts.appName}")` : "";
+  if (facts.appId && facts.appId !== String(configuredAppId).trim()) {
+    console.error(
+      `[Facebook] The saved Page token was issued by app ${facts.appId}${named}, ` +
+        `but Settings says the app is ${configuredAppId}. Permissions and App Review belong to ` +
+        "one app — if the submission is on the other one, approval will never reach this token."
+    );
+    return;
+  }
+  console.log(`[Facebook] Page token belongs to app ${facts.appId ?? configuredAppId}${named}`);
 }
 
 /** Short-lived → long-lived. Works on a user token; harmless on others. */

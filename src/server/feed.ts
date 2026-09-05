@@ -34,6 +34,8 @@ interface TokenFacts {
   scopes: string[];
   issuedAt?: Date;
   valid: boolean;
+  appId?: string;
+  appName?: string;
 }
 
 /**
@@ -62,6 +64,10 @@ async function inspectToken(
       scopes: Array.isArray(info.scopes) ? (info.scopes as string[]) : [],
       issuedAt: info.issued_at ? new Date(info.issued_at * 1000) : undefined,
       valid: info.is_valid !== false,
+      // Which app issued it. A studio can have more than one Meta app, and
+      // App Review belongs to exactly one of them.
+      appId: info.app_id != null ? String(info.app_id) : undefined,
+      appName: typeof info.application === "string" ? info.application : undefined,
     };
   } catch {
     return undefined;
@@ -262,7 +268,8 @@ export async function syncFeed(days = BACKFILL_DAYS): Promise<FeedSyncResult> {
   const facts = await inspectToken(token, config.appId, config.appSecret);
   if (facts) {
     console.warn(
-      `[Feed] Saved token: type=${facts.type ?? "unknown"} valid=${facts.valid} ` +
+      `[Feed] Saved token: app=${facts.appId ?? "unknown"}${facts.appName ? ` (${facts.appName})` : ""} ` +
+        `type=${facts.type ?? "unknown"} valid=${facts.valid} ` +
         `issued=${facts.issuedAt?.toISOString() ?? "unknown"} scopes=${facts.scopes.join(",") || "none"}`
     );
   }
