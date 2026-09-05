@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
 import { getDb } from "./db.js";
 import { artistUploads } from "../drizzle/schema.js";
+import { shrinkPhoto, STUDIO_PHOTO } from "./images.js";
 
 /**
  * The artists' end-of-day photos.
@@ -32,9 +33,18 @@ export async function saveArtistUpload(input: {
     throw new UploadRejected("That photo is over 8MB — try one straight from the camera roll.");
   }
 
+  // Eight megabytes off a phone camera, a few times a day, kept forever —
+  // this is half of why the database only ever grew. Re-encoded before it is
+  // hashed, so the id still describes the bytes actually stored and the same
+  // photo sent twice still collapses onto one row.
+  const shrunk = await shrinkPhoto(input.bytes, contentType, STUDIO_PHOTO);
+  if (!shrunk.original) {
+    console.log(`[Uploads] Photo from ${input.artistName?.trim() || "an artist"}: ${shrunk.detail}`);
+  }
+
   // Content-addressed: the same photo sent twice is stored once, so a
   // double-tap on a slow connection can't fill the grid with duplicates.
-  const id = crypto.createHash("sha256").update(input.bytes).digest("hex").slice(0, 40);
+  const id = crypto.createHash("sha256").update(shrunk.bytes).digest("hex").slice(0, 40);
 
   const db = await getDb();
   await db
@@ -43,8 +53,8 @@ export async function saveArtistUpload(input: {
       id,
       artistName: input.artistName?.trim().slice(0, 190) || null,
       note: input.note?.trim().slice(0, 2000) || null,
-      contentType,
-      bytes: input.bytes,
+      contentType: shrunk.contentType,
+      bytes: shrunk.bytes,
     })
     .onDuplicateKeyUpdate({
       // A re-send should refresh who sent it, not error.

@@ -7,6 +7,7 @@ import { draftForUnanswered } from "./agent.js";
 import { notifyOnce, clearAlert } from "./push.js";
 import { getFacebookConfig, getWebhookRejections } from "./db.js";
 import { describeToken } from "./token.js";
+import { pruneStoredImages } from "./housekeeping.js";
 
 /**
  * Runs every minute. Each post is flipped to "draft" before publishing so a
@@ -149,6 +150,28 @@ export function startScheduler() {
       }
     } catch (error) {
       console.error("[Watch] Health check failed:", (error as Error).message);
+    }
+  });
+
+  /**
+   * Take out what the database no longer needs, once a night.
+   *
+   * Nothing in this app ever deleted an image, so the MySQL volume climbed to
+   * 75% and had to be resized — which buys time and fixes nothing, because
+   * the only direction it ever moved was up.
+   *
+   * 16:00 UTC is two or three in the morning in Geelong: nobody is uploading,
+   * nobody is reading the feed, and a delete that briefly locks a row costs
+   * nothing. What it removes and why each one is safe is in housekeeping.ts —
+   * the short version is that a customer's reference photo is never a
+   * candidate, and everything that is can be re-fetched or was already junk.
+   */
+  cron.schedule("42 16 * * *", async () => {
+    try {
+      const report = await pruneStoredImages();
+      console.log(`[Housekeeping] ${report.detail}`);
+    } catch (error) {
+      console.error("[Housekeeping] Nightly clear-out failed:", (error as Error).message);
     }
   });
 

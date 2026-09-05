@@ -29,14 +29,29 @@ const app = express();
  * BUG FIX #1 (the other half) — Facebook signs the exact bytes it sends.
  * This keeps a copy of them before the JSON parser touches anything.
  */
-app.use(
-  express.json({
-    limit: "5mb",
-    verify: (req, _res, buf) => {
-      (req as RawBodyRequest).rawBody = buf;
-    },
-  })
-);
+const globalJson = express.json({
+  limit: "5mb",
+  verify: (req, _res, buf) => {
+    (req as RawBodyRequest).rawBody = buf;
+  },
+});
+
+/**
+ * The two photo routes below set their own, much larger, body limit — and
+ * until now they never got to use it. The parser above used to be mounted on
+ * everything, so a photo over about 3.7MB (5MB once it is base64) was refused
+ * here with Express's own HTML "Payload Too Large" page, before the route
+ * with the 24MB limit was ever reached. An artist photographing a piece
+ * on any recent phone was hitting that every time, and the message the code
+ * apologises with — "that photo is over 8MB" — was never the reason.
+ *
+ * So those two paths are stepped over, and keep the limit they declare.
+ */
+const PHOTO_ROUTES = new Set(["/api/uploads", "/api/post-image"]);
+app.use((req, res, next) => {
+  if (PHOTO_ROUTES.has(req.path)) return next();
+  return globalJson(req, res, next);
+});
 app.use(express.urlencoded({ extended: true }));
 
 // Before the guard: Meta has to be able to reach the webhook, and the
