@@ -197,6 +197,30 @@ against — id, first sixty characters, and when it was said — because "which
 message is this card actually about" was the question that could not be
 answered from the outside.
 
+**The thread view asked for the OLDEST fifty messages, so a long
+conversation showed the studio ancient history.** Brad, with two screenshots:
+Maureen's card headed
+
+> THEY SAID: When you get a chance, I would like to request quote for those
+> please
+
+dated two days ago, above a draft that correctly answered what she had asked
+twenty minutes earlier ("Does that include the 'P' by any chance?"). His
+words: *"The reply we drafted is right, but I'm only seeing her last message
+before the most recent one, it should always show her most recent message."*
+
+`getConversationMessages` ordered ASC and then `LIMIT 50` — which on a thread
+with more than fifty messages returns the first fifty ever sent and drops
+everything since. The card looks up the message its draft was written for;
+that message wasn't in the window, so the client fell back to "the newest
+customer message I can see", and on a truncated window that is whatever was
+being said days ago.
+
+`getRecentTurns`, which is what the agent reads, had always taken the newest
+and reversed. That is exactly why the draft was right and the heading above it
+was wrong — two readers of the same thread, one of them looking at the wrong
+end of it. DESC, limit, then reverse, so callers still get oldest-first.
+
 **A refresh button and "Updated 12s ago" sit above the board.** It already
 refetched every ten seconds; there was simply no way to SEE that, so a wrong
 card was indistinguishable from an old one and the first suspicion was always

@@ -435,14 +435,34 @@ export async function getRecentConversations(limit = 250) {
   }));
 }
 
+/**
+ * The most recent N messages on a thread, oldest first for reading.
+ *
+ * This used to order ASC and then LIMIT, which returns the OLDEST fifty
+ * messages of a long conversation and silently drops everything since. On a
+ * thread with more than fifty messages the studio was looking at ancient
+ * history and could not see what the customer had just said.
+ *
+ * It surfaced as a draft card carrying the wrong question. The card asks for
+ * the message the draft was written for; that message wasn't in the window,
+ * so the client fell back to "the newest customer message I can see" — which
+ * was two days old. Maureen's card read as a request for a quote she had
+ * already been quoted for, above a draft that correctly answered the question
+ * she had actually just asked. The draft was right; the thread window was
+ * wrong. `getRecentTurns` a few lines down had always done this correctly,
+ * which is why the agent saw the right message and the screen didn't.
+ *
+ * DESC to take the newest, then reversed, so callers still get oldest-first.
+ */
 export async function getConversationMessages(conversationId: string, limit = 50) {
   const db = await getDb();
-  return db
+  const rows = await db
     .select()
     .from(messengerMessages)
     .where(eq(messengerMessages.conversationId, conversationId))
-    .orderBy(asc(messengerMessages.createdAt), asc(messengerMessages.id))
+    .orderBy(desc(messengerMessages.createdAt), desc(messengerMessages.id))
     .limit(limit);
+  return rows.reverse();
 }
 
 /** Last N turns, oldest first — this is what gives the agent memory. */
