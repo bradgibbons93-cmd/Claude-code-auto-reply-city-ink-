@@ -18,12 +18,15 @@ import { format } from "date-fns";
 import PostPreview from "@/components/PostPreview";
 import PostImagePicker from "@/components/PostImagePicker";
 import PostCalendar from "@/components/PostCalendar";
+import BulkScheduler from "@/components/BulkScheduler";
 
+// Palette only. A blue "scheduled" pill and a red "failed" one were the two
+// colours on the Posts page that weren't the studio's.
 const STATUS_STYLES: Record<string, string> = {
   published: "border-success/40 bg-success/10 text-success",
-  scheduled: "border-blue-500/50 bg-blue-500/20 text-blue-400",
-  draft: "border-sepia/45 bg-beige/30 text-charcoal",
-  failed: "border-red-500/50 bg-red-500/20 text-red-400",
+  scheduled: "border-sepia/50 bg-sepia/15 text-sepia",
+  draft: "border-border bg-beige/30 text-muted-foreground",
+  failed: "border-destructive/50 bg-destructive/10 text-destructive",
 };
 
 export default function PostScheduler() {
@@ -107,6 +110,8 @@ export default function PostScheduler() {
           </p>
         </div>
 
+        <div className="flex flex-wrap items-center gap-2">
+        <BulkScheduler onScheduled={() => refetch()} />
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
           <DialogTrigger>
             <Button>
@@ -178,6 +183,7 @@ export default function PostScheduler() {
             </div>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       <Card className="border-border">
@@ -240,9 +246,7 @@ export default function PostScheduler() {
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge className={STATUS_STYLES[post.status]}>{post.status}</Badge>
                     {post.aiGenerated && (
-                      <Badge className="border-purple-500/50 bg-purple-500/20 text-purple-400">
-                        AI drafted
-                      </Badge>
+                      <Badge className="border-ink/45 bg-ink/10 text-ink">AI drafted</Badge>
                     )}
                   </div>
                   <Button
@@ -272,7 +276,10 @@ export default function PostScheduler() {
                 </p>
 
                 {post.status === "failed" && post.lastError && (
-                  <p className="mt-2 text-sm text-red-400">Facebook said: {post.lastError}</p>
+                  // Explained server-side now, so this is a sentence rather than a
+                  // Graph dump — "Facebook said:" in front of it read like the
+                  // app was quoting an error it hadn't understood.
+                  <p className="mt-2 text-sm text-destructive">{post.lastError}</p>
                 )}
               </CardContent>
             </Card>

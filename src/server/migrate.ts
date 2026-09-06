@@ -156,6 +156,23 @@ const STATEMENTS = [
     KEY upload_created_idx (created_at)
   )`,
 
+  `CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id VARCHAR(64) PRIMARY KEY,
+    endpoint TEXT NOT NULL,
+    p256dh VARCHAR(255) NOT NULL,
+    auth VARCHAR(255) NOT NULL,
+    label VARCHAR(191),
+    last_sent_at TIMESTAMP NULL,
+    failures INT DEFAULT 0,
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS app_settings (
+    name VARCHAR(64) PRIMARY KEY,
+    value TEXT,
+    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  )`,
+
   `CREATE TABLE IF NOT EXISTS example_exchanges (
     id INT AUTO_INCREMENT PRIMARY KEY,
     customer_message TEXT NOT NULL,
@@ -189,13 +206,26 @@ const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "messenger_conversations", column: "booking_dates", ddl: "VARCHAR(255)" },
   { table: "messenger_conversations", column: "booking_photo_urls", ddl: "JSON" },
   { table: "messenger_conversations", column: "booking_notified_at", ddl: "TIMESTAMP NULL" },
+  { table: "messenger_conversations", column: "last_notified_at", ddl: "TIMESTAMP NULL" },
+  { table: "messenger_conversations", column: "bot_pause_reason", ddl: "VARCHAR(16)" },
   { table: "facebook_config", column: "owner_psid", ddl: "VARCHAR(191)" },
   { table: "timely_config", column: "calendar_ics_url", ddl: "VARCHAR(1024)" },
   { table: "pending_replies", column: "is_sensitive", ddl: "BOOLEAN DEFAULT FALSE" },
   { table: "messenger_messages", column: "attachment_urls", ddl: "JSON" },
   { table: "pending_replies", column: "alternatives", ddl: "JSON" },
   { table: "pending_replies", column: "llm_failed", ddl: "BOOLEAN DEFAULT FALSE" },
+  { table: "pending_replies", column: "send_error", ddl: "TEXT" },
   { table: "facebook_config", column: "instagram_access_token", ddl: "TEXT" },
+  // Kept in the database, not in memory. Held in a module variable it reset on
+  // every deploy, so the delivery panel said "nothing has ever arrived" minutes
+  // after a push — which reads as a dead webhook when nothing is wrong at all.
+  { table: "facebook_config", column: "instagram_token_host", ddl: "VARCHAR(16)" },
+  { table: "facebook_config", column: "instagram_app_secret", ddl: "VARCHAR(255)" },
+  { table: "facebook_config", column: "last_delivery_at", ddl: "TIMESTAMP NULL" },
+  { table: "facebook_config", column: "last_rejected_at", ddl: "TIMESTAMP NULL" },
+  { table: "facebook_config", column: "rejected_count", ddl: "INT DEFAULT 0" },
+  { table: "facebook_config", column: "last_rejection_detail", ddl: "VARCHAR(255)" },
+  { table: "facebook_config", column: "last_delivery_kind", ddl: "VARCHAR(64)" },
   {
     table: "messenger_conversations",
     column: "platform",
@@ -216,6 +246,51 @@ async function ensureColumns(): Promise<void> {
       await db.execute(sql.raw(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`));
       console.log(`[DB] Added column ${table}.${column}`);
     }
+  }
+}
+
+/**
+ * Un-stick threads the handoff pause swallowed.
+ *
+ * Answering a customer by hand from Meta's own inbox muted the thread for
+ * twelve hours, and when the customer wrote back the app said nothing —
+ * no draft, no notification, and a dashboard reading "All caught up" over an
+ * inbox full of unread messages. That is fixed going forward, but the
+ * threads already sitting paused would stay silent until their timer ran
+ * out, and the messages inside them have no second webhook coming.
+ *
+ * So: any thread still paused automatically, where the customer has spoken
+ * since, is released. The next poll drafts for them. A pause the studio set
+ * by hand is left exactly where it is.
+ */
+async function liftStaleHandoffPauses(): Promise<void> {
+  const db = await getDb();
+  const [result] = (await db.execute(
+    sql.raw(`UPDATE messenger_conversations c
+                JOIN (
+                  SELECT m1.conversation_id, m1.sender_type
+                    FROM messenger_messages m1
+                    JOIN (
+                      SELECT conversation_id,
+                             SUBSTRING_INDEX(
+                               GROUP_CONCAT(id ORDER BY created_at DESC, id DESC), ',', 1
+                             ) AS last_id
+                        FROM messenger_messages
+                       GROUP BY conversation_id
+                    ) t ON t.last_id = m1.id
+                ) last ON last.conversation_id = c.conversation_id
+                 SET c.bot_paused_until = NULL, c.bot_pause_reason = NULL
+               WHERE c.bot_paused_until IS NOT NULL
+                 AND c.bot_paused_until > NOW()
+                 AND last.sender_type = 'customer'
+                 AND (c.bot_pause_reason IS NULL OR c.bot_pause_reason <> 'manual')`)
+  )) as unknown as [{ affectedRows?: number }];
+
+  const freed = Number(result?.affectedRows ?? 0);
+  if (freed) {
+    console.log(
+      `[DB] Released ${freed} thread(s) that were muted by the handoff pause while the customer was waiting`
+    );
   }
 }
 
@@ -321,6 +396,7 @@ export async function ensureTables(): Promise<void> {
     await db.execute(sql.raw(statement));
   }
   await ensureColumns();
+  await liftStaleHandoffPauses();
   await repairFailedDrafts();
   await clearPlaceholderNames();
   await repairConversationClocks();

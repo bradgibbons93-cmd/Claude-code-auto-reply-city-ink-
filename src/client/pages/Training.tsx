@@ -129,6 +129,25 @@ export default function Training() {
 
   const importHistory = trpc.history.import.useMutation();
 
+  // Learn from the threads the app already holds, rather than only from a
+  // file someone remembered to export.
+  const learnFromInbox = trpc.history.learnFromInbox.useMutation({
+    onSuccess: (r) => {
+      if (r.imported > 0) {
+        toast.success(
+          `Learned ${r.imported} more exchange${r.imported === 1 ? "" : "s"} from the inbox`,
+          { duration: 8000 }
+        );
+      } else if (r.found > 0) {
+        toast(`Already learned all ${r.found} of them`, { duration: 6000 });
+      } else {
+        toast("No question-and-answer pairs in the inbox yet", { duration: 6000 });
+      }
+      utils.history.count.invalidate();
+    },
+    onError: (e) => toast.error(e.message || "Couldn't read the inbox."),
+  });
+
   /**
    * Parses each exported thread in the browser and sends only the extracted
    * pairs, so a folder of large JSON files never has to be uploaded whole.
@@ -346,6 +365,28 @@ export default function Training() {
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
+          {/* The inbox this app already holds is a bigger and better teacher
+              than anything anyone remembers to upload, and it was going
+              unused. One button, safe to press twice — duplicates are dropped
+              on the fingerprint. */}
+          <div className="rounded-lg border border-border bg-beige/20 p-3">
+            <p className="text-xs text-muted-foreground">
+              Every thread already in the inbox is a lesson: a customer's question and the
+              answer the studio actually typed. This reads all of them. It only learns from
+              replies a person wrote — never from the agent's own drafts, which would just
+              teach it its own habits.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              onClick={() => learnFromInbox.mutate()}
+              disabled={learnFromInbox.isPending}
+            >
+              {learnFromInbox.isPending ? "Reading the inbox…" : "Learn from every chat we already have"}
+            </Button>
+          </div>
+
           <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-border bg-surface px-4 py-8 text-center transition-colors hover:border-sepia">
             <Upload className="mb-2 h-5 w-5 text-sepia" />
             <span className="text-sm text-charcoal">

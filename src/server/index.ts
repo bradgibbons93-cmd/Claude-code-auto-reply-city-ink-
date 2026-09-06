@@ -13,7 +13,9 @@ import { readAttachment, saveImageBytes, UnsupportedImage } from "./attachments.
 import { saveArtistUpload, readArtistUpload, UploadRejected } from "./uploads.js";
 import { syncFeed, countFeed } from "./feed.js";
 import QRCode from "qrcode";
-import { getLastLlmError, llmProvider, llmModel, llmBaseUrl } from "./llm.js";
+import { getLastLlmError, llmProvider, llmModel, llmBaseUrl, reportModelAvailability } from "./llm.js";
+import { reportPushReadiness } from "./push.js";
+import { reportAppIdentity } from "./token.js";
 import { mountAuth, requireStudio, requireStudioOrSignedLink } from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -28,14 +30,29 @@ const app = express();
  * BUG FIX #1 (the other half) — Facebook signs the exact bytes it sends.
  * This keeps a copy of them before the JSON parser touches anything.
  */
-app.use(
-  express.json({
-    limit: "5mb",
-    verify: (req, _res, buf) => {
-      (req as RawBodyRequest).rawBody = buf;
-    },
-  })
-);
+const globalJson = express.json({
+  limit: "5mb",
+  verify: (req, _res, buf) => {
+    (req as RawBodyRequest).rawBody = buf;
+  },
+});
+
+/**
+ * The two photo routes below set their own, much larger, body limit — and
+ * until now they never got to use it. The parser above used to be mounted on
+ * everything, so a photo over about 3.7MB (5MB once it is base64) was refused
+ * here with Express's own HTML "Payload Too Large" page, before the route
+ * with the 24MB limit was ever reached. An artist photographing a piece
+ * on any recent phone was hitting that every time, and the message the code
+ * apologises with — "that photo is over 8MB" — was never the reason.
+ *
+ * So those two paths are stepped over, and keep the limit they declare.
+ */
+const PHOTO_ROUTES = new Set(["/api/uploads", "/api/post-image"]);
+app.use((req, res, next) => {
+  if (PHOTO_ROUTES.has(req.path)) return next();
+  return globalJson(req, res, next);
+});
 app.use(express.urlencoded({ extended: true }));
 
 // Before the guard: Meta has to be able to reach the webhook, and the
@@ -90,7 +107,15 @@ app.post("/api/uploads", express.json({ limit: "24mb" }), async (req, res) => {
   }
 });
 
-app.get<{ id: string }>("/api/uploads/:id", requireStudio, async (req, res) => {
+/**
+ * A gallery photo. Studio-only, or a link the publisher signed.
+ *
+ * The signed variant matters because these are now postable: Facebook comes
+ * and collects the picture itself, with no cookie, so behind a password
+ * every bulk-scheduled post would have failed on Facebook's side of the
+ * fetch — invisibly, the same way the attachments route did.
+ */
+app.get<{ id: string }>("/api/uploads/:id", requireStudioOrSignedLink, async (req, res) => {
   try {
     const upload = await readArtistUpload(req.params.id);
     if (!upload) return res.sendStatus(404);
@@ -115,7 +140,7 @@ app.get("/api/upload-qr.png", requireStudio, async (req, res) => {
       width: 720,
       margin: 2,
       errorCorrectionLevel: "M",
-      color: { dark: "#2B2622", light: "#FFFFFF" },
+      color: { dark: "#6F5A4B", light: "#FFFFFF" },
     });
     res.setHeader("Content-Type", "image/png");
     res.setHeader("Cache-Control", "public, max-age=86400");
@@ -251,6 +276,24 @@ app.listen(port, async () => {
   countFeed()
     .then((count) => (count === 0 ? syncFeed() : undefined))
     .catch((error) => console.error("[Feed] Backfill failed:", (error as Error).message));
+
+  // Say now whether the configured model is one this key can actually use.
+  // Finding that out from an empty draft box with a customer waiting is how
+  // it went the first time.
+  reportModelAvailability().catch(() => undefined);
+
+  // And whether a notification could reach anyone at all. A customer wrote in,
+  // a draft was written, and the phone stayed silent — findable afterwards
+  // only by the absence of a log line, which is no way to find anything.
+  reportPushReadiness().catch(() => undefined);
+
+  // And which Meta app the saved Page token actually belongs to. This studio
+  // has two apps; permissions and App Review belong to one of them, and a
+  // token from the wrong one looks perfectly healthy while never receiving
+  // the approval being waited on.
+  getFacebookConfig()
+    .then((c) => reportAppIdentity(c?.pageAccessToken, c?.appId, c?.appSecret))
+    .catch(() => undefined);
 
   startScheduler();
 });
