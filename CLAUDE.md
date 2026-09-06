@@ -197,6 +197,41 @@ against — id, first sixty characters, and when it was said — because "which
 message is this card actually about" was the question that could not be
 answered from the outside.
 
+**A message the studio has already decided about kept coming back round,
+and the poll paid the model to write a draft it could never store.** Found in
+the live log a minute after a deploy, on a real Instagram thread with a real
+customer waiting:
+
+    [Agent] Drafting for 1387883430218440 against "(sent a photo)" (...)
+    [Agent] Bulk draft: 0 written, 0 failed
+
+It says it is drafting and then writes nothing — every poll, for ever, and
+"0 failed" reads as though there were simply nothing to do.
+
+`customer_message_id` is unique. Once a draft has been approved or discarded
+its row keeps that id, so a second draft for the same message is refused by
+the index and `createPendingReply` returns false. But there is no *pending*
+row left, so `getUnansweredConversations` went on listing the thread — and
+`draftForUnanswered` composed a fresh reply, a real call to the model, before
+finding out it had nowhere to put it.
+
+This is the Instagram case specifically, and it is the ordinary one: an
+approved Instagram reply is refused on send, so it leaves no message of ours
+behind for the "did we answer after this draft" clause to see. Discard has to
+stick too, or the card Brad just dismissed comes straight back.
+
+The query now also skips a thread whose NEWEST customer message already
+carries a decided draft. Bounded to the newest message on purpose: the
+decision was about that message, never about the person — the moment she
+writes again the clause stops matching and she is back on the board, which is
+Brad's rule. `explainNotUnanswered()` names this case too, so the log tells it
+apart from a stale draft.
+
+`unanswered.mjs` had an assertion that only passed *because* of the loop — it
+asserted the sentence printed at the bottom of the wasted pass. That is the
+same shape as `sendfail.mjs` holding the wrong wording in place. It accepts
+either sentence now and additionally asserts that no model call is made.
+
 **The thread view asked for the OLDEST fifty messages, so a long
 conversation showed the studio ancient history.** Brad, with two screenshots:
 Maureen's card headed

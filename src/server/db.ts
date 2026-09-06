@@ -184,7 +184,7 @@ export async function getUnansweredConversations(limit = 20, newerThanMinutes?: 
     sql`SELECT c.conversation_id AS conversationId
           FROM messenger_conversations c
           JOIN (
-            SELECT m1.conversation_id, m1.sender_type
+            SELECT m1.conversation_id, m1.sender_type, m1.message_id
               FROM messenger_messages m1
               JOIN (
                 SELECT conversation_id,
@@ -235,6 +235,34 @@ export async function getUnansweredConversations(limit = 20, newerThanMinutes?: 
                      AND r.sender_type IN ('bot', 'manual')
                      AND r.created_at > p.created_at
                 )
+           )
+           -- The studio has already made a decision about this exact
+           -- message: approved a reply to it, or discarded the draft.
+           --
+           -- Without this the thread never leaves the list. There is no
+           -- pending row left, so it reads as unanswered; the poll composes
+           -- a fresh draft — a real call to the model — and then cannot
+           -- store it, because customer_message_id is unique and the decided
+           -- row still holds it. The log says
+           --
+           --   [Agent] Drafting for 1387883430218440 against "(sent a photo)"
+           --   [Agent] Bulk draft: 0 written, 0 failed
+           --
+           -- which reads as "nothing to do", every poll, for ever. That is
+           -- a live Instagram thread: Instagram refuses every send, so an
+           -- approved draft leaves no reply of ours behind for the clause
+           -- above to see. And Discard has to stick — otherwise the card
+           -- Brad just dismissed comes straight back.
+           --
+           -- It is bounded to the newest message on purpose. A decision was
+           -- about that message, never about the person: the moment she
+           -- writes again this clause stops matching and she is back on the
+           -- board, which is Brad's rule.
+           AND NOT EXISTS (
+             SELECT 1 FROM pending_replies d
+              WHERE d.conversation_id = c.conversation_id
+                AND d.customer_message_id = last.message_id
+                AND d.status <> 'pending'
            )${recent}
          ORDER BY c.last_message_at DESC
          LIMIT ${limit}`
@@ -271,10 +299,14 @@ export async function explainNotUnanswered(limit = 5) {
                       WHERE r.conversation_id = c.conversation_id
                         AND r.sender_type IN ('bot', 'manual')
                         AND r.created_at > p.created_at
-                   )) AS liveDraftCount
+                   )) AS liveDraftCount,
+               (SELECT COUNT(*) FROM pending_replies d
+                 WHERE d.conversation_id = c.conversation_id
+                   AND d.customer_message_id = last.message_id
+                   AND d.status <> 'pending') AS decidedCount
           FROM messenger_conversations c
           JOIN (
-            SELECT m1.conversation_id, m1.sender_type
+            SELECT m1.conversation_id, m1.sender_type, m1.message_id
               FROM messenger_messages m1
               JOIN (
                 SELECT conversation_id,
@@ -295,6 +327,9 @@ export async function explainNotUnanswered(limit = 5) {
     if (Number(r.liveDraftCount) > 0) reasons.push("a draft is already waiting");
     if (Number(r.pendingCount) > 0 && Number(r.liveDraftCount) === 0) {
       reasons.push("only a stale draft, superseded by our own reply — a fresh one is due");
+    }
+    if (Number(r.decidedCount) > 0) {
+      reasons.push("this message has already been decided — approved or discarded");
     }
     if (r.pausedUntil && new Date(r.pausedUntil as string) > new Date() && r.pauseReason === "manual") {
       reasons.push("paused by hand");
