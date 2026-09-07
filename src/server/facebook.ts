@@ -6,6 +6,7 @@ import {
   getFacebookConfig,
   getConversationsMissingNamesWithPlatform,
   setConversationName,
+  setConversationAvatar,
   updatePageIdentity,
   realName,
 } from "./db.js";
@@ -806,6 +807,66 @@ interface InboxPage {
   paging?: { next?: string };
 }
 
+/**
+ * Ask for ONE person's thread instead of walking the whole inbox.
+ *
+ * This is Meta's own documented answer to error 2534084, "your query has
+ * timed out since you have too many conversations with users" — the error
+ * that has made this studio's Instagram history unreadable through three
+ * separate attempts to ask for less. Page size and field list were never the
+ * lever; the cost is Meta walking the edge. `user_id` means it never walks
+ * it: it goes straight to that one conversation.
+ *
+ * The app already knows the IGSID of everyone who has ever webhooked in, so
+ * the set of people worth asking about is sitting in the database. One call
+ * per unnamed person, no enumeration.
+ *
+ * Returns the participant who is not the Page.
+ */
+export async function getThreadParticipant(
+  userId: string,
+  platform: Platform = "instagram"
+): Promise<{ name?: string; avatarUrl?: string } | null> {
+  const endpoint = await endpointFor(platform);
+  if (!endpoint) return null;
+
+  const identity = await getPageIdentity().catch(() => null);
+
+  try {
+    const { data } = await axios.get<InboxPage>(`${endpoint.base}/me/conversations`, {
+      params: {
+        // Only graph.facebook.com splits the edge by platform; on Instagram's
+        // own host the conversations edge is already Instagram's.
+        ...(endpoint.base === IG_GRAPH ? {} : { platform: inboxParam(platform) }),
+        user_id: userId,
+        fields: "participants",
+        access_token: endpoint.token,
+      },
+      timeout: 12000,
+    });
+
+    for (const thread of data.data ?? []) {
+      for (const person of thread.participants?.data ?? []) {
+        if (!person.id || person.id === identity?.id) continue;
+        // Match the person asked about where the id is given; some responses
+        // name only the customer, which is the one we want anyway.
+        if (person.id !== userId && (thread.participants?.data?.length ?? 0) > 1) continue;
+        const named = realName(person.name);
+        const avatarUrl =
+          (person as { profile_pic?: string }).profile_pic ||
+          (person as { profile_picture_url?: string }).profile_picture_url;
+        if (named || avatarUrl) return { name: named || undefined, avatarUrl };
+      }
+    }
+    return null;
+  } catch (error) {
+    const detail = describeGraphError("conversations?user_id", error);
+    lastProfileError = { message: detail, at: new Date().toISOString() };
+    console.error(`[Facebook] ${platform} thread lookup for ${userId} failed — ${detail}`);
+    return null;
+  }
+}
+
 interface ThreadPage {
   data?: {
     id?: string;
@@ -1319,7 +1380,30 @@ export async function backfillCustomerNames(limit = 50): Promise<{
   // path their own inbox belongs to. Asking Instagram threads over the
   // Messenger route was how an Instagram permission error came to be
   // recorded against Facebook.
+  //
+  // Instagram gets asked by user_id FIRST. Its inbox list above cannot be
+  // walked at all — Meta times out on the edge with 2534084 — so for every
+  // Instagram thread `fromInbox` is empty and always has been. Asking for
+  // that one person's conversation is Meta's own documented way round it,
+  // and unlike the per-person profile lookup below it is not the call that
+  // has never once worked for this app.
   for (const thread of stillMissing) {
+    if (thread.platform === "instagram") {
+      const viaThread = await getThreadParticipant(thread.conversationId, "instagram");
+      if (viaThread?.name || viaThread?.avatarUrl) {
+        if (viaThread.name) await setConversationName(thread.conversationId, viaThread.name);
+        if (viaThread.avatarUrl) {
+          await setConversationAvatar(thread.conversationId, viaThread.avatarUrl).catch(
+            () => undefined
+          );
+        }
+        if (viaThread.name) {
+          named += 1;
+          continue;
+        }
+      }
+    }
+
     const profile = await getSenderProfile(thread.conversationId, thread.platform);
     if (profile?.name) {
       await setConversationName(thread.conversationId, profile.name);

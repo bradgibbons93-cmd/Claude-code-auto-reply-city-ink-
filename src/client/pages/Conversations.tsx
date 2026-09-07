@@ -58,6 +58,7 @@ function StatTile({
 function PendingReplyCard({
   draft,
   senderName,
+  avatarUrl,
   platform,
   onOpenThread,
 }: {
@@ -75,6 +76,7 @@ function PendingReplyCard({
   };
   senderName: string;
   platform?: string | null;
+  avatarUrl?: string | null;
   onOpenThread: (conversationId: string) => void;
 }) {
   const utils = trpc.useUtils();
@@ -97,9 +99,10 @@ function PendingReplyCard({
 
   // What the customer actually said, so the draft can be judged without
   // having to go hunting for the thread first.
-  const { data: thread } = trpc.conversations.messages.useQuery({
+  const { data: threadPage } = trpc.conversations.messages.useQuery({
     conversationId: draft.conversationId,
   });
+  const thread = threadPage?.messages;
   // The message this draft was actually written for. Showing the newest
   // message in the thread instead made correct drafts look wrong — a reply to
   // "where are you located" was labelled with a later "how much is this",
@@ -237,7 +240,7 @@ function PendingReplyCard({
             onClick={() => onOpenThread(draft.conversationId)}
             className="flex min-w-0 items-center gap-2 text-left"
           >
-            <Avatar name={senderName} className="h-7 w-7" />
+            <Avatar name={senderName} src={avatarUrl} className="h-7 w-7" />
             {/* Which inbox this reply goes back to. Brad works both and needs
                 to know which conversation he's in without opening it. */}
             {platform === "instagram" ? (
@@ -418,10 +421,24 @@ export default function Conversations() {
   const { data: conversations, refetch } = trpc.conversations.list.useQuery(undefined, {
     refetchInterval: 20000,
   });
-  const { data: messages } = trpc.conversations.messages.useQuery(
-    { conversationId: selected ?? "" },
+  // How far back the thread view is currently reading. Null means "the most
+  // recent window"; a number is the oldest message id already on screen, and
+  // the query then fetches the window before it.
+  //
+  // `windowSize` grows instead of stitching pages together in state. It keeps
+  // the ten-second refetch honest — a stitched list would have to decide what
+  // to do with a new message arriving while the studio is scrolled back
+  // through last month, and asking for a bigger window has no such problem.
+  const [windowSize, setWindowSize] = useState(50);
+  useEffect(() => setWindowSize(50), [selected]);
+
+  const { data: threadPage } = trpc.conversations.messages.useQuery(
+    { conversationId: selected ?? "", limit: windowSize },
     { enabled: !!selected, refetchInterval: 10000 }
   );
+  const messages = threadPage?.messages;
+  const totalMessages = threadPage?.total ?? 0;
+  const hasOlder = totalMessages > (messages?.length ?? 0);
   const {
     data: pendingReplies,
     refetch: refetchPending,
@@ -503,6 +520,8 @@ export default function Conversations() {
   const active = conversations?.find((c) => c.conversationId === selected);
   const senderNameFor = (conversationId: string) =>
     conversations?.find((c) => c.conversationId === conversationId)?.senderName || "a customer";
+  const avatarFor = (conversationId: string) =>
+    conversations?.find((c) => c.conversationId === conversationId)?.avatarUrl ?? null;
 
   const waiting = pendingReplies?.length ?? 0;
   const sensitiveCount = pendingReplies?.filter((d) => d.isSensitive).length ?? 0;
@@ -582,6 +601,7 @@ export default function Conversations() {
                 key={draft.id}
                 draft={draft}
                 senderName={senderNameFor(draft.conversationId)}
+                avatarUrl={avatarFor(draft.conversationId)}
                 platform={
                   conversations?.find((c) => c.conversationId === draft.conversationId)?.platform
                 }
@@ -650,7 +670,7 @@ export default function Conversations() {
                     : "border-border bg-card hover:border-beige hover:shadow-soft"
                 )}
               >
-                <Avatar name={c.senderName || "?"} />
+                <Avatar name={c.senderName || "?"} src={c.avatarUrl} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
                     <span className="flex min-w-0 items-center gap-1.5">
@@ -716,7 +736,7 @@ export default function Conversations() {
             <div className="space-y-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <Avatar name={active?.senderName || "Customer"} />
+                  <Avatar name={active?.senderName || "Customer"} src={active?.avatarUrl} />
                   <h2 className="font-display text-lg tracking-[0.08em] text-charcoal">
                     {active?.senderName || "Customer"}
                   </h2>
@@ -741,6 +761,30 @@ export default function Conversations() {
               </div>
 
               <div className="space-y-3">
+                {/* Older messages, on request. The thread opens on the most
+                    recent fifty — the studio nearly always wants the bottom
+                    of a conversation — and reaches further back only when
+                    asked, so a customer with a year of history doesn't cost
+                    a year of messages on every open. */}
+                {hasOlder && (
+                  <div className="flex flex-col items-center gap-1 pb-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setWindowSize((n) => n + 50)}
+                    >
+                      Load older messages
+                    </Button>
+                    <span className="text-[0.7rem] text-muted-foreground">
+                      Showing the last {messages?.length ?? 0} of {totalMessages}
+                    </span>
+                  </div>
+                )}
+                {!hasOlder && totalMessages > 50 && (
+                  <p className="pb-1 text-center text-[0.7rem] text-muted-foreground">
+                    The start of the conversation — all {totalMessages} messages
+                  </p>
+                )}
                 {messages?.map((m) => (
                   <div
                     key={m.id}

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import {
@@ -355,6 +355,19 @@ export async function getConversation(conversationId: string) {
   return row;
 }
 
+/**
+ * Cache a profile picture URL. Meta's picture links expire, so this is worth
+ * refreshing rather than trusting for ever — and it is frequently absent,
+ * which is why the Avatar falls back to initials instead of a broken image.
+ */
+export async function setConversationAvatar(conversationId: string, avatarUrl: string) {
+  const db = await getDb();
+  await db
+    .update(messengerConversations)
+    .set({ avatarUrl })
+    .where(eq(messengerConversations.conversationId, conversationId));
+}
+
 export async function setConversationName(conversationId: string, senderName: string) {
   const db = await getDb();
   await db
@@ -489,15 +502,42 @@ export async function getRecentConversations(limit = 250) {
  *
  * DESC to take the newest, then reversed, so callers still get oldest-first.
  */
-export async function getConversationMessages(conversationId: string, limit = 50) {
+export async function getConversationMessages(
+  conversationId: string,
+  limit = 50,
+  /**
+   * Row id to read backwards from, for "load older". The client hands back
+   * the id of the oldest message it currently holds and gets the window
+   * before it. Paged by row id rather than by an offset because an offset
+   * shifts under you the moment a new message arrives mid-scroll.
+   */
+  beforeId?: number
+) {
   const db = await getDb();
+  const where = beforeId
+    ? and(
+        eq(messengerMessages.conversationId, conversationId),
+        lt(messengerMessages.id, beforeId)
+      )
+    : eq(messengerMessages.conversationId, conversationId);
+
   const rows = await db
     .select()
     .from(messengerMessages)
-    .where(eq(messengerMessages.conversationId, conversationId))
+    .where(where)
     .orderBy(desc(messengerMessages.createdAt), desc(messengerMessages.id))
     .limit(limit);
   return rows.reverse();
+}
+
+/** How many messages the thread holds, so the view knows if more exist. */
+export async function countConversationMessages(conversationId: string): Promise<number> {
+  const db = await getDb();
+  const [row] = await db
+    .select({ n: sql<number>`COUNT(*)` })
+    .from(messengerMessages)
+    .where(eq(messengerMessages.conversationId, conversationId));
+  return Number(row?.n ?? 0);
 }
 
 /** Last N turns, oldest first — this is what gives the agent memory. */

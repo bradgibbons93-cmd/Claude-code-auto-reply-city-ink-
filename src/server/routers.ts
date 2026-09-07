@@ -4,6 +4,7 @@ import {
   getRecentConversations,
   searchInbox,
   getConversationMessages,
+  countConversationMessages,
   getActiveAutoReplyRules,
   createAutoReplyRule,
   deleteAutoReplyRule,
@@ -170,8 +171,23 @@ export const appRouter = t.router({
   conversations: t.router({
     list: publicProcedure.query(() => getRecentConversations()),
     messages: publicProcedure
-      .input(z.object({ conversationId: z.string() }))
-      .query(({ input }) => getConversationMessages(input.conversationId)),
+      .input(
+        z.object({
+          conversationId: z.string(),
+          // "Load older": the id of the oldest message the view already has.
+          beforeId: z.number().optional(),
+          limit: z.number().min(1).max(200).default(50),
+        })
+      )
+      .query(async ({ input }) => {
+        const messages = await getConversationMessages(
+          input.conversationId,
+          input.limit,
+          input.beforeId
+        );
+        const total = await countConversationMessages(input.conversationId);
+        return { messages, total };
+      }),
     pause: publicProcedure
       .input(z.object({ conversationId: z.string(), hours: z.number().default(12) }))
       // Pressed by a person, so it is obeyed even when the customer writes

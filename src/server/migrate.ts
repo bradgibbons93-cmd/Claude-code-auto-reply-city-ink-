@@ -208,6 +208,7 @@ const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "messenger_conversations", column: "booking_notified_at", ddl: "TIMESTAMP NULL" },
   { table: "messenger_conversations", column: "last_notified_at", ddl: "TIMESTAMP NULL" },
   { table: "messenger_conversations", column: "bot_pause_reason", ddl: "VARCHAR(16)" },
+  { table: "messenger_conversations", column: "avatar_url", ddl: "VARCHAR(1024)" },
   { table: "facebook_config", column: "owner_psid", ddl: "VARCHAR(191)" },
   { table: "timely_config", column: "calendar_ics_url", ddl: "VARCHAR(1024)" },
   { table: "pending_replies", column: "is_sensitive", ddl: "BOOLEAN DEFAULT FALSE" },

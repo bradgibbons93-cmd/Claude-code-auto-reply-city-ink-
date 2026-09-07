@@ -37,6 +37,12 @@ export const messengerConversations = mysqlTable(
     conversationId: varchar("conversation_id", { length: 191 }).notNull(),
     senderName: varchar("sender_name", { length: 255 }),
     senderEmail: varchar("sender_email", { length: 255 }),
+    // A profile picture when Meta will give one. It usually won't: the
+    // per-person lookup is refused for this app, and Instagram only offers
+    // one through the conversations edge. Nullable on purpose — the Avatar
+    // falls back to initials, which is honest rather than a broken image.
+    // Meta's picture URLs also expire, so this is a cache, not a record.
+    avatarUrl: varchar("avatar_url", { length: 1024 }),
     // Messenger or Instagram DMs. Both arrive on the same webhook shape but
     // as different webhook objects, and the studio needs to know which
     // inbox a thread is really in.
