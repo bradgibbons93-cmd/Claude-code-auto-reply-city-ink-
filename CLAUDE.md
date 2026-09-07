@@ -586,70 +586,107 @@ of App Review, for this studio, is one permission:
 `instagram_manage_messages`. Everything below is the state of the submission
 that is meant to grant it.
 
-**Read from Meta's own API on 5 September, through the Meta Social
-Technologies MCP. This replaces every guess above it.**
+**Read from Meta's own API on 8 September, through the Meta Social
+Technologies MCP. This replaces every guess above it, and two of my own
+earlier readings of it.**
 
-`devtools_app_review` on app **4457207527757824** ("city. nk autoi"):
+**A submission asking for `instagram_manage_messages` is now PENDING** —
+the first one that has ever asked for the permission the live errors name:
 
-    submission_status: PENDING      submitted 26 August 2026
-    has_been_previously_reviewed: false      submissions: []
+    submission_status: PENDING     submission_id 4514855335326376
+    submitted 8 September 2026, 06:54 AEST
+    requested: instagram_manage_messages, instagram_basic
 
-**It has never been reviewed.** Every permission reads `REJECTED` with
-`access_level: none`, and every one of them has an EMPTY `rejection_reasons`
-object — that is the default state of a permission that has never been
-granted, not a decision anybody made. Nothing was turned down. Nothing has
-been looked at.
+**What the 6 September review actually decided.** Approved and live:
+`pages_messaging` at **advanced** access, `pages_show_list` and
+`business_management` at standard — all three re-confirmed by a renewal on
+8 September. Messenger is settled; nothing about Instagram threatens it.
+Rejected: `instagram_business_basic`, `instagram_business_manage_messages`,
+`pages_read_engagement`, `Human Agent`.
 
-**Every permission in the pending submission is missing its screencast.**
-This is the finding. All seven:
+Meta's rejection reason, in their words, for all four:
 
-    instagram_business_basic            screencast: NOT DONE
-    instagram_business_manage_messages  screencast: NOT DONE
-    pages_show_list                     screencast: NOT DONE
-    pages_messaging                     screencast: NOT DONE   api_precheck: NOT DONE
-    business_management                 screencast: NOT DONE   api_precheck: NOT DONE
-    pages_read_engagement               screencast: NOT DONE   api_precheck: NOT DONE
-    Human Agent                         screencast: NOT DONE
+> **Screencast Not Aligned with Use Case Details** (Developer Policy 1.6)
+> "the submitted screencast fails to demonstrate the end-to-end experience of
+> the use case described in the submission notes"
 
-A screencast is mandatory. The submission cannot pass in this state, and it
-has been sitting in the queue since 26 August waiting to fail. Everything
-else is done: use case written, data use checkup complete, privacy policy
-present, business verification passed, test page set.
+and their list of what a passing screencast must contain: the complete Meta
+login flow; a user granting app access; the end-to-end experience; **captions
+and tool-tips explaining what buttons do**; and — the important one for this
+app — *"if your app is a server-to-server app … indicate it in your next
+submission so that we're aware that frontend Meta login authentication flow is
+not visible."*
 
-**Two permissions the studio actually needs are NOT in the submission at
-all**, which is what was suspected here for a week and is now confirmed:
+**Two permissions in that submission were the wrong ones all along.**
+`instagram_business_basic` and `instagram_business_manage_messages` belong to
+Meta's **Instagram Login** flow. This app holds a **Page** token and every
+refusal names `instagram_manage_messages`. Different door. They have been
+dropped; do not put them back.
 
-- **`instagram_manage_messages`** — the exact string in every live refusal
-  (`(#200) App does not have Advanced Access to instagram_manage_messages`).
-  Not requested. The submission asks for `instagram_business_manage_messages`
-  instead, which belongs to Meta's other Instagram flow. Note that Meta's own
-  `Human Agent` prerequisites list BOTH, so both can be requested together.
-- **`pages_manage_posts`** — blocks publishing a scheduled post. Not
-  requested.
+**`pages_manage_posts` needs `pages_read_engagement`** as a hard prerequisite
+(Meta lists it under `prerequisite_privileges`). Posting was therefore pulled
+out of this submission rather than drag an unmet dependency through it. It
+goes in the next round, with `pages_read_engagement` alongside it.
 
-`pages_read_engagement` IS in the submission — an earlier note in this file
-said it wasn't, and that was wrong.
+**`Human Agent` cannot pass until the Instagram permissions do** — Meta lists
+its prerequisites as `instagram_business_manage_messages`,
+`instagram_manage_messages` and `pages_messaging`. It only widens the reply
+window from 24 hours to 7 days, so it is a nice-to-have, not a blocker.
 
-**`can_submit: false` — "Cannot submit to App Review while a previous
-submission is in review."** So the pending one has to be cancelled before
-anything can be added to it.
+**Two flags in `devtools_app_review requirements` are NOT trustworthy, and I
+misread both.**
 
-### What has to happen, in order
+- **`screencast: is_completed: false` does not mean no video is attached.** It
+  read `false` for `pages_messaging`, which was *approved*, and it read
+  `false` after a video was demonstrably embedded in the submission. It
+  appears to describe a checklist for building a *new* submission, not the
+  state of the one that was sent. I told Brad "not one permission had a
+  screencast attached"; Meta's own rejection text then said one had been
+  submitted and judged inadequate. Read the App Review page, not this flag.
+- **`can_submit: false` — "Cannot submit while a previous submission is in
+  review"** appeared while the previous review was finished and while a
+  submission was in fact accepted minutes later. Don't treat it as a wall.
 
-1. Cancel the pending submission (nothing is lost — it has never been looked
-   at, and it cannot pass without screencasts).
-2. Add `instagram_manage_messages` and `pages_manage_posts`.
-3. Record the screencast and attach it to every permission — one recording
-   showing the real dashboard receiving a customer message, drafting a reply,
-   and Brad approving it covers the messaging permissions.
-4. Complete the API precheck for `pages_messaging`, `business_management` and
-   `pages_read_engagement` (a successful call using each, in dev mode).
-5. Resubmit.
+**Where permissions are actually edited: Use cases, not the App Review page.**
+The App Review page shows the result of a finished review and has no remove
+button — that is not a bug and cost time to work out. Left sidebar → Use cases
+→ the use case → Permissions. And you do not "remove" a rejected permission;
+you simply stop requesting it. The next submission is whatever has an open
+advanced-access request against it.
+
+**Review → Testing is the API precheck, not approval.** "Testing complete"
+there means the calls were made. It grants nothing. Two different pages,
+easily confused.
+
+### The screencast that was sent
+
+A real screen recording (`Cmd+Shift+5`), 71 seconds, captions burned in with
+ffmpeg. It shows: the studio dashboard; the Settings page with the Page token
+saved and the Page and Instagram account connected; a customer messaging the
+studio's Instagram **from instagram.com in a second browser window** — no
+phone mirroring needed, which is much cleaner than filming a phone; the draft
+appearing on the board; the studio owner reading it; Approve & send; and the
+reply arriving in the customer's Instagram.
+
+Two things worth keeping for next time. **The first attempt was a phone camera
+pointed at a laptop** — glare, motion blur, several frames unreadable. It was
+never going to pass, and it is the single easiest mistake to make here. And
+**check the whole recording frame by frame before it goes to Meta**: this one
+briefly showed Brad's desktop, with family photos and filenames readable,
+while he switched apps. Those three seconds were cut out with ffmpeg (the
+delivery shot comes *after* them, so trimming the end would have lost the
+proof).
+
+The submission notes declare the app as server-to-server with no login flow,
+which is Meta's own item 5 and the honest answer for a one-user internal tool
+whose only user owns the Page. Do not build a fake login screen for this.
 
 The submission says this is an internal tool for one studio and is not sold to
 other businesses — **that must stay true**, or the approval is at risk.
 Selling it to other studios needs multi-tenant work and the Instagram Business
-Login OAuth flow first.
+Login OAuth flow first. That is also why a public ad selling this to other
+studios should wait until approval lands.
+
 
 **Four Meta apps exist on this business.** `4457207527757824` ("city. nk
 autoi", Live) is the one that matters and the one the Page token belongs to —
