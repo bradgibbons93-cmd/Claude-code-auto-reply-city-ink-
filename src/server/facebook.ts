@@ -830,6 +830,14 @@ export async function getThreadParticipant(
   const endpoint = await endpointFor(platform);
   if (!endpoint) return null;
 
+  // Share the profile lookup's back-off. A permission refusal is about the
+  // app, not the person, so asking for the next twenty gets the same answer
+  // twenty more times — and it did exactly that on the first live run: one
+  // 403 per unnamed thread, every couple of minutes, which is the shape of
+  // noise this file already warns makes real faults unreadable.
+  const blocked = profileLookupBlocked.get(platform);
+  if (blocked && Date.now() < blocked.until) return null;
+
   const identity = await getPageIdentity().catch(() => null);
 
   try {
@@ -862,6 +870,18 @@ export async function getThreadParticipant(
   } catch (error) {
     const detail = describeGraphError("conversations?user_id", error);
     lastProfileError = { message: detail, at: new Date().toISOString() };
+
+    if (profileRefusalIsPermanent(detail)) {
+      const first = !profileLookupBlocked.has(platform);
+      profileLookupBlocked.set(platform, { until: Date.now() + 60 * 60 * 1000, why: detail });
+      if (first) {
+        console.warn(
+          `[Facebook] ${platform} won't name anyone by thread either — not asking again for an hour. ${detail}`
+        );
+      }
+      return null;
+    }
+
     console.error(`[Facebook] ${platform} thread lookup for ${userId} failed — ${detail}`);
     return null;
   }

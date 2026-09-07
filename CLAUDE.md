@@ -732,12 +732,32 @@ for. The import is the backfill and the safety net underneath the webhook,
 and for Instagram that net has never existed. Say that plainly rather than
 implying Instagram is broken — it isn't; its history is unreadable.
 
-**The one approach not yet tried** is Meta's own documented answer to 2534084:
-stop enumerating and ask for threads by person, `/me/conversations?user_id=
-<IGSID>`, which returns just that conversation. The app already knows the
-IGSID of everyone who has ever webhooked in, so the set of threads worth
-fetching is already in the database and the edge never has to be walked.
-Untested. Do not describe it as the fix until it has run against production.
+**The fourth approach — `/me/conversations?user_id=<IGSID>` — HAS now run
+against production, and the result is worth reading carefully.**
+
+It does not return names today. But it no longer returns 2534084 either.
+Every one of the nineteen threads came back with:
+
+    HTTP 403 (#200) App does not have Advanced Access to
+    instagram_manage_messages permission, and recipient user does not have
+    role on app.
+
+and one came back `(#100) The thread owner has archived or deleted this
+conversation` — a real, specific answer about a real thread, which is proof
+the call shape is right and Meta processed it.
+
+So the timeout is genuinely solved: asking by `user_id` never walks the edge,
+which is what the three "ask for less" attempts could never fix. What is left
+is one permission, and it is the same permission already in front of a
+reviewer. **When `instagram_manage_messages` is granted, Instagram names and
+profile pictures should start appearing by themselves** — no further work.
+Verify that when approval lands rather than assuming it.
+
+`getThreadParticipant()` shares `getSenderProfile`'s hour-long back-off, per
+platform. It did not at first, and the first live run made one 403 per
+unnamed thread every couple of minutes — exactly the red this file warns
+makes real faults unreadable. A permission refusal is about the app, not the
+person: the answer for the next nineteen people is already known.
 
 **Instagram refuses a page it thinks is too big, and how big is not a fixed
 number.** Twenty-five was reduced to eight and the live server still logged
