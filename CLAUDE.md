@@ -526,6 +526,30 @@ models take one: send it, and if the refusal names it, drop it and ask again,
 remembering the answer for the life of the process. Any other 400 is not
 retried — it would fail twice and keep a customer waiting longer.
 
+**The HTTP timeout has to be in proportion to `max_tokens`, and for months it
+wasn't.** A flat 20 seconds, while the budget is 4000 and the retry doubles it
+to 8000. A model that reasons before it answers cannot write eight thousand
+tokens in twenty seconds, so the retry that exists to RESCUE a hard draft
+could never once have finished — the doubling was pure cost.
+
+Found on a live thread that timed out on **every single poll** while every
+other thread drafted fine, so it read as "the provider is slow" and was really
+the client hanging up on it. One customer, permanently on the board with an
+empty card. It surfaced the day the prompt grew (two months of free days, plus
+thirty price corrections), which pushed that thread's call over a line it had
+always been close to.
+
+Roughly a second per hundred tokens now, floored at the old 20s so nothing
+small gets slower and capped at 90s so a wedged call can't hold a poll open.
+
+**And `draftForUnanswered` stops STARTING new drafts after two minutes.** The
+poll runs every three, a call can now take ninety seconds, and ten in a row
+would run one poll into the next. Overlapping polls is a failure mode this
+project has already had once, on Instagram's import, and it is miserable to
+diagnose because nothing errors — the work just doubles. Whatever is left is
+not lost: the thread is still unanswered, which is the whole basis of the
+query, so the next pass takes it.
+
 **Being on `/v1/models` is not the same as working.** The list said
 `claude-sonnet-5` was available while every real call was refused. So the boot
 check makes one tiny real call and logs `Model "X" answered a real call — the

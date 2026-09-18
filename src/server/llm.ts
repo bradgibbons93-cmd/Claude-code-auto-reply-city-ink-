@@ -77,6 +77,22 @@ export async function invokeLLM(
   const maxTokens = opts.maxTokens ?? 1024;
   const temperature = opts.temperature ?? 0.6;
 
+  // The HTTP timeout has to be in proportion to the budget, and it wasn't.
+  //
+  // It was a flat 20 seconds while `max_tokens` is 4000, retried once at
+  // 8000. A model that reasons before it answers cannot write 8000 tokens in
+  // twenty seconds, so the retry — the one meant to RESCUE a hard draft —
+  // could never finish, and the whole point of doubling the budget was lost.
+  //
+  // Found on a live thread that timed out on every single poll while every
+  // other thread drafted fine: one customer, permanently on the board with an
+  // empty card, for a reason that read as "the provider is slow" and was
+  // really the client hanging up on it.
+  //
+  // Roughly a second per hundred tokens, floored at the old 20s so nothing
+  // small gets slower, and capped so a wedged call can't hold a poll open.
+  const timeoutMs = Math.min(90_000, Math.max(20_000, maxTokens * 10));
+
   if (llmProvider() === "anthropic") {
     const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
     const rest = messages.filter((m) => m.role !== "system");
@@ -100,7 +116,7 @@ export async function invokeLLM(
     try {
       ({ data } = await axios.post(endpoint("messages"), body(!rejectsTemperature.has(model)), {
         headers,
-        timeout: 20000,
+        timeout: timeoutMs,
       }));
     } catch (error) {
       // Newer Claude models refuse `temperature` outright, and the refusal is
@@ -111,7 +127,7 @@ export async function invokeLLM(
       if (!saysTemperatureUnwanted(error) || rejectsTemperature.has(model)) throw error;
       console.warn(`[LLM] ${model} doesn't take a temperature — asking again without it`);
       rejectsTemperature.add(model);
-      ({ data } = await axios.post(endpoint("messages"), body(false), { headers, timeout: 20000 }));
+      ({ data } = await axios.post(endpoint("messages"), body(false), { headers, timeout: timeoutMs }));
     }
 
     const blocks: { type: string; text?: string }[] = data?.content ?? [];
@@ -144,7 +160,7 @@ export async function invokeLLM(
         Authorization: `Bearer ${process.env.LLM_API_KEY || ""}`,
         "Content-Type": "application/json",
       },
-      timeout: 20000,
+      timeout: timeoutMs,
     }
   );
 

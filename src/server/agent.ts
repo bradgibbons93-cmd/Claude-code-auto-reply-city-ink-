@@ -502,7 +502,30 @@ export async function draftForUnanswered(
   // work, which is the opposite of reassuring.
   let skipped = 0;
 
+  // Stop STARTING new drafts after two minutes.
+  //
+  // The poll runs every three. A single call can now take up to ninety
+  // seconds — it has to, because a model that reasons before it answers
+  // cannot write eight thousand tokens in twenty — and ten of those in a row
+  // would run a poll straight into the next one. Overlapping polls is a
+  // failure mode this project has already had once, on Instagram's import,
+  // and it is miserable to diagnose because nothing errors; the work just
+  // doubles up.
+  //
+  // Whatever is left over is not lost. The next pass picks it up, because
+  // the thread is still unanswered and that is the whole basis of this query.
+  const startedAt = Date.now();
+  const budgetMs = 2 * 60_000;
+  let ranOutOfTime = 0;
+
   for (const conversationId of ids) {
+    if (Date.now() - startedAt > budgetMs) {
+      ranOutOfTime = ids.length - (drafted + failed + skipped);
+      console.log(
+        `[Agent] Out of time this pass — ${ranOutOfTime} thread(s) left for the next one in three minutes`
+      );
+      break;
+    }
     try {
       const turns = await getRecentTurns(conversationId, 20);
       const answering = [...turns].reverse().find((t) => t.senderType === "customer");
