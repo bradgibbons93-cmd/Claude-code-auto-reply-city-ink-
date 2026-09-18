@@ -19,6 +19,8 @@ import {
 import { trpc } from "@/lib/trpc";
 import LiveFeed from "@/components/LiveFeed";
 import DashboardBanner from "@/components/DashboardBanner";
+import AgentStatusCard from "@/components/AgentStatusCard";
+import StudioTiles from "@/components/StudioTiles";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/Avatar";
@@ -194,6 +196,12 @@ export default function Dashboard() {
         messagesToday={dash?.todayMessages}
         nextBooking={bookings?.[0] ? { title: bookings[0].title, label: bookings[0].label } : null}
       />
+
+      {/* Is it actually alive, and where is everything. Both questions get
+          answered above the fold, because the failure mode of this app is
+          silence and the place Brad works is a phone. */}
+      <AgentStatusCard />
+      <StudioTiles />
 
       <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
         <div className="space-y-4">

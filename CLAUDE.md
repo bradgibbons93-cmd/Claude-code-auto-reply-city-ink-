@@ -345,6 +345,27 @@ Three things had to be wrong at once and all three are fixed:
   nothing called it on a schedule, so a bad card sat there until somebody
   pressed a button. It runs at the top of the three-minute poll now.
 
+**The home screen opens with "is it alive" and "where is everything".**
+Brad sent a mockup he liked — gold on black, somebody else's brand — and the
+half worth taking was the layout, not the palette. Two things came from it:
+
+- `AgentStatusCard` — one card at the top saying whether the agent is
+  actually drafting, reading the same `lastError` the failed-draft card does,
+  so the two can never disagree. It exists because the failure mode of this
+  whole product is **silence**: every time the app has quietly stopped — a
+  spent account, an expired token, a key on the wrong workspace — the
+  dashboard went on looking completely normal. It wraps the provider's own
+  sentence rather than truncating it; "the agent can't write anythi…" is the
+  same dead end as no message at all.
+- `StudioTiles` — eight tiles, everything one tap from home. Brad works on a
+  phone, where the sidebar lives behind a hamburger, so a section he doesn't
+  open weekly may as well not exist.
+
+The palette stayed the studio's own. Coffee brown and silver are on the sheet
+he sent and on the sign above the door; the mockup's gold would have been a
+third colour the studio doesn't own, which this file already has a rule
+about.
+
 **A refresh button and "Updated 12s ago" sit above the board.** It already
 refetched every ten seconds; there was simply no way to SEE that, so a wrong
 card was indistinguishable from an old one and the first suspicion was always
