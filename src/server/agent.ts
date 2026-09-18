@@ -16,6 +16,12 @@ import {
   clearSendError,
   findSimilarExchanges,
   getRecentDraftEdits,
+  getPriceCorrections,
+  getColdConversations,
+  getRecentConversations,
+  claimFollowUp,
+  getSetting,
+  isPlaceholderName,
   recordDraftEdit,
   getConversationMessages,
   pauseBot,
@@ -28,7 +34,7 @@ import {
   explainNotUnanswered
 } from "./db.js";
 import { invokeLLMJson, getLastLlmError, type ChatMessage } from "./llm.js";
-import { availabilityForPrompt } from "./calendar.js";
+import { availabilityForPrompt, getPastAppointments } from "./calendar.js";
 import {
   sendMessengerMessage,
   sendTypingIndicator,
@@ -85,7 +91,9 @@ async function decide(
   hasPhoto: boolean,
   availability: string,
   examples: Array<{ customerMessage: string; studioReply: string }>,
-  corrections: Array<{ draftText: string; sentText: string }>
+  corrections: Array<{ draftText: string; sentText: string }>,
+  priceCorrections: Array<{ draftText: string; sentText: string }> = [],
+  reviewUrl?: string
 ): Promise<AgentDecision & { ok: boolean }> {
   const missing = [
     !known.name && "their full name",
@@ -134,8 +142,24 @@ ${corrections.map((c) => `You wrote: ${c.draftText}\nThey sent instead: ${c.sent
 
 `
       : ""
+  }${
+    priceCorrections.length
+      ? `PRICES THE STUDIO HAS CORRECTED — these matter more than anything else here. Every one is a job you quoted too low or too high and the studio fixed by hand before it went out. When a new enquiry looks like one of these, price it like the CORRECTED figure, not your own instinct:
+${priceCorrections.map((c) => `You quoted: ${c.draftText}\nThe studio actually charged: ${c.sentText}`).join("\n\n")}
+
+`
+      : ""
   }WHAT THE STUDIO HAS TOLD YOU (this is your only source of facts):
 ${studioFacts || "(nothing configured yet — stay general, don't quote prices, defer to the studio)"}
+
+AFTERCARE — if our last message asked how their tattoo was healing:
+- They answer happily ("it's great", "loving it", "healed perfectly", a heart) → thank them warmly, and ${
+    reviewUrl
+      ? `ask once, lightly, if they'd mind leaving a review — include this exact link and nothing else: ${reviewUrl}. Something like "so glad you're happy with it! 😊 if you get a minute a quick review would mean a lot to us — ${reviewUrl}". Ask ONCE. If they ignore it, never ask again.`
+      : `thank them and leave it there. Do NOT ask for a review and do NOT invent a review link — the studio hasn't saved one.`
+  }
+- They answer with a PROBLEM (it's red, it's scabbing badly, they're worried, they're unhappy) → do NOT ask for a review, do not reassure them medically, and do not diagnose. Be warm, take it seriously, and say the studio will get back to them personally. This one is for Brad, not for you.
+- They answer flatly or briefly with no real sentiment → thank them and leave it. No review ask.
 
 THE BOOKING FLOW — work out which step you're at and do that step:
 1. First enquiry / "get a quote" → ask for a reference photo, rough size, and where on the body. Real example: "Please send over any ideas and/ or reference photos along with a rough size and area you would like for the tattoo."
@@ -326,6 +350,8 @@ async function composeDraft(
   // a customer getting a reply.
   const examples = text ? await findSimilarExchanges(text).catch(() => []) : [];
   const corrections = await getRecentDraftEdits().catch(() => []);
+  const priceCorrections = await getPriceCorrections().catch(() => []);
+  const reviewUrl = await getSetting("google_review_url").catch(() => undefined);
 
   const turns = await getRecentTurns(senderId, 10);
   const history: ChatMessage[] = turns.map((t) => ({
@@ -349,7 +375,9 @@ async function composeDraft(
   }
 
   if (rule && rule.sendBookingLink) {
-    const decision = await decide(history, "", known, hasPhoto, availability, examples, corrections);
+    const decision = await decide(
+      history, "", known, hasPhoto, availability, examples, corrections, priceCorrections, reviewUrl
+    );
     return {
       reply: rule.responseText,
       intent: "booking",
@@ -370,7 +398,9 @@ async function composeDraft(
     hasPhoto,
     availability,
     examples,
-    corrections
+    corrections,
+    priceCorrections,
+    reviewUrl
   );
 
   return {
@@ -962,6 +992,8 @@ export async function practiceReply(
   const availability = await availabilityForPrompt().catch(() => "");
   const examples = await findSimilarExchanges(message).catch(() => []);
   const corrections = await getRecentDraftEdits().catch(() => []);
+  const priceCorrections = await getPriceCorrections().catch(() => []);
+  const reviewUrl = await getSetting("google_review_url").catch(() => undefined);
 
   const history: ChatMessage[] = [...priorTurns, { role: "user", content: message }];
 
@@ -972,7 +1004,9 @@ export async function practiceReply(
     false,
     availability,
     examples,
-    corrections
+    corrections,
+    priceCorrections,
+    reviewUrl
   );
 
   return {
@@ -1053,4 +1087,209 @@ Reply with JSON only:
 
   if (!ok) throw new Error("Couldn't reach the AI — check the connection in Settings.");
   return data.ideas ?? [];
+}
+
+/* ------------------------------------------------------------------ */
+/* Follow-ups — the two messages nobody ever gets round to sending      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Both of these put a DRAFT on the board. Neither sends.
+ *
+ * That is not a limitation to be worked around later. A follow-up is the
+ * message most likely to read as automated if it lands wrong — nudging
+ * someone who booked yesterday by phone, or asking after a tattoo that never
+ * happened because the appointment was cancelled — and this app's whole
+ * promise is that a person reads every word before a customer does. The
+ * scans find the person and write the words; Brad still taps approve.
+ */
+
+/** Ask the model for one message, in the studio's voice, for one situation. */
+async function draftFollowUpText(
+  conversationId: string,
+  instruction: string
+): Promise<string | null> {
+  const turns = await getRecentTurns(conversationId, 20).catch(() => []);
+  const knowledge = await getStudioKnowledge().catch(() => []);
+  const studioFacts = knowledge.map((k) => `Q: ${k.question}\nA: ${k.answer}`).join("\n\n");
+
+  const history = turns
+    .map((t) => `${t.senderType === "customer" ? "THEM" : "US"}: ${t.content}`)
+    .join("\n");
+
+  const { ok, data } = await invokeLLMJson<{ reply?: string }>(
+    [
+      {
+        role: "user",
+        content: `You write messages for City Ink Tattoo in Geelong, in their voice: warm, short, lower case where it reads naturally, an emoji at most. Australian.
+
+THE CONVERSATION SO FAR:
+${history || "(nothing stored)"}
+
+WHAT THE STUDIO KNOWS:
+${studioFacts || "(nothing configured)"}
+
+${instruction}
+
+Reply with JSON: {"reply": "the message"}`,
+      },
+    ],
+    {} as { reply?: string },
+    { maxTokens: 2000 }
+  );
+
+  if (!ok) return null;
+  const reply = (data.reply ?? "").trim();
+  return reply || null;
+}
+
+/**
+ * Customers who went quiet on us, once a day.
+ *
+ * The opposite shape to the board's usual job: here WE spoke last and heard
+ * nothing back. For a tattoo studio that is a quote sent into silence, which
+ * is the commonest way a booking is quietly lost.
+ */
+export async function draftColdFollowUps(
+  limit = 10
+): Promise<{ drafted: number; detail: string }> {
+  const cold = await getColdConversations(limit);
+  if (!cold.length) {
+    return { drafted: 0, detail: "Nobody has gone cold — every thread is either answered or still live." };
+  }
+
+  let drafted = 0;
+
+  for (const thread of cold) {
+    try {
+      const turns = await getRecentTurns(thread.conversationId, 20).catch(() => []);
+      // Follow up on what THEY last said, not on our own message, so the
+      // draft is anchored to a real question of theirs.
+      const theirs = [...turns].reverse().find((t) => t.senderType === "customer");
+      if (!theirs) continue;
+
+      // Claim before drafting. If the model falls over we still don't come
+      // back tomorrow and try the same person again — one nudge is a nudge,
+      // a daily one is harassment.
+      if (!(await claimFollowUp(thread.conversationId, "cold"))) continue;
+
+      const days = Math.round(
+        (Date.now() - new Date(thread.lastAt).getTime()) / 86_400_000
+      );
+
+      const text = await draftFollowUpText(
+        thread.conversationId,
+        `We replied to this person about ${days} day(s) ago and they never wrote back. Write ONE short, low-pressure follow-up that gently reopens it. Refer to what they actually asked about. Do NOT apologise for chasing, do NOT offer a discount, do NOT invent a price or a date that isn't already in the conversation. If they were mid-way through booking, offer to pick it back up. Something like "hey, just checking in on this one 😊 still keen to sort something out?" but specific to them.`
+      );
+
+      if (!text) {
+        // The card still goes up. Brad's rule: a waiting customer always gets
+        // a card, even when the AI can't write one.
+        await createPendingReply(
+          thread.conversationId, `followup_cold_${thread.conversationId}`, "", false, undefined, true
+        ).catch(() => undefined);
+        continue;
+      }
+
+      const queued = await createPendingReply(
+        thread.conversationId,
+        `followup_cold_${thread.conversationId}`,
+        text
+      );
+      if (queued) drafted += 1;
+    } catch (error) {
+      console.error(
+        `[Agent] Cold follow-up failed for ${thread.conversationId}:`,
+        (error as Error).message
+      );
+    }
+  }
+
+  console.log(`[Agent] Cold follow-ups: ${drafted} drafted from ${cold.length} quiet thread(s)`);
+  return {
+    drafted,
+    detail: drafted
+      ? `Drafted ${drafted} follow-up${drafted === 1 ? "" : "s"} for people who went quiet — all waiting for your OK.`
+      : "Found quiet threads but couldn't draft for them.",
+  };
+}
+
+/**
+ * Three days after someone was tattooed, ask how it's healing.
+ *
+ * The calendar is the only record of who actually sat in the chair, so a past
+ * appointment is the signal and the event title is the only name to match on.
+ * Anyone we can't confidently match to a conversation is skipped rather than
+ * guessed at — sending "how's your tattoo?" to the wrong person is worse than
+ * sending nothing.
+ */
+export async function draftAftercareMessages(
+  daysAfter = 3
+): Promise<{ drafted: number; detail: string }> {
+  const appointments = await getPastAppointments(daysAfter).catch(() => []);
+  if (!appointments.length) {
+    return { drafted: 0, detail: `Nobody was tattooed ${daysAfter} days ago.` };
+  }
+
+  const conversations = await getRecentConversations(400).catch(() => []);
+  const reviewUrl = await getSetting("google_review_url").catch(() => undefined);
+
+  let drafted = 0;
+  let unmatched = 0;
+
+  for (const appointment of appointments) {
+    try {
+      const title = appointment.title.toLowerCase();
+      // Match the calendar's name against a thread's. Both halves have to be
+      // a real name — "a customer" matches everybody and nobody.
+      const match = conversations.find((c: { senderName: string | null; conversationId: string }) => {
+        const name = (c.senderName ?? "").toLowerCase().trim();
+        if (name.length < 4 || isPlaceholderName(c.senderName)) return false;
+        const first = name.split(" ")[0];
+        return title.includes(name) || (first.length >= 4 && title.includes(first));
+      });
+
+      if (!match) {
+        unmatched += 1;
+        continue;
+      }
+
+      if (!(await claimFollowUp(match.conversationId, "aftercare"))) continue;
+
+      const text = await draftFollowUpText(
+        match.conversationId,
+        `This person was tattooed at the studio ${daysAfter} days ago. Write ONE short, warm message asking how the tattoo is healing and how they're finding it. Do NOT ask them to book anything, do NOT mention a price, and do NOT ask for a review in this message — that only happens if they answer happily. Something like "hey! just checking in, how's the tattoo healing up? 😊".`
+      );
+
+      const queued = await createPendingReply(
+        match.conversationId,
+        `followup_aftercare_${match.conversationId}`,
+        text ?? "",
+        false,
+        undefined,
+        !text
+      );
+      if (queued) drafted += 1;
+    } catch (error) {
+      console.error(
+        `[Agent] Aftercare draft failed for "${appointment.title}":`,
+        (error as Error).message
+      );
+    }
+  }
+
+  const note = unmatched
+    ? ` ${unmatched} appointment(s) couldn't be matched to a conversation — skipped rather than guessed.`
+    : "";
+  const reviewNote = reviewUrl
+    ? ""
+    : " (No Google review link saved yet — Settings → Studio. Without it the agent can't offer one when they reply happily.)";
+
+  console.log(
+    `[Agent] Aftercare: ${drafted} drafted, ${unmatched} unmatched, from ${appointments.length} appointment(s)`
+  );
+  return {
+    drafted,
+    detail: `Drafted ${drafted} aftercare check-in${drafted === 1 ? "" : "s"}.${note}${reviewNote}`,
+  };
 }

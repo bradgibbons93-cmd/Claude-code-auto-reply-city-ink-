@@ -191,6 +191,14 @@ const STATEMENTS = [
     sent_text TEXT NOT NULL,
     created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP
   )`,
+
+  `CREATE TABLE IF NOT EXISTS follow_ups (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    conversation_id VARCHAR(191) NOT NULL,
+    kind VARCHAR(32) NOT NULL,
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY follow_ups_conversation_kind (conversation_id, kind)
+  )`,
 ];
 
 /**

@@ -3,7 +3,7 @@ import { getDuePosts, updatePostStatus } from "./db.js";
 import { publishPagePost, importExistingConversations } from "./facebook.js";
 import { syncFeed } from "./feed.js";
 import { ensureMessengerSubscription } from "./facebook.js";
-import { draftForUnanswered } from "./agent.js";
+import { draftForUnanswered, draftColdFollowUps, draftAftercareMessages } from "./agent.js";
 import { notifyOnce, clearAlert } from "./push.js";
 import { getFacebookConfig, getWebhookRejections } from "./db.js";
 import { describeToken } from "./token.js";
@@ -166,6 +166,39 @@ export function startScheduler() {
    * the short version is that a customer's reference photo is never a
    * candidate, and everything that is can be re-fetched or was already junk.
    */
+  /**
+   * The two follow-ups, once a day at 9pm UTC — 7am in Geelong, so the cards
+   * are on the board before the studio opens rather than landing mid-tattoo.
+   *
+   * Brad asked for both: "scan the messages once daily to find any customers
+   * that went cold for us to send a follow up message", and "after each
+   * customer gets tattooed I want to automatically send them a message 3 days
+   * later asking how their tattoo is".
+   *
+   * Neither sends. Both put a draft on the board like everything else here —
+   * a follow-up is the message most likely to read as automated if it lands
+   * wrong, and the one thing this app has never done is send without Brad.
+   *
+   * Independent try/catch each, for the reason written all over this file:
+   * two jobs in one block means the second never runs on the day the first
+   * has a bad minute.
+   */
+  cron.schedule("0 21 * * *", async () => {
+    try {
+      const cold = await draftColdFollowUps();
+      console.log(`[Scheduler] Cold follow-ups — ${cold.detail}`);
+    } catch (error) {
+      console.error("[Scheduler] Cold follow-up scan failed:", (error as Error).message);
+    }
+
+    try {
+      const aftercare = await draftAftercareMessages(3);
+      console.log(`[Scheduler] Aftercare — ${aftercare.detail}`);
+    } catch (error) {
+      console.error("[Scheduler] Aftercare scan failed:", (error as Error).message);
+    }
+  });
+
   cron.schedule("42 16 * * *", async () => {
     try {
       const report = await pruneStoredImages();

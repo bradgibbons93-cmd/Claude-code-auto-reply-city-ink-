@@ -13,7 +13,9 @@ import {
   studioKnowledge,
   pendingReplies,
   exampleExchanges,
+  appSettings,
   draftEdits,
+  followUps,
   type InsertUser,
 } from "../drizzle/schema.js";
 
@@ -1647,7 +1649,163 @@ export async function recordDraftEdit(
 /** The most recent corrections, newest first — shown to the model as fixes. */
 export async function getRecentDraftEdits(limit = 5) {
   const db = await getDb();
-  return db.select().from(draftEdits).orderBy(desc(draftEdits.createdAt)).limit(limit);
+  // id breaks the tie. Several corrections inside the same second is normal —
+  // Brad works through the board in one sitting — and on a bare timestamp
+  // sort the order within that second is whatever MySQL feels like, so which
+  // five the model sees changes between identical calls.
+  return db
+    .select()
+    .from(draftEdits)
+    .orderBy(desc(draftEdits.createdAt), desc(draftEdits.id))
+    .limit(limit);
+}
+
+/**
+ * The corrections where Brad changed a PRICE, kept for much longer.
+ *
+ * Every other rewrite is about tone and goes stale; a price correction is the
+ * studio telling the agent what a job is worth, and it stays true. Brad, on a
+ * calf cover-up the agent quoted at $350 - $450:
+ *
+ *   "that quote was a little low, the agent had it in for $350 - $450 but I
+ *   adjusted to $550 - $650"
+ *
+ * Under the plain five-most-recent window that lesson was gone within a day
+ * of ordinary edits, so the next similar piece got quoted low all over again.
+ * Here it survives thirty corrections deep, and only rows where the dollar
+ * figures actually changed are kept — an edit that merely reworded a sentence
+ * around the same number teaches nothing about price.
+ */
+export async function getPriceCorrections(limit = 30) {
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(draftEdits)
+    .orderBy(desc(draftEdits.createdAt), desc(draftEdits.id))
+    .limit(200);
+
+  const amounts = (text: string) =>
+    (text.match(/\$\s?\d[\d,]*/g) ?? []).map((m) => m.replace(/[\s,]/g, ""));
+
+  return rows
+    .filter((row) => {
+      const before = amounts(row.draftText ?? "");
+      const after = amounts(row.sentText ?? "");
+      if (!before.length && !after.length) return false;
+      return before.join("|") !== after.join("|");
+    })
+    .slice(0, limit);
+}
+
+/** A named setting, for the handful of things that aren't per-conversation. */
+export async function getSetting(name: string): Promise<string | undefined> {
+  const db = await getDb();
+  const rows = await db
+    .select({ value: appSettings.value })
+    .from(appSettings)
+    .where(eq(appSettings.name, name))
+    .limit(1);
+  return rows[0]?.value ?? undefined;
+}
+
+export async function setSetting(name: string, value: string): Promise<void> {
+  const db = await getDb();
+  await db
+    .insert(appSettings)
+    .values({ name, value })
+    .onDuplicateKeyUpdate({ set: { value } });
+}
+
+/**
+ * Claim a follow-up, so nobody is nagged twice for the same reason.
+ *
+ * Returns true only the first time. Claimed in the database, not in memory,
+ * for the same reason the notification slot is: the scan runs every day and
+ * the answer has to survive a redeploy.
+ */
+export async function claimFollowUp(conversationId: string, kind: string): Promise<boolean> {
+  const db = await getDb();
+  try {
+    await db.insert(followUps).values({ conversationId, kind });
+    return true;
+  } catch (error) {
+    if ((error as { code?: string })?.code === "ER_DUP_ENTRY") return false;
+    throw error;
+  }
+}
+
+/**
+ * Enquiries that went cold — we answered, and then nothing came back.
+ *
+ * Brad: "scan the messages once daily to find any customers that went cold
+ * for us to send a follow up message".
+ *
+ * The shape that matters is the opposite of `getUnansweredConversations`:
+ * there the customer spoke last and is waiting on us; here WE spoke last and
+ * they never replied. That is a quote sent into silence, which for a tattoo
+ * studio is the single commonest way a booking is lost.
+ *
+ * Bounded at both ends on purpose. Under three days is not cold, it is a
+ * person who has a job — chasing them reads as desperate. Past about six
+ * weeks the moment has gone and a nudge is just odd, so the window closes
+ * rather than dredging up the whole history the first time this runs.
+ */
+export async function getColdConversations(
+  limit = 10,
+  quietForDays = 3,
+  giveUpAfterDays = 42
+) {
+  const db = await getDb();
+  const rows = await db.execute(
+    sql`SELECT c.conversation_id AS conversationId,
+               c.sender_name     AS senderName,
+               last.created_at   AS lastAt
+          FROM messenger_conversations c
+          JOIN (
+            SELECT m1.conversation_id, m1.sender_type, m1.created_at
+              FROM messenger_messages m1
+              JOIN (
+                SELECT conversation_id,
+                       SUBSTRING_INDEX(
+                         GROUP_CONCAT(id ORDER BY created_at DESC, id DESC), ',', 1
+                       ) AS last_id
+                  FROM messenger_messages
+                 GROUP BY conversation_id
+              ) t ON t.last_id = m1.id
+          ) last ON last.conversation_id = c.conversation_id
+         -- WE spoke last. A bot draft that was approved, or a reply Brad
+         -- typed himself in Meta's inbox and we saw the echo of.
+         WHERE last.sender_type IN ('bot', 'manual')
+           AND last.created_at < NOW() - INTERVAL ${quietForDays} DAY
+           AND last.created_at > NOW() - INTERVAL ${giveUpAfterDays} DAY
+           -- A thread the studio deliberately muted stays muted.
+           AND (
+             c.bot_paused_until IS NULL
+             OR c.bot_paused_until < NOW()
+             OR c.bot_pause_reason IS NULL
+             OR c.bot_pause_reason <> 'manual'
+           )
+           -- Only once, ever.
+           AND NOT EXISTS (
+             SELECT 1 FROM follow_ups f
+              WHERE f.conversation_id = c.conversation_id AND f.kind = 'cold'
+           )
+           -- And never while something is already waiting for Brad on that
+           -- thread — two cards for one person is the bug this app has had
+           -- more than once.
+           AND NOT EXISTS (
+             SELECT 1 FROM pending_replies p
+              WHERE p.conversation_id = c.conversation_id AND p.status = 'pending'
+           )
+         ORDER BY last.created_at DESC
+         LIMIT ${limit}`
+  );
+  const list = (rows as unknown as [{ conversationId: string; senderName: string | null; lastAt: string }[]])[0] ?? [];
+  return list.map((r) => ({
+    conversationId: r.conversationId,
+    senderName: r.senderName,
+    lastAt: r.lastAt,
+  }));
 }
 
 /**

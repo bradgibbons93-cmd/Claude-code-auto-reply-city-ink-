@@ -256,6 +256,70 @@ and reversed. That is exactly why the draft was right and the heading above it
 was wrong — two readers of the same thread, one of them looking at the wrong
 end of it. DESC, limit, then reverse, so callers still get oldest-first.
 
+**Instagram is APPROVED.** Read from Meta's API on 18 September:
+`instagram_manage_messages` and `instagram_basic` are both `is_live: true` at
+**advanced** access, alongside `pages_messaging`, `pages_show_list` and
+`business_management`. Instagram replies send. The month-long blocker is gone,
+and the entries above about Instagram sending being refused are history, not
+current state — keep them for the reasoning, don't act on them.
+
+Still NOT granted: `pages_manage_posts` and `pages_read_engagement` (so the
+Live feed page is broken and scheduled posts can't publish), `Human Agent`,
+and the whole `instagram_business_*` branch, which is the wrong flow anyway.
+The next submission is those first two, together, since posting depends on
+`pages_read_engagement`.
+
+**The agent sees two months of calendar, not a fortnight.** Brad: "I want the
+agent to offer more dates, 2 months in advance it needs to see." A customer
+asked about "next Saturday 19th" and the draft said it "isn't showing as free
+for us yet" — which was never an answer about the 19th at all; the agent could
+only see fourteen days out.
+
+Raising the horizon alone would not have fixed it. `findFreeSlots` walks
+forward and stops at the first few openings, so a named date beyond them is
+still invisible. `findFreeDays()` is the other half: every day with something
+open across the whole horizon, as one line in the prompt, so a customer naming
+a date gets a real answer instead of "not showing".
+
+**A price the studio corrected is remembered thirty deep; tone is remembered
+five.** Brad, on a calf cover-up the agent quoted at $350 - $450: *"that quote
+was a little low, the agent had it in for $350 - $450 but I adjusted to $550 -
+$650"*. Under the plain five-most-recent window that lesson was gone within a
+day of ordinary edits and the next similar piece got quoted low again.
+`getPriceCorrections()` keeps only the rows where the dollar figures actually
+changed — a reworded sentence around the same number teaches nothing — and the
+prompt says these outrank the agent's own instinct.
+
+Both correction readers now order by `created_at` **and** `id`. Brad works the
+board in one sitting, so a dozen edits share a second, and on a bare timestamp
+sort which five the model saw changed between identical calls. Same lesson as
+`MAX(id)` further up: a tie needs a deterministic second key.
+
+**Two daily follow-ups, and NEITHER sends.** Both put a draft on the board at
+7am Geelong. Brad asked for both:
+
+- **Cold enquiries** — we spoke last and heard nothing back for 3 to 42 days.
+  The mirror image of `getUnansweredConversations`, and for a tattoo studio it
+  is the commonest way a booking is lost: a quote sent into silence. Under
+  three days is a person with a job, not a cold lead; past six weeks the
+  moment has gone. Claimed in `follow_ups` so nobody is nudged twice, skipped
+  entirely if a card is already on the board for them, and a `manual` pause is
+  obeyed.
+- **Aftercare** — three days after an appointment, ask how it healed. The
+  calendar is the only record of who actually sat in the chair, so a past
+  event is the signal and its title is the only name to match on. Anyone who
+  can't be matched to a conversation is SKIPPED, not guessed at: "how's your
+  tattoo?" to the wrong person is worse than nothing.
+
+The review link is opt-in and never invented. With `google_review_url` unset
+the agent thanks them and stops. Set, it asks **once**, only after a genuinely
+happy reply, and never when the customer reports a problem — that case goes to
+Brad, with no reassurance and no diagnosis.
+
+These are drafts on purpose and it should stay that way. A follow-up is the
+message most likely to read as automated when it lands wrong, and this app's
+whole promise is that a person reads every word first.
+
 **A refresh button and "Updated 12s ago" sit above the board.** It already
 refetched every ten seconds; there was simply no way to SEE that, so a wrong
 card was indistinguishable from an old one and the first suspicion was always

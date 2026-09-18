@@ -207,7 +207,16 @@ export async function findFreeSlots(options?: {
 
   const slotMinutes = options?.slotMinutes ?? DEFAULT_SLOT_MINUTES;
   const limit = options?.limit ?? 3;
-  const daysAhead = options?.daysAhead ?? 14;
+  // Two months, not a fortnight.
+  //
+  // Brad: "I want the agent to offer more dates, 2 months in advance it needs
+  // to see." A customer asking about "next Saturday the 19th" was told it
+  // wasn't showing as free when the real answer was that the agent could only
+  // see fourteen days out — so a date the studio could genuinely have booked
+  // read as unavailable. Half of a tattoo studio's enquiries are for
+  // something weeks away; a fortnight's sight was the wrong shape for the
+  // trade.
+  const daysAhead = options?.daysAhead ?? 60;
 
   const now = new Date();
   const earliest = new Date(now.getTime() + MIN_NOTICE_MINUTES * 60_000);
@@ -255,6 +264,68 @@ export async function findFreeSlots(options?: {
 }
 
 /**
+ * Which DAYS have anything free, right across the horizon.
+ *
+ * `findFreeSlots` answers "when can you next fit me in" — it walks forward
+ * and stops at the first few. That is the wrong question when a customer
+ * names a date. A real one, from Brad's screenshot:
+ *
+ *   "Do you have an availability next Saturday 19th for me and Jake?"
+ *
+ * and the draft said the 19th "isn't showing as free for us yet" — because
+ * the agent could only ever see the next handful of openings, all of them
+ * that week. The 19th may well have been free; nothing had looked.
+ *
+ * So the prompt gets both: the soonest slots, and a plain list of every day
+ * with something open between now and the horizon. One line, and it lets the
+ * agent answer about a named date honestly instead of guessing from silence.
+ */
+export async function findFreeDays(daysAhead = 60): Promise<string[]> {
+  const config = await getTimelyConfig().catch(() => undefined);
+  if (!config?.calendarIcsUrl) return [];
+
+  const now = new Date();
+  const earliest = new Date(now.getTime() + MIN_NOTICE_MINUTES * 60_000);
+  const horizon = new Date(now.getTime() + daysAhead * 24 * 60 * 60_000);
+
+  let busy: BusyBlock[];
+  try {
+    busy = await fetchBusyBlocks(config.calendarIcsUrl, now, horizon);
+  } catch (error) {
+    // Same rule as everywhere else here: a calendar we cannot read must never
+    // become invented availability.
+    console.error("[Calendar] Couldn't read the feed for free days:", (error as Error).message);
+    return [];
+  }
+
+  const days: string[] = [];
+
+  for (let day = 0; day <= daysAhead; day++) {
+    const { year, month, day: dayOfMonth, weekday } = studioDateParts(
+      new Date(now.getTime() + day * 24 * 60 * 60_000)
+    );
+    if (CLOSED_WEEKDAYS.includes(weekday)) continue;
+
+    const dayStart = studioTime(year, month, dayOfMonth, OPENING.startHour, OPENING.startMinute);
+    const dayEnd = studioTime(year, month, dayOfMonth, OPENING.endHour, 0);
+
+    for (
+      let t = new Date(dayStart);
+      t.getTime() + DEFAULT_SLOT_MINUTES * 60_000 <= dayEnd.getTime();
+      t = new Date(t.getTime() + 30 * 60_000)
+    ) {
+      if (t < earliest) continue;
+      const slotEnd = new Date(t.getTime() + DEFAULT_SLOT_MINUTES * 60_000);
+      if (overlaps(t, slotEnd, busy)) continue;
+      days.push(describeSlot(t));
+      break;
+    }
+  }
+
+  return days;
+}
+
+/**
  * How long a sitting runs, and therefore how big a gap it actually needs.
  *
  * A full day means the studio day — 10:30 to 5 — so "full day free" can only
@@ -283,23 +354,72 @@ export const SESSION_LENGTHS = [
 export async function availabilityForPrompt(): Promise<string> {
   const rows = await Promise.all(
     SESSION_LENGTHS.map(async (length) => {
-      const slots = await findFreeSlots({ slotMinutes: length.minutes, limit: 3 });
+      // Five rather than three: with two months in view the first three are
+      // often all this week, which reads as "nothing else exists".
+      const slots = await findFreeSlots({ slotMinutes: length.minutes, limit: 5 });
       return { ...length, slots };
     })
   );
 
-  if (rows.every((row) => row.slots.length === 0)) return "";
+  const freeDays = await findFreeDays().catch(() => []);
 
-  return rows
+  if (rows.every((row) => row.slots.length === 0) && !freeDays.length) return "";
+
+  const soonest = rows
     .map(
       (row) =>
         `- ${row.label}: ${
           row.slots.length
             ? row.slots.map((s) => s.label).join(", ")
-            : "nothing free in the next fortnight"
+            : "nothing free in the next two months"
         }`
     )
     .join("\n");
+
+  if (!freeDays.length) return soonest;
+
+  // The full two months, so a customer naming a date gets a real answer
+  // rather than "that isn't showing as free" when nothing ever looked.
+  return `${soonest}\n\nEVERY day with something open between now and two months out — if a customer names a date, check it against THIS list before saying it isn't free:\n${freeDays.join("; ")}`;
+}
+
+/**
+ * Appointments that happened a given number of days ago.
+ *
+ * This is what makes the aftercare message possible. Brad: "after each
+ * customer gets tattooed I want to automatically send them a message 3 days
+ * later asking how their tattoo is".
+ *
+ * The calendar is the only record of who actually sat in the chair — the app
+ * never sees the booking being made, only the conversation that led to it —
+ * so a past appointment IS the signal, and the event title is the only name
+ * we have to match a customer by.
+ */
+export async function getPastAppointments(daysAgo = 3): Promise<UpcomingBooking[]> {
+  const config = await getTimelyConfig().catch(() => undefined);
+  if (!config?.calendarIcsUrl) return [];
+
+  const now = new Date();
+  // A whole studio day, in Geelong's clock, N days back.
+  const target = new Date(now.getTime() - daysAgo * 24 * 60 * 60_000);
+  const { year, month, day } = studioDateParts(target);
+  const from = studioTime(year, month, day, 0, 0);
+  const to = studioTime(year, month, day, 23, 59);
+
+  try {
+    const blocks = await fetchBusyBlocks(config.calendarIcsUrl, from, to);
+    return blocks
+      .filter((b) => b.start >= from && b.start <= to)
+      .sort((a, b) => a.start.getTime() - b.start.getTime())
+      .map((b) => ({
+        title: b.title || "Appointment",
+        start: b.start,
+        label: describeSlot(b.start),
+      }));
+  } catch (error) {
+    console.error("[Calendar] Couldn't read past appointments:", (error as Error).message);
+    return [];
+  }
 }
 
 export interface UpcomingBooking {

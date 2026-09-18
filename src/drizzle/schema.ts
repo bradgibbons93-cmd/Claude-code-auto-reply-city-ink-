@@ -250,6 +250,29 @@ export const pushSubscriptions = mysqlTable("push_subscriptions", {
  * notification preferences. A separate table rather than more columns on
  * facebook_config, because none of this is Facebook's.
  */
+/**
+ * Follow-ups the app has already put up, so it never nags the same person
+ * twice for the same reason.
+ *
+ * Claimed in the database rather than worked out from the messages, for the
+ * same reason the notification slot is: the scan runs daily, the board is
+ * re-read constantly, and "have we already done this one" has to survive a
+ * restart and a redeploy. One row per conversation per kind.
+ */
+export const followUps = mysqlTable(
+  "follow_ups",
+  {
+    id: int("id").primaryKey().autoincrement(),
+    conversationId: varchar("conversation_id", { length: 191 }).notNull(),
+    // "cold" — they went quiet on us. "aftercare" — three days post-tattoo.
+    kind: varchar("kind", { length: 32 }).notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => ({
+    once: uniqueIndex("follow_ups_conversation_kind").on(table.conversationId, table.kind),
+  })
+);
+
 export const appSettings = mysqlTable("app_settings", {
   name: varchar("name", { length: 64 }).primaryKey(),
   value: text("value"),
