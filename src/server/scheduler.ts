@@ -5,7 +5,7 @@ import { syncFeed } from "./feed.js";
 import { ensureMessengerSubscription } from "./facebook.js";
 import { draftForUnanswered, draftColdFollowUps, draftAftercareMessages } from "./agent.js";
 import { notifyOnce, clearAlert } from "./push.js";
-import { getFacebookConfig, getWebhookRejections } from "./db.js";
+import { getFacebookConfig, getWebhookRejections, dropDraftsAnsweringOurselves } from "./db.js";
 import { describeToken } from "./token.js";
 import { pruneStoredImages } from "./housekeeping.js";
 
@@ -46,6 +46,27 @@ export function startScheduler() {
    * would be rude to an API we depend on.
    */
   cron.schedule("*/3 * * * *", async () => {
+    /**
+     * Clear any card that is answering US.
+     *
+     * `dropDraftsAnsweringOurselves` has existed for a while but only ever
+     * ran on a manual Import, so a card in this state sat on the board until
+     * somebody happened to press a button. Brad found one the hard way: a
+     * card headed "THEY SAID" with the studio's own quote under it.
+     *
+     * It is a cheap DELETE with a join and it runs before the drafting, so a
+     * bad card is gone on the next pass rather than the next import. The
+     * thread goes back to being unanswered and is drafted for properly.
+     */
+    try {
+      const dropped = await dropDraftsAnsweringOurselves();
+      if (dropped) {
+        console.log(`[Scheduler] Dropped ${dropped} draft(s) that were answering our own message`);
+      }
+    } catch (error) {
+      console.error("[Scheduler] Couldn't sweep self-answering drafts:", (error as Error).message);
+    }
+
     // Two separate jobs, and the second must not depend on the first.
     //
     // It used to: the draft pass ran only when the import had found new

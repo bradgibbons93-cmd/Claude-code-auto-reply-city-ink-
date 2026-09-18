@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { verifyWebhookSignature } from "../facebook.js";
 import { handleCustomerMessage, handleEcho } from "../agent.js";
+import { getPageIdentity } from "../facebook.js";
 import {
   getFacebookConfig,
   recordWebhookDelivery,
@@ -215,6 +216,34 @@ router.post("/facebook", async (req: RawBodyRequest, res: Response) => {
 
           if (!event.sender?.id) return;
           if (!message.text && !photoUrls.length && !others.length) return;
+
+          /**
+           * A message from OUR OWN account is ours, whatever `is_echo` says.
+           *
+           * Messenger sets `is_echo` on the studio's own outgoing messages and
+           * the branch above catches them. Instagram is not reliably the same,
+           * and Instagram sending only started working the day Meta granted
+           * the permission — so this path had never once run for a studio
+           * message until today. Anything that slips through gets stored as
+           * the CUSTOMER having said it, and then the agent reads the
+           * studio's own quote back as the customer's words and the board
+           * prints it under "THEY SAID".
+           *
+           * Identity is asked of the token rather than trusted from config —
+           * the same rule as everywhere else in this file.
+           */
+          const identity = await getPageIdentity().catch(() => null);
+          if (identity?.id && event.sender.id === identity.id) {
+            console.log(
+              `[Webhook] ${platform} message from our own account (${event.sender.id}) — recording as ours, not the customer's`
+            );
+            await handleEcho(
+              event.recipient?.id ?? "",
+              message.mid ?? `echo_${Date.now()}`,
+              message.text ?? ""
+            );
+            return;
+          }
 
           const describedOther = others.length ? describeAttachments(others) : "";
 

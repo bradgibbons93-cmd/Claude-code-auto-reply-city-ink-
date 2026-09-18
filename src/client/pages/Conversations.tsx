@@ -107,9 +107,19 @@ function PendingReplyCard({
   // message in the thread instead made correct drafts look wrong — a reply to
   // "where are you located" was labelled with a later "how much is this",
   // so it read as though the agent had answered the wrong question.
+  // Both halves insist the message is actually the CUSTOMER'S.
+  //
+  // The id lookup didn't, and Brad caught it: a card headed "THEY SAID" with
+  // the studio's own quote under it — "Hi Rebecca, Tattoo 1 ... $300-$350 ...
+  // Thank you so much 😊 xx" — presented as Rebecca's words. If a draft's
+  // customerMessageId ever points at one of our own messages, rendering it
+  // unchecked puts our words in the customer's mouth on the one screen the
+  // studio trusts. The data fault is fixed at source too, but this is the
+  // line that makes the symptom impossible.
   const answering =
-    (thread ?? []).find((m) => m.messageId === draft.customerMessageId) ??
-    [...(thread ?? [])].reverse().find((m) => m.senderType === "customer");
+    (thread ?? []).find(
+      (m) => m.messageId === draft.customerMessageId && m.senderType === "customer"
+    ) ?? [...(thread ?? [])].reverse().find((m) => m.senderType === "customer");
 
   // Reference photos come down with the draft, gathered across the thread —
   // they usually arrive a message or two BEFORE the question ("(sent a

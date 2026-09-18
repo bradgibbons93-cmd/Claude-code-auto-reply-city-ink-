@@ -320,6 +320,31 @@ These are drafts on purpose and it should stay that way. A follow-up is the
 message most likely to read as automated when it lands wrong, and this app's
 whole promise is that a person reads every word first.
 
+**The board showed the studio's own quote under "THEY SAID".** Brad, with a
+screenshot, the day Instagram sending was approved: a card headed THEY SAID
+carrying *"Hi Rebecca, Tattoo 1 - a memorial of your dog ... $300-$350 ...
+Thank you so much 😊 xx"* — the studio's own message, presented as Rebecca's
+words, on the one screen the studio trusts.
+
+Three things had to be wrong at once and all three are fixed:
+
+- **The card's lookup didn't check who said it.** It found the message by
+  `customerMessageId` and rendered it, with no assertion that it came from the
+  customer. Both halves require `senderType === "customer"` now. This is the
+  line that makes the symptom impossible regardless of the data.
+- **A message from our own account is ours, whatever `is_echo` says.**
+  Messenger sets the flag; Instagram is not reliably the same, and Instagram
+  sending had never once worked before that day — so this path had never run
+  for a studio message. Anything slipping past was stored as the CUSTOMER
+  having said it, and then the agent read the studio's own quote back as the
+  customer's words. The webhook now compares the sender against
+  `getPageIdentity()` and routes it to `handleEcho`.
+- **`dropDraftsAnsweringOurselves()` only ever ran on a manual Import.** It
+  has existed for a while and does exactly the right thing — delete any
+  pending card whose `customer_message_id` is not a customer message — but
+  nothing called it on a schedule, so a bad card sat there until somebody
+  pressed a button. It runs at the top of the three-minute poll now.
+
 **A refresh button and "Updated 12s ago" sit above the board.** It already
 refetched every ten seconds; there was simply no way to SEE that, so a wrong
 card was indistinguishable from an old one and the first suspicion was always
