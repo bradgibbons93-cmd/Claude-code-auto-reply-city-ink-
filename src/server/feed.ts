@@ -27,6 +27,53 @@ export interface FeedSyncResult {
   detail: string;
 }
 
+/** What Facebook says about the token we actually have saved. */
+interface TokenFacts {
+  /** "PAGE" or "USER" — reading Page posts needs a Page one. */
+  type?: string;
+  scopes: string[];
+  issuedAt?: Date;
+  valid: boolean;
+  appId?: string;
+  appName?: string;
+}
+
+/**
+ * Ask Facebook what the saved token really is.
+ *
+ * Guessing at this has already cost an evening. The settings box only ever
+ * says a token is saved, never which one, so a paste that silently didn't
+ * take looks identical to a permission Facebook refused to grant. debug_token
+ * distinguishes the two, and it's the app's own credentials doing the asking,
+ * so it works even when the token itself can't read anything.
+ */
+async function inspectToken(
+  token: string,
+  appId?: string | null,
+  appSecret?: string | null
+): Promise<TokenFacts | undefined> {
+  if (!appId || !appSecret) return undefined;
+  try {
+    const { data } = await axios.get(`${GRAPH}/debug_token`, {
+      params: { input_token: token, access_token: `${appId}|${appSecret}` },
+      timeout: 10000,
+    });
+    const info = data?.data ?? {};
+    return {
+      type: typeof info.type === "string" ? info.type : undefined,
+      scopes: Array.isArray(info.scopes) ? (info.scopes as string[]) : [],
+      issuedAt: info.issued_at ? new Date(info.issued_at * 1000) : undefined,
+      valid: info.is_valid !== false,
+      // Which app issued it. A studio can have more than one Meta app, and
+      // App Review belongs to exactly one of them.
+      appId: info.app_id != null ? String(info.app_id) : undefined,
+      appName: typeof info.application === "string" ? info.application : undefined,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 interface GraphPost {
   id: string;
   message?: string;
@@ -139,26 +186,42 @@ export async function syncFeed(days = BACKFILL_DAYS): Promise<FeedSyncResult> {
   let facebook = 0;
   let instagram = 0;
 
-  try {
-    const posts = await pagedGet(
-      `${GRAPH}/me/posts`,
-      {
-        fields:
-          "id,message,created_time,permalink_url,full_picture,likes.summary(true),comments.summary(true)",
-        limit: "50",
-        access_token: token,
-      },
-      6,
-      since
-    );
-    facebook = await store(posts, "facebook", since);
-  } catch (error) {
-    const err = error as { response?: { status?: number; data?: unknown } };
-    problems.push(
-      err.response
-        ? `Facebook posts → HTTP ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 200)}`
-        : `Facebook posts → ${(error as Error).message}`
-    );
+  // /me/posts is the obvious edge and the wrong one. With a valid Page token
+  // carrying pages_read_engagement it still answers "(#10) requires
+  // pages_read_engagement or Page Public Content Access" — the error for
+  // reading a Page you don't manage, which is not what's happening. The
+  // documented edge for a Page's own posts is published_posts; feed is the
+  // older equivalent and includes other people's posts to the Page. Try them
+  // in that order rather than sending anyone back to the app dashboard for a
+  // permission they already granted.
+  const POST_EDGES = ["me/published_posts", "me/feed", "me/posts"];
+  for (const edge of POST_EDGES) {
+    try {
+      const posts = await pagedGet(
+        `${GRAPH}/${edge}`,
+        {
+          fields:
+            "id,message,created_time,permalink_url,full_picture,likes.summary(true),comments.summary(true)",
+          limit: "50",
+          access_token: token,
+        },
+        6,
+        since
+      );
+      facebook = await store(posts, "facebook", since);
+      // An edge that worked settles it — the ones tried before it were
+      // attempts, not faults, and must not be reported as though they were.
+      problems.length = 0;
+      if (edge !== POST_EDGES[0]) console.log(`[Feed] Read the Page's posts from /${edge}`);
+      break;
+    } catch (error) {
+      const err = error as { response?: { status?: number; data?: unknown } };
+      problems.push(
+        err.response
+          ? `/${edge} → HTTP ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 400)}`
+          : `/${edge} → ${(error as Error).message}`
+      );
+    }
   }
 
   // Instagram only exists here if a business account is linked to the Page.
@@ -191,12 +254,39 @@ export async function syncFeed(days = BACKFILL_DAYS): Promise<FeedSyncResult> {
   }
 
   const total = facebook + instagram;
-  const detail = problems.length
-    ? `${total} post${total === 1 ? "" : "s"} in. ${explain(problems)}`
-    : `${facebook} from Facebook, ${instagram} from Instagram.`;
+  if (!problems.length) {
+    const detail = `${facebook} from Facebook, ${instagram} from Instagram.`;
+    console.log(`[Feed] Sync: ${detail}`);
+    return { facebook, instagram, detail };
+  }
 
-  console.log(`[Feed] Sync: ${detail}`);
+  // Log what Facebook actually said before turning it into advice. An earlier
+  // version kept only the advice, so a wrong guess was indistinguishable from
+  // a right one and the logs couldn't settle it.
+  console.warn(`[Feed] Sync failed. Graph said: ${problems.join(" · ")}`);
+
+  const facts = await inspectToken(token, config.appId, config.appSecret);
+  if (facts) {
+    console.warn(
+      `[Feed] Saved token: app=${facts.appId ?? "unknown"}${facts.appName ? ` (${facts.appName})` : ""} ` +
+        `type=${facts.type ?? "unknown"} valid=${facts.valid} ` +
+        `issued=${facts.issuedAt?.toISOString() ?? "unknown"} scopes=${facts.scopes.join(",") || "none"}`
+    );
+  }
+
+  const detail = `${total} post${total === 1 ? "" : "s"} in. ${explain(problems, facts)}`;
   return { facebook, instagram, detail };
+}
+
+/** "on 30 Aug at 2:14 pm" — a token's age is how you spot the wrong one. */
+function when(at: Date): string {
+  return at.toLocaleString("en-AU", {
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "Australia/Melbourne",
+  });
 }
 
 /**
@@ -205,17 +295,61 @@ export async function syncFeed(days = BACKFILL_DAYS): Promise<FeedSyncResult> {
  * A raw Graph error dumped on screen reads as a broken app. Nearly every
  * failure here is one of a handful of known causes with a known fix, so name
  * the fix. The raw text is still logged for anything genuinely unexpected.
+ *
+ * Where the fix depends on what the saved token is, check it rather than
+ * assume: telling someone to add a permission their token already carries
+ * sends them round the same loop a second time.
  */
-function explain(problems: string[]): string {
+function explain(problems: string[], facts?: TokenFacts): string {
   const all = problems.join(" ");
 
   if (/pages_read_engagement|Page Public Content Access/i.test(all)) {
+    // A User token reads the person's own posts, not the Page's, and no
+    // permission will change that. It's the easiest wrong token to paste,
+    // because it's the one the Graph Explorer shows you first.
+    if (facts?.type && facts.type.toUpperCase() !== "PAGE") {
+      return (
+        `The saved token is a ${facts.type.toLowerCase()} token, not the Page token, so ` +
+        "Facebook is looking for your own posts rather than the studio's. In the Graph API " +
+        "Explorer, switch the \"User or Page\" dropdown to City Ink Tattoo Geelong, copy the " +
+        "token that appears, and paste that into the Facebook Page box above."
+      );
+    }
+
+    if (facts && !facts.scopes.includes("pages_read_engagement")) {
+      const age = facts.issuedAt ? ` The one saved was issued ${when(facts.issuedAt)}.` : "";
+      return (
+        "Facebook won't hand over the Page's posts until the connection includes the " +
+        `pages_read_engagement permission, and the saved token doesn't carry it.${age} ` +
+        "Regenerate the Page access token in the Meta app dashboard with pages_read_engagement " +
+        "ticked, paste it into the Facebook Page box above, and refresh. Messages are " +
+        "unaffected — they use a different permission and keep working either way."
+      );
+    }
+
+    // The token has the permission and Facebook refuses anyway. A permission
+    // lives in two places: on the token, where the person granted it, and on
+    // the app, where Meta decides whether the app may use it at all. Only the
+    // first of those is fixed by generating a new token, which is why doing so
+    // changes nothing here. Nothing on this screen can fix the second.
+    if (facts?.scopes.includes("pages_read_engagement")) {
+      return (
+        "Nothing is wrong with the connection — the saved token is the Page token, it's " +
+        "valid, and pages_read_engagement is on it. Generating another one won't change " +
+        "this. The permission also has to be switched on for the app itself, and that's " +
+        "what's missing: in the Meta app dashboard under App Review → Permissions and " +
+        "Features, find pages_read_engagement and request access for it. Until that's " +
+        "granted the Live feed stays empty. Messages are completely unaffected — they use " +
+        "a different permission and are working."
+      );
+    }
+
     return (
       "Facebook won't hand over the Page's posts until the connection includes the " +
-      "pages_read_engagement permission. It isn't on the saved token. Regenerate the " +
-      "Page access token in the Meta app dashboard with pages_read_engagement ticked, " +
-      "paste it into the Facebook Page box above, and refresh. Messages are unaffected — " +
-      "they use a different permission and keep working either way."
+      "pages_read_engagement permission. Regenerate the Page access token in the Meta app " +
+      "dashboard with pages_read_engagement ticked, paste it into the Facebook Page box " +
+      "above, and refresh. Messages are unaffected — they use a different permission and " +
+      "keep working either way."
     );
   }
 

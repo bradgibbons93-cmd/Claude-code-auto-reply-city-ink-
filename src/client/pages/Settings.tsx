@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import PhoneNotifications from "@/components/PhoneNotifications";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,6 +27,7 @@ export default function Settings() {
 
   const { data: fb } = trpc.config.facebook.useQuery();
   const { data: timely } = trpc.config.timely.useQuery();
+  const { data: review } = trpc.config.reviewUrl.useQuery();
   const { data: knowledge } = trpc.knowledge.list.useQuery();
   const { data: llm } = trpc.llm.status.useQuery();
 
@@ -74,8 +76,14 @@ export default function Settings() {
 
   const refreshNames = trpc.config.refreshNames.useMutation({
     onSuccess: (result) => {
-      if (result.named > 0) toast.success(`Named ${result.named} customer${result.named === 1 ? "" : "s"}`);
-      else toast.error("No names came back");
+      // A handful with no name is the resting state, not a failure: Facebook
+      // will not name those people to a Page at all. Shouting "No names came
+      // back" in red made a healthy inbox look broken.
+      if (result.named > 0) {
+        toast.success(`Named ${result.named} customer${result.named === 1 ? "" : "s"}`);
+      } else {
+        toast("Everyone Facebook will name is already named", { duration: 6000 });
+      }
       utils.conversations.list.invalidate();
       utils.pendingReplies.list.invalidate();
       utils.dashboard.invalidate();
@@ -90,11 +98,15 @@ export default function Settings() {
   // Kept apart from the Page token on purpose — see the schema comment. One
   // box for both is how you take Messenger down while wiring up Instagram.
   const [instagramAccessToken, setInstagramAccessToken] = useState("");
+  // Instagram signs its webhooks with a different secret from Facebook's, and
+  // every Instagram DM was refused for want of it.
+  const [instagramAppSecret, setInstagramAppSecret] = useState("");
   const [appId, setAppId] = useState("");
   const [appSecret, setAppSecret] = useState("");
   const [verifyToken, setVerifyToken] = useState("city_ink_webhook_2024");
   const [bookingUrl, setBookingUrl] = useState("");
   const [calendarUrl, setCalendarUrl] = useState("");
+  const [reviewUrl, setReviewUrl] = useState("");
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
 
@@ -114,10 +126,18 @@ export default function Settings() {
     if (timely?.calendarIcsUrl) setCalendarUrl(timely.calendarIcsUrl);
   }, [timely]);
 
+  useEffect(() => {
+    if (review?.url) setReviewUrl(review.url);
+  }, [review]);
+
   const saveFacebook = trpc.config.saveFacebook.useMutation({
-    onSuccess: () => {
-      toast.success("Page connected");
+    onSuccess: (result) => {
+      // Say what actually happened to the token. A pasted one is usually
+      // swapped for the Page's own, which never expires — and knowing that
+      // is the difference between doing this once and doing it every day.
+      toast.success(result?.detail ?? "Page connected", { duration: 8000 });
       utils.config.facebook.invalidate();
+      utils.config.messengerDelivery.invalidate();
     },
     // Reporting the real error matters: this used to always blame empty
     // fields, which sent you hunting through the form when the actual
@@ -131,6 +151,20 @@ export default function Settings() {
       utils.config.timely.invalidate();
     },
     onError: (error) => toast.error(error.message || "That doesn't look like a valid URL."),
+  });
+
+  const saveReviewUrl = trpc.config.saveReviewUrl.useMutation({
+    // Say which of the two things happened. Saving an empty box is a
+    // deliberate action (stop asking for reviews), not a failed save, and a
+    // bare "Saved" would leave that ambiguous.
+    onSuccess: (result) => {
+      toast.success(
+        result.url ? "Review link saved" : "Review link cleared — the agent won't ask any more"
+      );
+      utils.config.reviewUrl.invalidate();
+    },
+    onError: (error) =>
+      toast.error(error.message || "That doesn't look like a valid link. Paste the whole thing."),
   });
 
   const addKnowledge = trpc.knowledge.create.useMutation({
@@ -223,22 +257,58 @@ export default function Settings() {
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
+          {/* Facebook delivering and the app refusing is the worst of the
+              failures and the least visible: every other panel reads healthy
+              while real enquiries are turned away. It goes above everything. */}
+          {delivery?.rejected && (
+            <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+              <strong>
+                Facebook is sending {delivery.rejected.count} message
+                {delivery.rejected.count === 1 ? "" : "s"} that this app is turning away.
+              </strong>{" "}
+              They're being rejected because the saved <strong>App secret</strong> doesn't match
+              the one Facebook signs with — so the messages are real, and they aren't getting in.
+              Copy the App secret from the Meta app dashboard (Settings → Basic → App secret →
+              Show) into the box below and save. Facebook retries, so recent ones should land
+              once it matches.
+              {delivery.rejected.detail && (
+                <>
+                  {" "}
+                  <span className="mt-2 block font-mono text-xs opacity-80">
+                    Last one: {delivery.rejected.detail}
+                  </span>
+                </>
+              )}
+            </div>
+          )}
+
           <div
             className={`rounded-lg border p-3 text-sm ${
               delivery?.subscribed && !delivery?.missing?.length
                 ? "border-success/40 bg-success/10 text-success"
-                : "border-destructive/40 bg-destructive/5 text-destructive"
+                : delivery?.unknown
+                  ? "border-border bg-beige/30 text-charcoal"
+                  : "border-destructive/40 bg-destructive/5 text-destructive"
             }`}
           >
             {delivery?.detail ?? "Checking…"}
           </div>
 
+          {/* "no" and "we couldn't ask" are different answers. Printing the
+              first when we meant the second turned an expired token into a
+              hunt for a subscription that was never broken. */}
           <dl className="grid grid-cols-[9rem_1fr] gap-x-3 gap-y-1 text-sm">
             <dt className="text-muted-foreground">Page subscribed</dt>
-            <dd className="text-charcoal">{delivery ? (delivery.subscribed ? "yes" : "no") : "…"}</dd>
+            <dd className="text-charcoal">
+              {!delivery ? "…" : delivery.unknown ? "couldn't check" : delivery.subscribed ? "yes" : "no"}
+            </dd>
             <dt className="text-muted-foreground">Events</dt>
             <dd className="break-all text-charcoal">
-              {delivery?.fields?.length ? delivery.fields.join(", ") : "none"}
+              {delivery?.unknown
+                ? "couldn't check"
+                : delivery?.fields?.length
+                  ? delivery.fields.join(", ")
+                  : "none"}
             </dd>
             <dt className="text-muted-foreground">Last delivery</dt>
             <dd className="text-charcoal">
@@ -320,6 +390,40 @@ export default function Settings() {
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
+          {/* The state of the saved token, before anything else on this card.
+              An expired one takes down messages, names and the import all at
+              once, and every panel then reports its own symptom instead of
+              the cause. */}
+          {fb?.token && (
+            <div
+              className={`rounded-lg border p-3 text-sm ${
+                !fb.token.valid
+                  ? "border-destructive/40 bg-destructive/5 text-destructive"
+                  : fb.token.permanent
+                    ? "border-success/40 bg-success/10 text-success"
+                    : "border-border bg-beige/30 text-charcoal"
+              }`}
+            >
+              {!fb.token.valid ? (
+                <>
+                  <strong>The saved Page token has expired.</strong> Nothing can be read from
+                  Facebook until it's replaced — no new messages, no names, no import. Paste a
+                  new one below; the user token from the Graph API Explorer is fine, the app
+                  swaps it for the Page's own permanent one.
+                </>
+              ) : fb.token.permanent ? (
+                "Page token is good and has no expiry — this shouldn't need doing again."
+              ) : (
+                <>
+                  <strong>This token expires {new Date(fb.token.expiresAt!).toLocaleString("en-AU", {
+                    day: "numeric", month: "short", hour: "numeric", minute: "2-digit",
+                  })}.</strong>{" "}
+                  Paste the user token from the Graph API Explorer below and the app will trade
+                  it for a permanent one.
+                </>
+              )}
+            </div>
+          )}
           <Input placeholder="Page ID" value={pageId} onChange={(e) => setPageId(e.target.value)} />
           <Input
             placeholder="Page name (optional)"
@@ -341,6 +445,16 @@ export default function Settings() {
             type="password"
             value={instagramAccessToken}
             onChange={(e) => setInstagramAccessToken(e.target.value)}
+          />
+          <Input
+            placeholder={
+              fb?.hasInstagramAppSecret
+                ? "Instagram app secret — saved, leave blank to keep it"
+                : "Instagram app secret (from the Instagram product, not the Facebook one)"
+            }
+            type="password"
+            value={instagramAppSecret}
+            onChange={(e) => setInstagramAppSecret(e.target.value)}
           />
           <Input placeholder="App ID" value={appId} onChange={(e) => setAppId(e.target.value)} />
           <Input
@@ -364,6 +478,7 @@ export default function Settings() {
                 appSecret,
                 webhookVerifyToken: verifyToken,
                 instagramAccessToken: instagramAccessToken || undefined,
+                instagramAppSecret: instagramAppSecret || undefined,
               })
             }
             disabled={saveFacebook.isPending}
@@ -372,6 +487,8 @@ export default function Settings() {
           </Button>
         </CardContent>
       </Card>
+
+      <PhoneNotifications />
 
       <Card className="border-border">
         <CardHeader>
@@ -441,6 +558,46 @@ export default function Settings() {
             disabled={saveTimely.isPending}
           >
             {saveTimely.isPending ? "Saving…" : "Save calendar"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/*
+        The Google review link.
+
+        Opt-in on purpose and never invented. With this empty the aftercare
+        follow-up thanks them and stops; filled in, the agent asks ONCE, only
+        after a genuinely happy reply, and never when the customer reports a
+        problem — that case goes to Brad with no reassurance and no diagnosis.
+
+        This box is here because the server has read the setting since the
+        follow-ups were built and nothing could ever write it.
+      */}
+      <Card className="border-border">
+        <CardHeader>
+          <CardTitle className="font-display text-xl text-charcoal">Google review link</CardTitle>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {review?.url
+              ? "Saved. After a happy aftercare reply the agent asks once for a review — and never when someone reports a problem."
+              : "Optional. Without it the aftercare message just thanks them and stops — it won't invent a link or ask for a review."}
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Input
+            placeholder="https://g.page/r/.../review"
+            value={reviewUrl}
+            onChange={(e) => setReviewUrl(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            Google Maps → your profile picture →{" "}
+            <span className="text-charcoal/80">Your Business Profile</span> →{" "}
+            <span className="text-charcoal/80">Ask for reviews</span> → copy the link.
+          </p>
+          <Button
+            onClick={() => saveReviewUrl.mutate({ url: reviewUrl.trim() })}
+            disabled={saveReviewUrl.isPending}
+          >
+            {saveReviewUrl.isPending ? "Saving…" : "Save review link"}
           </Button>
         </CardContent>
       </Card>

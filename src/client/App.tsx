@@ -15,7 +15,6 @@ import {
   Moon,
   Sun,
   Bell,
-  Search,
   Images,
   Rss,
 } from "lucide-react";
@@ -23,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
 import { useTheme } from "@/lib/useTheme";
 import { StampBadge, InkDefs } from "@/components/Logo";
+import InboxSearch from "@/components/InboxSearch";
 import Dashboard from "./pages/Dashboard";
 import Conversations from "./pages/Conversations";
 import Bookings from "./pages/Bookings";
@@ -122,7 +122,10 @@ function StatusBar() {
   }, []);
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 flex justify-center pb-4">
+    // Bottom-right rather than centred: sitting in the middle of the page it
+    // covered whatever card happened to be under it, which on the dashboard
+    // was the top of a scheduled post.
+    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 flex justify-end pb-4 pr-3 sm:pr-6">
       <div className="glass pointer-events-auto flex items-center gap-4 rounded-full border px-5 py-2 text-xs text-muted-foreground shadow-soft">
         <span className="flex items-center gap-2">
           <span className="live-dot" />
@@ -224,14 +227,7 @@ export default function App() {
             {menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
 
-          <label className="relative hidden min-w-0 flex-1 items-center md:flex lg:max-w-md">
-            <Search className="pointer-events-none absolute left-3 h-4 w-4 text-muted-foreground" />
-            <input
-              type="search"
-              placeholder="Search anything…"
-              className="h-10 w-full rounded-xl border border-border bg-input pl-9 pr-3 text-sm transition-all duration-300 placeholder:text-muted-foreground focus:border-sepia/60 focus:shadow-glow focus:outline-none"
-            />
-          </label>
+          <InboxSearch />
 
           <div className="flex-1 md:hidden" />
 
