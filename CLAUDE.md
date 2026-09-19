@@ -389,6 +389,60 @@ he sent and on the sign above the door; the mockup's gold would have been a
 third colour the studio doesn't own, which this file already has a rule
 about.
 
+**A photo opened with no way back out, and on the home screen that meant
+force-quitting.** Brad: *"when I click on a photo either the ones uploaded by
+artists or the customer pictures, there is no back button and I have to cancel
+the app."*
+
+Every photo was an `<a target="_blank">`. In a browser that opens a tab you
+close. Installed on the **home screen** — which is where he works, and which
+Apple requires before a push can arrive at all — the app runs standalone with
+no address bar, no tabs and no back button, so the picture covered everything
+with no exit. Force-quitting was genuinely the only way out, and it dropped
+him back on the dashboard rather than the thread he was reading.
+
+`PhotoViewer` opens it inside the app with four ways out: the close button,
+the backdrop, Escape, and the phone's own back gesture. Three of those are
+obvious; the fourth is the one he'd actually reach for after being trapped.
+
+Three things about it are load-bearing, and I got two of them wrong first:
+
+- **It renders through a portal into `<body>`.** In place, the close button
+  came out UNDERNEATH the header — the one control that had to work.
+  `position: fixed` resolves against the nearest ancestor carrying a
+  transform, not the viewport, and these photos sit inside cards with
+  `animate-fade-up`, which is a transform. So `fixed inset-0 z-50` was pinned
+  inside a card and trapped below a `z-20` header.
+- **The back-gesture handling must not double-pop.** The first version called
+  `history.back()` in cleanup unconditionally, so a real back press consumed a
+  second entry and left the app entirely — worse than the bug being fixed. It
+  tracks whether popstate already did it.
+- **The effect runs on mount/unmount only.** `onClose` is an inline arrow at
+  every call site, so a fresh identity each render; with it in the deps this
+  pushed a history entry per render until back did nothing at all. The
+  callback lives in a ref.
+
+**Playwright's `isVisible()` called that buried close button visible.** Being
+covered by another element is not being hidden, so the assertion passed while
+the control was unreachable. The screenshot is what caught it. Anything that
+must be TAPPABLE gets `document.elementFromPoint` at its centre, not
+`isVisible()`.
+
+**The thread had no scroll area of its own, so "up" left the conversation.**
+Brad, same message: *"I can't scroll up in the messages to see previous."*
+
+The messages were just more page. Opening a thread left the view wherever it
+already was — thousands of pixels up, on the dashboard counters and the draft
+board — and scrolling up inside a conversation walked back out of it instead
+of reaching older messages. "Load older messages" was real, worked, and sat at
+the top of that buried block where he could never see it. Measured at 430px:
+6722px of page, a 932px window, and the thread far below the fold.
+
+It behaves like a messaging app now: opening a thread scrolls it into view and
+lands on the newest message, the list scrolls itself (`max-h-[60vh]`,
+`overscroll-contain`) so up always means further back, and loading older
+messages restores the distance from the bottom so the view doesn't lurch.
+
 **A refresh button and "Updated 12s ago" sit above the board.** It already
 refetched every ten seconds; there was simply no way to SEE that, so a wrong
 card was indistinguishable from an old one and the first suspicion was always

@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearch } from "wouter";
 import { format, formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
+import PhotoViewer from "@/components/PhotoViewer";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -127,6 +128,8 @@ function PendingReplyCard({
   // answered message alone meant pricing a tattoo you couldn't see. Assembled
   // server-side so this page and the dashboard can't disagree.
   const recentPhotos = draft.photoUrls ?? [];
+  // Which reference photo is open, if any. -1 is closed.
+  const [photo, setPhoto] = useState(-1);
 
   // Anything older than a fortnight is almost certainly cold, and quite
   // possibly answered by hand somewhere this app can't see. Saying so beats
@@ -291,17 +294,31 @@ function PendingReplyCard({
               They said
             </p>
             <p className="mt-1 whitespace-pre-wrap text-sm text-charcoal">{answering.content}</p>
+            {photo >= 0 && (
+              <PhotoViewer
+                urls={recentPhotos}
+                index={photo}
+                onIndex={setPhoto}
+                onClose={() => setPhoto(-1)}
+                alt="Reference photo the customer sent"
+              />
+            )}
             {!!recentPhotos.length && (
               <div className="mt-2 flex flex-wrap gap-2">
-                {recentPhotos.map((url) => (
-                  <a key={url} href={url} target="_blank" rel="noopener noreferrer">
+                {recentPhotos.map((url, i) => (
+                  <button
+                    key={url}
+                    type="button"
+                    onClick={() => setPhoto(i)}
+                    className="rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
                     <img
                       src={url}
                       alt="Reference photo the customer sent"
                       className="h-28 w-28 rounded-lg border border-border object-cover"
                       loading="lazy"
                     />
-                  </a>
+                  </button>
                 ))}
               </div>
             )}
@@ -440,6 +457,39 @@ export default function Conversations() {
   // to do with a new message arriving while the studio is scrolled back
   // through last month, and asking for a bigger window has no such problem.
   const [windowSize, setWindowSize] = useState(50);
+  // Which photo in the thread is open. Carries its whole message's set, so
+  // the arrows step through the reference photos that arrived together.
+  const [threadPhoto, setThreadPhoto] = useState<{ urls: string[]; index: number } | null>(null);
+
+  /*
+   * Brad: "I can't scroll up in the messages to see previous."
+   *
+   * The thread had no scroll area of its own, so on a phone it was just more
+   * page. Opening a thread left the view wherever it already was — thousands
+   * of pixels up, on the dashboard counters and the draft board — and
+   * scrolling up inside a conversation walked back out of it into the board
+   * instead of reaching older messages. "Load older messages" was real and
+   * sat at the top of that buried block, so he never saw it.
+   *
+   * Two effects fix it, and both are what a messaging app does:
+   *   - opening a thread brings it into view and lands on the NEWEST message
+   *   - the message list scrolls itself, so up means further back in the
+   *     conversation, every time
+   */
+  const threadPanel = useRef<HTMLDivElement>(null);
+  const messageList = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!selected) return;
+    threadPanel.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    // Newest last, so the bottom is where the conversation actually is.
+    const list = messageList.current;
+    if (list) list.scrollTop = list.scrollHeight;
+  }, [selected]);
+
+  // Loading older messages must not yank the view. Keep the message that was
+  // under the thumb where it was by restoring the distance from the bottom.
+  const pinnedFromBottom = useRef<number | null>(null);
   useEffect(() => setWindowSize(50), [selected]);
 
   const { data: threadPage } = trpc.conversations.messages.useQuery(
@@ -449,6 +499,18 @@ export default function Conversations() {
   const messages = threadPage?.messages;
   const totalMessages = threadPage?.total ?? 0;
   const hasOlder = totalMessages > (messages?.length ?? 0);
+
+  // Declared below `messages` on purpose — it is what the effect watches.
+  useEffect(() => {
+    const list = messageList.current;
+    if (!list) return;
+    if (pinnedFromBottom.current === null) {
+      list.scrollTop = list.scrollHeight;
+      return;
+    }
+    list.scrollTop = list.scrollHeight - pinnedFromBottom.current;
+    pinnedFromBottom.current = null;
+  }, [messages]);
   const {
     data: pendingReplies,
     refetch: refetchPending,
@@ -735,6 +797,16 @@ export default function Conversations() {
           )}
         </div>
 
+        {threadPhoto && (
+          <PhotoViewer
+            urls={threadPhoto.urls}
+            index={threadPhoto.index}
+            onIndex={(i) => setThreadPhoto({ ...threadPhoto, index: i })}
+            onClose={() => setThreadPhoto(null)}
+            alt="Photo from the conversation"
+          />
+        )}
+
         <div>
           {!selected ? (
             <Card>
@@ -743,7 +815,7 @@ export default function Conversations() {
               </CardContent>
             </Card>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-4" ref={threadPanel}>
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <Avatar name={active?.senderName || "Customer"} src={active?.avatarUrl} />
@@ -770,7 +842,14 @@ export default function Conversations() {
                 )}
               </div>
 
-              <div className="space-y-3">
+              {/* Its own scroll area, so "up" means further back in the
+                  conversation rather than back out into the board. Capped in
+                  viewport height so a long thread never pushes the reply box
+                  off the bottom of a phone. */}
+              <div
+                ref={messageList}
+                className="max-h-[60vh] space-y-3 overflow-y-auto overscroll-contain pr-1 sm:max-h-[65vh]"
+              >
                 {/* Older messages, on request. The thread opens on the most
                     recent fifty — the studio nearly always wants the bottom
                     of a conversation — and reaches further back only when
@@ -781,7 +860,16 @@ export default function Conversations() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setWindowSize((n) => n + 50)}
+                      onClick={() => {
+                        // Remember the distance from the bottom so the
+                        // messages already on screen stay put when fifty
+                        // more land above them.
+                        const list = messageList.current;
+                        pinnedFromBottom.current = list
+                          ? list.scrollHeight - list.scrollTop
+                          : null;
+                        setWindowSize((n) => n + 50);
+                      }}
                     >
                       Load older messages
                     </Button>
@@ -808,15 +896,20 @@ export default function Conversations() {
                     <p className="whitespace-pre-wrap">{m.content}</p>
                     {!!m.attachmentUrls?.length && (
                       <div className="mt-2 flex flex-wrap gap-2">
-                        {m.attachmentUrls.map((url) => (
-                          <a key={url} href={url} target="_blank" rel="noopener noreferrer">
+                        {m.attachmentUrls.map((url, i) => (
+                          <button
+                            key={url}
+                            type="button"
+                            onClick={() => setThreadPhoto({ urls: m.attachmentUrls ?? [], index: i })}
+                            className="rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                          >
                             <img
                               src={url}
                               alt="Reference photo"
                               className="h-32 w-32 rounded-lg object-cover"
                               loading="lazy"
                             />
-                          </a>
+                          </button>
                         ))}
                       </div>
                     )}

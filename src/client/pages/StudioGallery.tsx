@@ -1,4 +1,5 @@
 import { useState } from "react";
+import PhotoViewer from "@/components/PhotoViewer";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,9 @@ import { toast } from "sonner";
  * the studio still wants the whole back catalogue.
  */
 export default function StudioGallery() {
+  // Which photo is open, -1 for none. The arrows walk the whole gallery,
+  // which is what a grid of photos is for.
+  const [photo, setPhoto] = useState(-1);
   const utils = trpc.useUtils();
   const [unusedOnly, setUnusedOnly] = useState(false);
 
@@ -107,22 +111,39 @@ export default function StudioGallery() {
               Once an artist scans the code above, their photos land here.
             </p>
           ) : (
+            <>
+              {photo >= 0 && uploads[photo] && (
+                <PhotoViewer
+                  urls={uploads.map((u) => u.url)}
+                  index={photo}
+                  onIndex={setPhoto}
+                  onClose={() => setPhoto(-1)}
+                  alt={uploads[photo].note || "Tattoo by the studio"}
+                />
+              )}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-              {uploads.map((upload) => (
+              {uploads.map((upload, i) => (
                 <figure
                   key={upload.id}
                   className={`group relative overflow-hidden rounded-xl border border-border ${
                     upload.usedAt ? "opacity-55" : ""
                   }`}
                 >
-                  <a href={upload.url} target="_blank" rel="noopener noreferrer">
+                  {/* Opens in the app. It used to be target="_blank", which
+                      on the home screen has no back button — Brad had to
+                      force-quit to get out of a photo. */}
+                  <button
+                    type="button"
+                    onClick={() => setPhoto(i)}
+                    className="block w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
                     <img
                       src={upload.url}
                       alt={upload.note || `Tattoo by ${upload.artistName || "an artist"}`}
                       className="aspect-square w-full object-cover"
                       loading="lazy"
                     />
-                  </a>
+                  </button>
 
                   <figcaption className="space-y-0.5 p-2">
                     <p className="truncate text-xs text-charcoal">
@@ -173,7 +194,8 @@ export default function StudioGallery() {
                   </div>
                 </figure>
               ))}
-            </div>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
