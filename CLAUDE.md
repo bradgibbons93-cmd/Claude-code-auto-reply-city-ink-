@@ -320,6 +320,29 @@ These are drafts on purpose and it should stay that way. A follow-up is the
 message most likely to read as automated when it lands wrong, and this app's
 whole promise is that a person reads every word first.
 
+**The review link had no box, and the back half had shipped alone.** Brad
+found his link and sent it over, asking where it went. The honest answer was
+nowhere: `google_review_url` had been read by `composeDraft`,
+`draftColdFollowUps` and `draftAftercareMessages` since the follow-ups were
+built, and nothing in the app could ever WRITE it. "Paste it into Settings"
+would have sent him hunting for a field that did not exist — and this file
+already lists that exact shape twice (the gallery picker offering a path
+`posts.create` rejected; the 24MB photo route behind a 5MB global limit).
+
+`config.reviewUrl` and `config.saveReviewUrl` exist now, with a card in
+Settings between Calendar and What the agent knows. **An empty box clears it
+on purpose**: unset is a real state the agent handles — it thanks them and
+stops — so turning reviews off must not need a database edit.
+
+**Neither `followups.mjs` nor the first version of `reviewurl.mjs` proved the
+link reaches the MODEL.** Both asserted only that the setting round-tripped
+through the database, which is the same bug one layer down: a link that saves
+perfectly and is never put in the prompt is worth exactly as much as no box.
+`reviewurl.mjs` now stands up a stand-in provider and drives
+`draftForUnanswered`, then reads the body that was actually sent. Driving
+`decide()` would have been easier and wrong — it is private, and calling it
+directly tests the test's own call rather than the path a customer takes.
+
 **The board showed the studio's own quote under "THEY SAID".** Brad, with a
 screenshot, the day Instagram sending was approved: a card headed THEY SAID
 carrying *"Hi Rebecca, Tattoo 1 - a memorial of your dog ... $300-$350 ...

@@ -16,6 +16,8 @@ import {
   setFacebookConfig,
   getTimelyConfig,
   setTimelyConfig,
+  getSetting,
+  setSetting,
   getStudioKnowledge,
   createKnowledge,
   updateKnowledge,
@@ -706,6 +708,29 @@ export const appRouter = t.router({
         })
       )
       .mutation(({ input }) => setTimelyConfig(input)),
+
+    /*
+     * The Google review link.
+     *
+     * The server has read `google_review_url` since the aftercare follow-up
+     * was built, but nothing ever wrote it — there was no box. Brad went
+     * looking for a field that did not exist, which is the same shape as
+     * every other entry in CLAUDE.md where the back half shipped without
+     * the front.
+     *
+     * Empty string clears it on purpose. Unset is a real state the agent
+     * handles (it thanks them and stops), so removing the link has to be
+     * possible without editing the database.
+     */
+    reviewUrl: publicProcedure.query(async () => ({
+      url: (await getSetting("google_review_url").catch(() => undefined)) ?? "",
+    })),
+    saveReviewUrl: publicProcedure
+      .input(z.object({ url: z.string().url().or(z.literal("")) }))
+      .mutation(async ({ input }) => {
+        await setSetting("google_review_url", input.url.trim());
+        return { url: input.url.trim() };
+      }),
   }),
 });
 

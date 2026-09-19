@@ -27,6 +27,7 @@ export default function Settings() {
 
   const { data: fb } = trpc.config.facebook.useQuery();
   const { data: timely } = trpc.config.timely.useQuery();
+  const { data: review } = trpc.config.reviewUrl.useQuery();
   const { data: knowledge } = trpc.knowledge.list.useQuery();
   const { data: llm } = trpc.llm.status.useQuery();
 
@@ -105,6 +106,7 @@ export default function Settings() {
   const [verifyToken, setVerifyToken] = useState("city_ink_webhook_2024");
   const [bookingUrl, setBookingUrl] = useState("");
   const [calendarUrl, setCalendarUrl] = useState("");
+  const [reviewUrl, setReviewUrl] = useState("");
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
 
@@ -123,6 +125,10 @@ export default function Settings() {
     if (timely?.bookingPageUrl) setBookingUrl(timely.bookingPageUrl);
     if (timely?.calendarIcsUrl) setCalendarUrl(timely.calendarIcsUrl);
   }, [timely]);
+
+  useEffect(() => {
+    if (review?.url) setReviewUrl(review.url);
+  }, [review]);
 
   const saveFacebook = trpc.config.saveFacebook.useMutation({
     onSuccess: (result) => {
@@ -145,6 +151,20 @@ export default function Settings() {
       utils.config.timely.invalidate();
     },
     onError: (error) => toast.error(error.message || "That doesn't look like a valid URL."),
+  });
+
+  const saveReviewUrl = trpc.config.saveReviewUrl.useMutation({
+    // Say which of the two things happened. Saving an empty box is a
+    // deliberate action (stop asking for reviews), not a failed save, and a
+    // bare "Saved" would leave that ambiguous.
+    onSuccess: (result) => {
+      toast.success(
+        result.url ? "Review link saved" : "Review link cleared — the agent won't ask any more"
+      );
+      utils.config.reviewUrl.invalidate();
+    },
+    onError: (error) =>
+      toast.error(error.message || "That doesn't look like a valid link. Paste the whole thing."),
   });
 
   const addKnowledge = trpc.knowledge.create.useMutation({
@@ -538,6 +558,46 @@ export default function Settings() {
             disabled={saveTimely.isPending}
           >
             {saveTimely.isPending ? "Saving…" : "Save calendar"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/*
+        The Google review link.
+
+        Opt-in on purpose and never invented. With this empty the aftercare
+        follow-up thanks them and stops; filled in, the agent asks ONCE, only
+        after a genuinely happy reply, and never when the customer reports a
+        problem — that case goes to Brad with no reassurance and no diagnosis.
+
+        This box is here because the server has read the setting since the
+        follow-ups were built and nothing could ever write it.
+      */}
+      <Card className="border-border">
+        <CardHeader>
+          <CardTitle className="font-display text-xl text-charcoal">Google review link</CardTitle>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {review?.url
+              ? "Saved. After a happy aftercare reply the agent asks once for a review — and never when someone reports a problem."
+              : "Optional. Without it the aftercare message just thanks them and stops — it won't invent a link or ask for a review."}
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Input
+            placeholder="https://g.page/r/.../review"
+            value={reviewUrl}
+            onChange={(e) => setReviewUrl(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            Google Maps → your profile picture →{" "}
+            <span className="text-charcoal/80">Your Business Profile</span> →{" "}
+            <span className="text-charcoal/80">Ask for reviews</span> → copy the link.
+          </p>
+          <Button
+            onClick={() => saveReviewUrl.mutate({ url: reviewUrl.trim() })}
+            disabled={saveReviewUrl.isPending}
+          >
+            {saveReviewUrl.isPending ? "Saving…" : "Save review link"}
           </Button>
         </CardContent>
       </Card>
