@@ -24,7 +24,7 @@ import StudioTiles from "@/components/StudioTiles";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/Avatar";
-import { cn } from "@/lib/utils";
+import { cn, isUnanswered } from "@/lib/utils";
 import { useReveal } from "@/lib/useReveal";
 
 function greeting() {
@@ -184,6 +184,13 @@ export default function Dashboard() {
     .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())
     .slice(0, 3);
 
+  // Only the people nobody has answered. This card listed the five newest
+  // threads with no test at all, so most of what Brad saw on the home screen
+  // was work he had already done — and under a heading that says otherwise,
+  // that reads as the app being behind. `conversations.list` comes back
+  // newest-first, so the order is already right.
+  const unanswered = (conversations ?? []).filter(isUnanswered);
+
   const series = dash?.series.map((point) => point.count) ?? [];
   const nameFor = (conversationId: string) =>
     conversations?.find((c) => c.conversationId === conversationId)?.senderName ?? "a customer";
@@ -311,10 +318,10 @@ export default function Dashboard() {
                 <div className="flex items-baseline justify-between gap-2">
                   <div>
                     <h2 className="font-display text-base tracking-[0.06em] text-charcoal">
-                      Messenger Inbox
+                      Waiting on a reply
                     </h2>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      All incoming Facebook messages
+                      Messenger and Instagram, newest first
                     </p>
                   </div>
                   <Link
@@ -326,8 +333,8 @@ export default function Dashboard() {
                 </div>
 
                 <div className="mt-4 divide-y divide-border">
-                  {conversations?.length ? (
-                    conversations.slice(0, 5).map((c) => (
+                  {unanswered.length ? (
+                    unanswered.slice(0, 5).map((c) => (
                       <Link
                         key={c.conversationId}
                         href="/messages"
@@ -351,6 +358,10 @@ export default function Dashboard() {
                         )}
                       </Link>
                     ))
+                  ) : conversations?.length ? (
+                    <p className="py-6 text-sm text-muted-foreground">
+                      Everyone's been answered. Older conversations are under Messages.
+                    </p>
                   ) : (
                     <p className="py-6 text-sm text-muted-foreground">
                       No messages yet. Connect the Page in Settings, then message your studio to
@@ -486,7 +497,7 @@ export default function Dashboard() {
                 Live activity
               </h2>
               <div className="mt-4 space-y-3">
-                {pending?.length || conversations?.length ? (
+                {pending?.length || unanswered.length ? (
                   <>
                     {pending?.slice(0, 3).map((draft) => (
                       <div key={`d${draft.id}`} className="flex gap-3">
@@ -506,13 +517,15 @@ export default function Dashboard() {
                         )}
                       </div>
                     ))}
-                    {conversations?.slice(0, 3).map((c) => (
+                    {unanswered.slice(0, 3).map((c) => (
                       <div key={`c${c.conversationId}`} className="flex gap-3">
                         <span className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-beige/30 text-sepia">
                           <MessageCircle className="h-3.5 w-3.5" />
                         </span>
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm text-charcoal">Messenger enquiry</p>
+                          <p className="text-sm text-charcoal">
+                            {c.platform === "instagram" ? "Instagram" : "Messenger"} enquiry
+                          </p>
                           <p className="truncate text-xs text-muted-foreground">
                             {c.senderName || "Unknown customer"}
                           </p>

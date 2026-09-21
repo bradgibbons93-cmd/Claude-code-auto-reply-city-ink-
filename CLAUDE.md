@@ -256,6 +256,31 @@ and reversed. That is exactly why the draft was right and the heading above it
 was wrong — two readers of the same thread, one of them looking at the wrong
 end of it. DESC, limit, then reverse, so callers still get oldest-first.
 
+**The home screen listed threads the studio had already answered, and the
+inbox opened on all of them.** Brad: *"some of the messages since it's been
+going have been already replied to — only show us the most recent messages
+that have not been replied to, and a history of the conversation if I scroll
+up."*
+
+The dashboard's inbox card took `conversations.slice(0, 5)` with no test at
+all, under a heading that implied they were waiting. Brad answers people by
+hand all day, so most of what the home screen showed him was work already
+done — and a screen full of finished work reads as an app that is behind.
+The Messages page had the right filter all along (`needs`) and simply
+defaulted to `all`.
+
+`isUnanswered()` lives in `lib/utils.ts` now and both screens ask it. That
+matters more than either fix: the same question was already answered in two
+places on the server (`getPendingReplies` versus `getUnansweredConversations`)
+and a customer fell down the gap between them. One definition, or it happens
+again.
+
+Two things the fix must not break, and both are tested. **The history stays
+one tap away** — All, and the thread's own scroll area. And **a name search
+reaches past the open tab**: filtering the search by the tab as well would
+have made every answered customer unfindable by name the moment the default
+changed, which is a regression hiding inside a fix.
+
 **Instagram is APPROVED.** Read from Meta's API on 18 September:
 `instagram_manage_messages` and `instagram_basic` are both `is_live: true` at
 **advanced** access, alongside `pages_messaging`, `pages_show_list` and

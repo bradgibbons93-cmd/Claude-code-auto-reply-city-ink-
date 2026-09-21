@@ -8,7 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
+import { cn, isPaused, isUnanswered } from "@/lib/utils";
 import { useReveal } from "@/lib/useReveal";
 import { Avatar } from "@/components/Avatar";
 import { StampBadge } from "@/components/Logo";
@@ -23,10 +23,6 @@ import {
   Copy,
   Check,
 } from "lucide-react";
-
-function isPaused(until: string | Date | null | undefined) {
-  return !!until && new Date(until) > new Date();
-}
 
 function StatTile({
   label,
@@ -433,7 +429,12 @@ export default function Conversations() {
   const [search, setSearch] = useState("");
   // The split Brad works from: who is waiting on whom. Derived from who
   // spoke last, so there's nothing to keep up to date by hand.
-  const [filter, setFilter] = useState<"all" | "needs" | "waiting" | "mine">("all");
+  // Opens on the people nobody has answered. It opened on "all", which put
+  // a couple of hundred threads the studio had already replied to above the
+  // handful that were actually waiting — Brad: "only show us the most recent
+  // messages that have not been replied to". The history is one tap away on
+  // All, and a name search reaches it without switching tab.
+  const [filter, setFilter] = useState<"all" | "needs" | "waiting" | "mine">("needs");
   const inboxRef = useReveal<HTMLDivElement>();
   // Navigating to /messages?thread=… while already on the page doesn't
   // remount, so the initial state above wouldn't fire a second time.
@@ -571,18 +572,20 @@ export default function Conversations() {
   const matchesFilter = (c: { lastSenderType?: string | null; botPausedUntil?: string | Date | null }) => {
     if (filter === "mine") return isPaused(c.botPausedUntil);
     if (isPaused(c.botPausedUntil)) return filter === "all";
-    if (filter === "needs") return c.lastSenderType === "customer";
+    if (filter === "needs") return isUnanswered(c);
     if (filter === "waiting") return !!c.lastSenderType && c.lastSenderType !== "customer";
     return true;
   };
-  const shownConversations = (conversations ?? []).filter(
-    (c) => matchesFilter(c) && (!needle || (c.senderName || "").toLowerCase().includes(needle))
-  );
+  // A typed name searches the whole inbox, not just the open tab. With the
+  // tab defaulting to "needs", filtering the search too would have made
+  // everyone the studio has already answered unfindable by name — a
+  // regression hidden inside a fix.
+  const shownConversations = needle
+    ? (conversations ?? []).filter((c) => (c.senderName || "").toLowerCase().includes(needle))
+    : (conversations ?? []).filter(matchesFilter);
 
   const counts = {
-    needs: (conversations ?? []).filter(
-      (c) => !isPaused(c.botPausedUntil) && c.lastSenderType === "customer"
-    ).length,
+    needs: (conversations ?? []).filter(isUnanswered).length,
     waiting: (conversations ?? []).filter(
       (c) => !isPaused(c.botPausedUntil) && !!c.lastSenderType && c.lastSenderType !== "customer"
     ).length,
@@ -687,7 +690,7 @@ export default function Conversations() {
       <div ref={inboxRef} className="grid gap-6 md:grid-cols-[290px_1fr]">
         <div className="space-y-2">
           <h2 className="px-1 font-display text-sm tracking-[0.14em] text-muted-foreground">
-            INBOX{conversations?.length ? ` (${conversations.length})` : ""}
+            INBOX{shownConversations.length ? ` (${shownConversations.length})` : ""}
           </h2>
 
           {/* Who's waiting on whom. The same split Messenger gives you, but
