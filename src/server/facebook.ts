@@ -1013,22 +1013,44 @@ async function fetchInstagramThread(
 ): Promise<{ thread?: InboxThread; failed?: string }> {
   let failed: string | undefined;
 
-  for (const limit of [10, 3, 1]) {
+  /**
+   * Ask for less each time, on a shorter clock each time.
+   *
+   * A TIMEOUT is the commonest way this fails in production, and it used to
+   * end the thread outright: only an explicit "that was too much" earned a
+   * retry, so a thread that merely took longer than twenty seconds was
+   * abandoned with ten messages still unasked for. The live log is full of
+   * `wouldn't open — timeout of 20000ms exceeded`, and every one of those is
+   * a thread whose history never arrived AND whose mislabelled senders never
+   * got corrected, because the correction only happens on a thread that
+   * opens.
+   *
+   * A timeout means the same thing as Meta saying so in words: too much to
+   * assemble. So it earns the same smaller ask. The clock shortens with the
+   * page because a smaller page that is still slow is a thread to leave for
+   * the next pass rather than spend the whole run on: three attempts cost at
+   * most 40 seconds, inside the 100-second deadline the caller holds.
+   */
+  for (const [limit, budget] of [
+    [10, 20000],
+    [3, 12000],
+    [1, 8000],
+  ] as const) {
     try {
       const { data } = await axios.get<InboxThread>(`${endpoint.base}/${threadId}`, {
         params: {
           fields: `participants,messages.limit(${limit}){id,message,created_time,from,attachments{image_data,file_url,mime_type}}`,
           access_token: endpoint.token,
         },
-        timeout: 20000,
+        timeout: budget,
       });
       return { thread: data };
     } catch (error) {
       failed = describeGraphError(`thread ${threadId}`, error);
-      // Anything that isn't "that was too much to assemble" comes back the
-      // same however little is asked for, so asking again only costs time a
-      // customer is waiting through.
-      if (!asksForTooMuch(error)) break;
+      const timedOut = (error as { code?: string }).code === "ECONNABORTED";
+      // Anything else comes back the same however little is asked for, so
+      // asking again only costs time a customer is waiting through.
+      if (!asksForTooMuch(error) && !timedOut) break;
     }
   }
 

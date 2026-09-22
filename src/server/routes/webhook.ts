@@ -221,24 +221,43 @@ router.post("/facebook", async (req: RawBodyRequest, res: Response) => {
            * A message from OUR OWN account is ours, whatever `is_echo` says.
            *
            * Messenger sets `is_echo` on the studio's own outgoing messages and
-           * the branch above catches them. Instagram is not reliably the same,
-           * and Instagram sending only started working the day Meta granted
-           * the permission — so this path had never once run for a studio
-           * message until today. Anything that slips through gets stored as
-           * the CUSTOMER having said it, and then the agent reads the
-           * studio's own quote back as the customer's words and the board
-           * prints it under "THEY SAID".
+           * the branch above catches them. Instagram does not reliably do the
+           * same, so this check is the one that has to hold, and for months it
+           * could not: it compared the sender against `getPageIdentity()`,
+           * which asks the PAGE token and therefore returns the FACEBOOK PAGE
+           * id. The studio's Instagram account is a different number
+           * entirely, so an Instagram sender never matched it — not once.
            *
-           * Identity is asked of the token rather than trusted from config —
-           * the same rule as everywhere else in this file.
+           * Every message Brad typed by hand in Instagram was therefore stored
+           * as the CUSTOMER having said it. That is how the studio's own
+           * deposit request, bank details and all, came to sit on the board
+           * under "THEY SAID" with a draft reply written to it.
+           *
+           * `entry.id` is the account the delivery is ABOUT: the Page for
+           * `object=page`, the studio's own Instagram account for
+           * `object=instagram`. It is correct on both inboxes, it costs no
+           * call to Graph, and it cannot drift out of step with a token. The
+           * Page identity stays as a second opinion, never the only one.
+           *
+           * The recipient test is the belt to that brace: we only treat a
+           * message as ours when we sent it AND someone else received it. If
+           * `entry.id` were ever wrong, the worst case is that a real customer
+           * message gets filed as ours and silently never answered, which is
+           * the failure this whole file exists to prevent.
            */
+          const selfIds = new Set<string>();
+          if (entry?.id) selfIds.add(String(entry.id));
           const identity = await getPageIdentity().catch(() => null);
-          if (identity?.id && event.sender.id === identity.id) {
+          if (identity?.id) selfIds.add(String(identity.id));
+
+          const senderId = String(event.sender.id);
+          const recipientId = String(event.recipient?.id ?? "");
+          if (selfIds.has(senderId) && !selfIds.has(recipientId)) {
             console.log(
-              `[Webhook] ${platform} message from our own account (${event.sender.id}) — recording as ours, not the customer's`
+              `[Webhook] ${platform} message from our own account (${senderId}) — recording as ours, not the customer's`
             );
             await handleEcho(
-              event.recipient?.id ?? "",
+              recipientId,
               message.mid ?? `echo_${Date.now()}`,
               message.text ?? ""
             );

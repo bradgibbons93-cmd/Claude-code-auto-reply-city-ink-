@@ -393,6 +393,52 @@ Three things had to be wrong at once and all three are fixed:
   nothing called it on a schedule, so a bad card sat there until somebody
   pressed a button. It runs at the top of the three-minute poll now.
 
+**And it happened again, because the fix compared against the wrong id.**
+Brad, with two screenshots, twelve days later: a card headed THEY SAID
+carrying the studio's own deposit request, bank details and all, with a draft
+reply written to it.
+
+> Okay perfect, If you happy to book in, Could you please send $50 deposit for
+> confirmation ... BSB - 063 097 ... Amount: $50
+
+He typed that in Instagram himself. The second screenshot is the real thread,
+where it is plainly the studio's own outgoing message.
+
+The live log said it in two lines:
+
+    21:38:37  last word: manual     <- a reply sent through the app: right
+    23:35:51  last word: customer   <- the deposit message: wrong
+
+and nowhere a `[Webhook] message from our own account` line, because the check
+never matched. **`getPageIdentity()` asks the PAGE token, so it returns the
+FACEBOOK PAGE id. The studio's Instagram account is a different number
+entirely.** An Instagram sender could never equal it — not once, ever. So the
+entry above was only ever true for Messenger, where the two happen to be the
+same, and Instagram went on filing the studio's own words as the customer's.
+
+The webhook now tests the sender against **`entry.id`**, which is the account
+the delivery is ABOUT: the Page for `object=page`, the studio's own Instagram
+account for `object=instagram`. It is right on both inboxes, costs no call to
+Graph, and cannot drift out of step with a token. The Page identity stays as a
+second opinion, never the only one. The recipient is checked too — a message
+is ours only when we sent it AND somebody else received it — because if
+`entry.id` were ever wrong the failure would be a real customer silently
+filed as ours and never answered.
+
+`theysaid.mjs` reproduces Brad's exact delivery and **fails on the old code
+with the same two symptoms he photographed**: stored as `customer`, one draft
+written. It asserts the Page id and the Instagram id are different, so a
+fixture that cannot reproduce the bug fails loudly rather than passing.
+
+**A timed-out Instagram thread was abandoned, not asked again smaller.** Found
+while chasing the repair for the above: the sender correction only happens on
+a thread that opens, and the log was full of
+`wouldn't open — timeout of 20000ms exceeded`. Only an explicit "that was too
+much" earned a smaller ask; a timeout broke out of the loop. A timeout means
+the same thing, so it now earns the same retry, on a shortening clock
+(20s/10, 12s/3, 8s/1) so three attempts still fit inside the caller's
+100-second deadline.
+
 **The home screen opens with "is it alive" and "where is everything".**
 Brad sent a mockup he liked — gold on black, somebody else's brand — and the
 half worth taking was the layout, not the palette. Two things came from it:
