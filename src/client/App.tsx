@@ -126,10 +126,15 @@ function StatusBar() {
     // covered whatever card happened to be under it, which on the dashboard
     // was the top of a scheduled post.
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 flex justify-end pb-4 pr-3 sm:pr-6">
-      <div className="glass pointer-events-auto flex items-center gap-4 rounded-full border px-5 py-2 text-xs text-muted-foreground shadow-soft">
+      {/* Compact on a phone. At full width this is 250px of a 390px screen
+          and it sat straight across a customer's name on the draft board —
+          the one thing on that card you need to read. The dot is the signal;
+          the sentence is the desktop's luxury. */}
+      <div className="glass pointer-events-auto flex items-center gap-4 rounded-full border px-3 py-1.5 text-xs text-muted-foreground shadow-soft sm:px-5 sm:py-2">
         <span className="flex items-center gap-2">
           <span className="live-dot" />
-          <span className="text-charcoal">System live &amp; running</span>
+          <span className="text-charcoal sm:hidden">Live</span>
+          <span className="hidden text-charcoal sm:inline">System live &amp; running</span>
         </span>
         <span className="hidden tabular-nums sm:inline">
           Last updated {now.toLocaleTimeString("en-AU", { hour12: false })}

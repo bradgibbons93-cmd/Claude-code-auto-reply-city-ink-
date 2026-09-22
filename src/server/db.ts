@@ -182,6 +182,27 @@ export async function getUnansweredConversations(limit = 20, newerThanMinutes?: 
   // The last message by when it was said. See getRecentConversations above:
   // MAX(id) is insert order, which is not the same thing, and the difference
   // is a thread the studio answered months ago coming back up for a reply.
+  /*
+                 * The newest message per thread, without GROUP_CONCAT.
+                 *
+                 * This used to be SUBSTRING_INDEX(GROUP_CONCAT(id ORDER BY
+                 * created_at DESC, id DESC), ',', 1). group_concat_max_len is
+                 * 1024 bytes by default, so once a thread had enough messages
+                 * the list was CUT and MySQL raised
+                 * "Row N was cut by GROUP_CONCAT()". In migrate.ts that took
+                 * out the whole statement, which is why every boot logged
+                 * "[DB] Could not prepare schema" and liftStaleHandoffPauses()
+                 * never ran — so threads stuck on an automatic handoff pause
+                 * were never released, which is the exact failure this file
+                 * has a whole entry about.
+                 *
+                 * It was also a ticking clock: the row number in that error
+                 * climbed by one a day as the studio's history grew.
+                 *
+                 * A correlated LIMIT 1 has no length to overflow, keeps the
+                 * created_at then id ordering that makes ties deterministic,
+                 * and reads as what it is.
+                 */
   const rows = await db.execute(
     sql`SELECT c.conversation_id AS conversationId
           FROM messenger_conversations c
@@ -189,12 +210,14 @@ export async function getUnansweredConversations(limit = 20, newerThanMinutes?: 
             SELECT m1.conversation_id, m1.sender_type, m1.message_id
               FROM messenger_messages m1
               JOIN (
-                SELECT conversation_id,
-                       SUBSTRING_INDEX(
-                         GROUP_CONCAT(id ORDER BY created_at DESC, id DESC), ',', 1
-                       ) AS last_id
-                  FROM messenger_messages
-                 GROUP BY conversation_id
+                SELECT s.conversation_id,
+                       (SELECT m2.id
+                          FROM messenger_messages m2
+                         WHERE m2.conversation_id = s.conversation_id
+                         ORDER BY m2.created_at DESC, m2.id DESC
+                         LIMIT 1) AS last_id
+                  FROM (SELECT DISTINCT conversation_id
+                          FROM messenger_messages) s
               ) t ON t.last_id = m1.id
           ) last ON last.conversation_id = c.conversation_id
          WHERE last.sender_type = 'customer'
@@ -311,12 +334,14 @@ export async function explainNotUnanswered(limit = 5) {
             SELECT m1.conversation_id, m1.sender_type, m1.message_id
               FROM messenger_messages m1
               JOIN (
-                SELECT conversation_id,
-                       SUBSTRING_INDEX(
-                         GROUP_CONCAT(id ORDER BY created_at DESC, id DESC), ',', 1
-                       ) AS last_id
-                  FROM messenger_messages
-                 GROUP BY conversation_id
+                SELECT s.conversation_id,
+                       (SELECT m2.id
+                          FROM messenger_messages m2
+                         WHERE m2.conversation_id = s.conversation_id
+                         ORDER BY m2.created_at DESC, m2.id DESC
+                         LIMIT 1) AS last_id
+                  FROM (SELECT DISTINCT conversation_id
+                          FROM messenger_messages) s
               ) t ON t.last_id = m1.id
           ) last ON last.conversation_id = c.conversation_id
          ORDER BY c.last_message_at DESC
@@ -468,13 +493,15 @@ export async function getRecentConversations(limit = 250) {
     sql`SELECT m.conversation_id AS conversationId, m.sender_type AS senderType
           FROM messenger_messages m
           JOIN (
-            SELECT conversation_id,
-                   SUBSTRING_INDEX(
-                     GROUP_CONCAT(id ORDER BY created_at DESC, id DESC), ',', 1
-                   ) AS last_id
-              FROM messenger_messages
-             WHERE conversation_id IN ${ids}
-             GROUP BY conversation_id
+            SELECT s.conversation_id,
+                       (SELECT m2.id
+                          FROM messenger_messages m2
+                         WHERE m2.conversation_id = s.conversation_id
+                         ORDER BY m2.created_at DESC, m2.id DESC
+                         LIMIT 1) AS last_id
+                  FROM (SELECT DISTINCT conversation_id
+                          FROM messenger_messages
+                         WHERE conversation_id IN ${ids}) s
           ) t ON t.last_id = m.id`
   )) as unknown as [{ conversationId: string; senderType: string }[]];
 
@@ -1765,12 +1792,14 @@ export async function getColdConversations(
             SELECT m1.conversation_id, m1.sender_type, m1.created_at
               FROM messenger_messages m1
               JOIN (
-                SELECT conversation_id,
-                       SUBSTRING_INDEX(
-                         GROUP_CONCAT(id ORDER BY created_at DESC, id DESC), ',', 1
-                       ) AS last_id
-                  FROM messenger_messages
-                 GROUP BY conversation_id
+                SELECT s.conversation_id,
+                       (SELECT m2.id
+                          FROM messenger_messages m2
+                         WHERE m2.conversation_id = s.conversation_id
+                         ORDER BY m2.created_at DESC, m2.id DESC
+                         LIMIT 1) AS last_id
+                  FROM (SELECT DISTINCT conversation_id
+                          FROM messenger_messages) s
               ) t ON t.last_id = m1.id
           ) last ON last.conversation_id = c.conversation_id
          -- WE spoke last. A bot draft that was approved, or a reply Brad

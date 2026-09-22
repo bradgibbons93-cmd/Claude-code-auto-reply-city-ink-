@@ -627,8 +627,12 @@ export default function Conversations() {
           to nobody. But some of those people asked something weeks ago and
           were missed, and they're the ones worth answering. Separate press,
           so it can never happen by accident. */}
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-beige/20 px-4 py-3">
-        <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+      {/* Stacked on a phone. `flex-1` let the paragraph shrink under the
+          button, so at 390px this was six words wide and eleven lines tall
+          next to a button that kept its full size. The button goes under the
+          text where there is room for both. */}
+      <div className="flex flex-col items-start gap-3 rounded-xl border border-border bg-beige/20 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <p className="w-full min-w-0 text-xs text-muted-foreground sm:flex-1">
           Someone asked a question and never got an answer? This writes a draft for each of
           them from the last fortnight — nothing sends, they all wait for your OK like any
           other. Older threads are left alone: they've usually been answered by hand somewhere

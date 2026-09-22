@@ -397,7 +397,29 @@ export function explainProfileFailure(detail: string): string {
   if (/does not exist|cannot be loaded|missing permissions|Unsupported get request/i.test(detail)) {
     return "Facebook won't release these customers' names. That happens with restricted or deactivated accounts, and it isn't something the app can fix — everyone else is named from the Page inbox as normal.";
   }
-  if (/expired|session has been invalidated|OAuthException/i.test(detail)) {
+  // Meta will not name an Instagram customer without the person's consent,
+  // and there is no consent flow for a business inbox. Permanent, and
+  // nothing to do with the token.
+  if (/\(#230\)|User consent is required/i.test(detail)) {
+    return "Instagram won't release this person's name without their consent, and there is no way for a business to ask for it. Their messages arrive and can be replied to as normal; only the name is missing.";
+  }
+  // The account is gone, or was never an Instagram professional account.
+  if (/\(#9010\)|No matching Instagram user/i.test(detail)) {
+    return "Instagram has no account matching this thread any more — usually someone who deleted or deactivated. Nothing to fix; their old messages are still here.";
+  }
+  /*
+   * An expired token says so in those words, or carries code 190.
+   *
+   * This used to match a bare "OAuthException", which is the error CLASS on
+   * very nearly every Graph failure — including the two consent refusals
+   * above. So a perfectly good token was reported as expired on every boot,
+   * four seconds after the same log printed
+   * "Page token belongs to app 4457207527757824". Acting on that means an
+   * evening spent regenerating a token that was never the problem, which is
+   * the exact wrong turn this file warns about for the model name and for
+   * Graph permissions. Match the thing, not the family it belongs to.
+   */
+  if (/Session has expired|Error validating access token|session has been invalidated|code.{0,4}190/i.test(detail)) {
     return "The saved Page token has expired. Generate a new one in the Meta app dashboard and paste it in below.";
   }
   if (/rate limit|too many calls/i.test(detail)) {

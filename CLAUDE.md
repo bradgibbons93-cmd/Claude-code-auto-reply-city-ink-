@@ -430,6 +430,62 @@ with the same two symptoms he photographed**: stored as `customer`, one draft
 written. It asserts the Page id and the Instagram id are different, so a
 fixture that cannot reproduce the bug fails loudly rather than passing.
 
+**`GROUP_CONCAT` truncation killed FIVE repair steps at every single boot,
+and nobody noticed because the line reads like a warning.**
+
+    [DB] Could not prepare schema: Row 411 was cut by GROUP_CONCAT()
+
+The row number climbed by one a day as the studio's history grew. "The newest
+message in each thread" was
+`SUBSTRING_INDEX(GROUP_CONCAT(id ORDER BY created_at DESC, id DESC), ',', 1)`
+in five places. `group_concat_max_len` is **1024 bytes** by default, so once a
+thread had a couple of hundred messages the list was cut and MySQL raised.
+
+The damage is in `ensureTables()`, where `liftStaleHandoffPauses()` runs FIRST.
+It threw, so everything after it never ran, at any boot, ever:
+`repairFailedDrafts`, `clearPlaceholderNames`, `repairConversationClocks` and
+**`dropDraftsAnsweringOurselves`** — the last of which is precisely the thing
+that deletes a card pointing at one of our own messages. The entry above about
+it now running "at the top of the three-minute poll" was true; it also ran at
+boot, and at boot it was dead. `[DB] Schema ready` never printed, which was the
+tell nobody read.
+
+All five sites are a correlated `ORDER BY created_at DESC, id DESC LIMIT 1`
+now: nothing to overflow, same deterministic tie-break, and it reads as what it
+is. `ensureIndexes()` adds `msg_conv_recent_idx (conversation_id, created_at,
+id)` because the old index covered only `conversation_id`, and without the sort
+columns MySQL reads and sorts every message in the thread on a query that runs
+on every poll and every board load.
+
+**This sandbox's MariaDB ships `group_concat_max_len` at 1MB; Railway's MySQL
+uses the 1024 default.** The bug was therefore invisible to every local test
+and fatal in production. `/etc/mysql/conf.d/zz-prodlike.cnf` pins it to 1024 so
+the sandbox matches, and `groupconcat.mjs` asserts the setting is 1024 AND that
+the old query really is cut at it. Without that pin the suite proves nothing —
+the same trap as `prune.mjs` inventing ids that did not look real. MariaDB
+raises warning 1260 and carries on where MySQL escalates to an error, so the
+suite asserts the truncation, which is the mechanism, not the server's policy
+about it.
+
+**"OAuthException" is Meta's error CLASS, not a verdict on the token.** The
+boot log, four seconds apart:
+
+    [Facebook] Page token belongs to app 4457207527757824 ("city. nk autoi")
+    [Facebook] Name backfill: 0/5 — The saved Page token has expired.
+
+The token was fine. `explainProfileFailure()` matched a bare `OAuthException`,
+which is on very nearly every Graph failure — including `(#230) User consent is
+required` and `(#9010) No matching Instagram user`, the two ordinary refusals
+the name backfill actually gets. Acting on that sentence means an evening
+regenerating a token that was never the problem. **This is the third time this
+project has been sent to fix a setting that was already right** (the model
+name, the Graph permission, now the token), and every time the cause was
+matching a word that belongs to a family rather than the thing itself. An
+expired token says "Session has expired", "Error validating access token", or
+carries code 190. Nothing else counts. Both refusals now get their own honest
+sentence, and `profilewhy.mjs` holds the line with Brad's verbatim error
+bodies.
+
 **A timed-out Instagram thread was abandoned, not asked again smaller.** Found
 while chasing the repair for the above: the sender correction only happens on
 a thread that opens, and the log was full of

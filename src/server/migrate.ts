@@ -242,6 +242,41 @@ const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   },
 ];
 
+/*
+ * Indexes the app needs but the original CREATE TABLE never declared.
+ *
+ * Same shape as ensureColumns: checked against information_schema, added
+ * once, never dropped. `msg_conv_idx` covers the conversation_id alone,
+ * which was fine while "the newest message in a thread" was answered with
+ * GROUP_CONCAT. It is now a correlated ORDER BY created_at DESC, id DESC
+ * LIMIT 1 per thread, and without the sort columns in the index MySQL reads
+ * every message in the thread and sorts them, on a query that runs on every
+ * poll and every board load.
+ */
+const INDEXES: { table: string; name: string; ddl: string }[] = [
+  {
+    table: "messenger_messages",
+    name: "msg_conv_recent_idx",
+    ddl: "(conversation_id, created_at, id)",
+  },
+];
+
+async function ensureIndexes(): Promise<void> {
+  const db = await getDb();
+  for (const { table, name, ddl } of INDEXES) {
+    const [rows] = (await db.execute(
+      sql.raw(
+        `SELECT COUNT(*) AS cnt FROM information_schema.statistics
+         WHERE table_schema = DATABASE() AND table_name = '${table}' AND index_name = '${name}'`
+      )
+    )) as unknown as [Array<{ cnt: number }>];
+    if (Number(rows[0]?.cnt) === 0) {
+      await db.execute(sql.raw(`ALTER TABLE ${table} ADD INDEX ${name} ${ddl}`));
+      console.log(`[DB] Added index ${table}.${name}`);
+    }
+  }
+}
+
 async function ensureColumns(): Promise<void> {
   const db = await getDb();
   for (const { table, column, ddl } of COLUMNS) {
@@ -280,12 +315,14 @@ async function liftStaleHandoffPauses(): Promise<void> {
                   SELECT m1.conversation_id, m1.sender_type
                     FROM messenger_messages m1
                     JOIN (
-                      SELECT conversation_id,
-                             SUBSTRING_INDEX(
-                               GROUP_CONCAT(id ORDER BY created_at DESC, id DESC), ',', 1
-                             ) AS last_id
-                        FROM messenger_messages
-                       GROUP BY conversation_id
+                      SELECT s.conversation_id,
+                       (SELECT m2.id
+                          FROM messenger_messages m2
+                         WHERE m2.conversation_id = s.conversation_id
+                         ORDER BY m2.created_at DESC, m2.id DESC
+                         LIMIT 1) AS last_id
+                  FROM (SELECT DISTINCT conversation_id
+                          FROM messenger_messages) s
                     ) t ON t.last_id = m1.id
                 ) last ON last.conversation_id = c.conversation_id
                  SET c.bot_paused_until = NULL, c.bot_pause_reason = NULL
@@ -405,6 +442,7 @@ export async function ensureTables(): Promise<void> {
     await db.execute(sql.raw(statement));
   }
   await ensureColumns();
+  await ensureIndexes();
   await liftStaleHandoffPauses();
   await repairFailedDrafts();
   await clearPlaceholderNames();
