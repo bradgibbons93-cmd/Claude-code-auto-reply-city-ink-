@@ -1,6 +1,6 @@
 import cron from "node-cron";
 import { getDuePosts, updatePostStatus } from "./db.js";
-import { publishPagePost, importExistingConversations } from "./facebook.js";
+import { publishPagePost, importExistingConversations, sweepOlderInstagramThreads } from "./facebook.js";
 import { syncFeed } from "./feed.js";
 import { ensureMessengerSubscription } from "./facebook.js";
 import { draftForUnanswered, draftColdFollowUps, draftAftercareMessages } from "./agent.js";
@@ -14,6 +14,14 @@ import { pruneStoredImages } from "./housekeeping.js";
  * second worker (or a restart mid-run) can't post the same thing twice.
  */
 export function startScheduler() {
+  // Older Instagram threads the three-minute poll never reaches, re-checked
+  // a few at a time until every one has been seen once by the fixed import.
+  // Its own clock and its own guard, so it never holds up drafting; once it
+  // has finished it is one settings read every five minutes.
+  cron.schedule("2-59/5 * * * *", () => {
+    void sweepOlderInstagramThreads();
+  });
+
   // A subscription can lapse mid-life, not just across a restart — an outage
   // long enough for Facebook to give up doesn't need a redeploy to happen.
   // Every six hours, cheap when nothing is wrong.

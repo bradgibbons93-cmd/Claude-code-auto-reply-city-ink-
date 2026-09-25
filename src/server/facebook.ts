@@ -1114,6 +1114,46 @@ type InboxThread = NonNullable<ThreadPage["data"]>[number];
  * behind it. A partial list is never thrown away for that — some threads are
  * worth more than a tidier request.
  */
+/**
+ * These people's Instagram threads, asked for one person at a time.
+ *
+ * `user_id` goes straight to one conversation, so it never walks the edge Meta
+ * refuses to enumerate (see the long entry in CLAUDE.md). One small call per
+ * person. A refusal that is about ONE thread — archived, deleted, no such user
+ * any more — is that person's, and the rest of the batch carries on; only a
+ * refusal about the app (a permission) or no answer at all stops it.
+ */
+async function findInstagramThreadsFor(
+  endpoint: { base: string; token: string },
+  userIds: string[]
+): Promise<{ threads: InboxThread[]; failed?: string }> {
+  const threads: InboxThread[] = [];
+  let failed: string | undefined;
+
+  for (const userId of userIds) {
+    try {
+      const { data }: { data: ThreadPage } = await axios.get(`${endpoint.base}/me/conversations`, {
+        params: {
+          ...(endpoint.base === IG_GRAPH ? {} : { platform: inboxParam("instagram") }),
+          user_id: userId,
+          fields: "id,participants",
+          access_token: endpoint.token,
+        },
+        timeout: 12000,
+      });
+      const found = data.data?.[0];
+      if (found?.id) threads.push(found);
+    } catch (error) {
+      const detail = describeGraphError(`conversations?user_id=${userId}`, error);
+      if (/\(#100\)|\(#9000001\)|\(#9010\)|archived or deleted|No matching/i.test(detail)) continue;
+      failed = detail;
+      if (profileRefusalIsPermanent(detail)) break;
+    }
+  }
+
+  return { threads, failed };
+}
+
 async function listInstagramThreads(
   endpoint: { base: string; token: string },
   maxThreads: number
@@ -1241,6 +1281,8 @@ export interface ImportedThreads {
   corrected: number;
   /** Per-platform notes, including why one came back empty. */
   detail: string;
+  /** Inboxes that refused us this pass, so a caller keeping its place knows not to move on. */
+  failed: Platform[];
 }
 
 /**
@@ -1275,7 +1317,19 @@ export async function importExistingConversations(
    * quietly does nothing for the next half hour is worse than one that
    * fails honestly.
    */
-  force = false
+  force = false,
+  /**
+   * Re-check these Instagram people's threads, and nothing else.
+   *
+   * The poll only ever looks at the thirty most recent threads, so a thread
+   * the old import had turned inside out stayed that way the moment it slipped
+   * past thirtieth — Emily Failli's, twelve days old, was still showing the
+   * studio's own "see you then" under THEY SAID after the fix went live. The
+   * repair sweep walks every older Instagram thread through this, a batch at
+   * a time, asking for each one by person (`user_id`), which never walks the
+   * edge Meta refuses to enumerate.
+   */
+  opts: { instagramUsers?: string[] } = {}
 ): Promise<ImportedThreads> {
   const {
     getOrCreateConversation,
@@ -1290,6 +1344,7 @@ export async function importExistingConversations(
   let messages = 0;
   let corrected = 0;
   const unsure: Record<Platform, number> = { facebook: 0, instagram: 0 };
+  const failedInboxes: Platform[] = [];
 
   /**
    * Store one thread the way a live delivery would.
@@ -1401,6 +1456,9 @@ export async function importExistingConversations(
   }
 
   for (const platform of ["facebook", "instagram"] as const) {
+    // A targeted Instagram re-check has no business with Messenger.
+    if (opts.instagramUsers && platform === "facebook") continue;
+
     const endpoint = await endpointFor(platform);
     if (!endpoint) {
       notes.push(`${platform}: not connected`);
@@ -1421,7 +1479,9 @@ export async function importExistingConversations(
     if (platform === "instagram") {
       /* ---- two phases, because Instagram will not do it in one ---- */
 
-      const listed = await listInstagramThreads(endpoint, maxThreads);
+      const listed = opts.instagramUsers
+        ? await findInstagramThreadsFor(endpoint, opts.instagramUsers)
+        : await listInstagramThreads(endpoint, maxThreads);
 
       // The whole pass has to finish inside the three minutes between polls,
       // or the polls start overlapping and each holds a Graph connection
@@ -1497,6 +1557,7 @@ export async function importExistingConversations(
     }
 
     if (failed) {
+      failedInboxes.push(platform);
       noteInboxFailure(`${platform}-import`);
       console.error(`[Facebook] ${platform} import failed — ${failed}`);
     } else {
@@ -1561,7 +1622,70 @@ export async function importExistingConversations(
     );
   }
 
-  return { conversations, messages, corrected, detail: notes.join(" · ") };
+  return { conversations, messages, corrected, detail: notes.join(" · "), failed: failedInboxes };
+}
+
+/**
+ * Walk every older Instagram thread through the fixed import, once.
+ *
+ * The poll re-checks the thirty most recent threads; anything older that the
+ * old import had turned inside out stays wrong for ever, because nothing ever
+ * looks at it again. That is Emily Failli's card on 26 September: twelve days
+ * old, the studio's own "Hello Emily … I'll see you then" still labelled as
+ * hers, and a follow-up drafted on the strength of it — after the fix was live.
+ *
+ * A few threads at a time, oldest row first, resuming where it left off
+ * (`app_settings.ig_relabel_sweep`) across restarts, and finishing for good
+ * when it runs out. It never moves on past a batch Instagram refused, and it
+ * doesn't start until the studio's own Instagram id is known, because without
+ * it every thread would be skipped and the sweep would "finish" having done
+ * nothing.
+ */
+const SWEEP_SETTING = "ig_relabel_sweep";
+let sweeping = false;
+
+export async function sweepOlderInstagramThreads(batch = 10): Promise<void> {
+  if (sweeping) return;
+  sweeping = true;
+  try {
+    const { getSetting, setSetting, getInstagramConversationsAfter } = await import("./db.js");
+    const raw = await getSetting(SWEEP_SETTING);
+    const state = (raw ? JSON.parse(raw) : {}) as { afterId?: number; done?: boolean; fixed?: number };
+    if (state.done) return;
+    if (!(await endpointFor("instagram"))) return;
+    if (inboxIsResting("instagram-import")) return;
+
+    const own = await getOwnAccountIds();
+    if (own.instagram.size === 0) return;
+
+    const rows = await getInstagramConversationsAfter(state.afterId ?? 0, batch, [...own.all]);
+    if (!rows.length) {
+      await setSetting(SWEEP_SETTING, JSON.stringify({ ...state, done: true }));
+      console.log(
+        `[Inbox] Finished re-checking every older Instagram thread — ${state.fixed ?? 0} message(s) relabelled in all`
+      );
+      return;
+    }
+
+    const result = await importExistingConversations(batch, false, {
+      instagramUsers: rows.map((r) => r.conversationId),
+    });
+    if (result.failed.includes("instagram")) {
+      console.warn(`[Inbox] Older-thread re-check paused, will try again — ${result.detail}`);
+      return;
+    }
+
+    const fixed = (state.fixed ?? 0) + result.corrected;
+    await setSetting(SWEEP_SETTING, JSON.stringify({ afterId: rows[rows.length - 1].id, fixed }));
+    console.log(
+      `[Inbox] Re-checked ${rows.length} older Instagram thread(s)` +
+        (result.corrected ? ` — relabelled ${result.corrected} message(s)` : " — all correct")
+    );
+  } catch (error) {
+    console.error("[Inbox] Older-thread re-check failed:", (error as Error).message);
+  } finally {
+    sweeping = false;
+  }
 }
 
 /** A Graph refusal turned into the sentence that says what to do about it. */

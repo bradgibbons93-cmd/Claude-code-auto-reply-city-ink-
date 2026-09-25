@@ -20,6 +20,7 @@ import { trpc } from "@/lib/trpc";
 import LiveFeed from "@/components/LiveFeed";
 import DashboardBanner from "@/components/DashboardBanner";
 import AgentStatusCard from "@/components/AgentStatusCard";
+import { MessagePhoto } from "@/components/MessagePhoto";
 import StudioTiles from "@/components/StudioTiles";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -284,7 +285,7 @@ export default function Dashboard() {
                         {!!draft.photoUrls?.length && (
                           <div className="mb-2 flex flex-wrap gap-1.5">
                             {draft.photoUrls.map((url) => (
-                              <img
+                              <MessagePhoto
                                 key={url}
                                 src={url}
                                 alt="Reference photo"

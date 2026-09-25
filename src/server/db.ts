@@ -721,6 +721,33 @@ export async function correctMessageSender(
 }
 
 /**
+ * Instagram threads in a stable order, for a sweep that resumes where it left
+ * off. By row id, because that never changes; last_message_at does, and a
+ * sweep ordered by it would skip or repeat threads as people wrote in.
+ */
+export async function getInstagramConversationsAfter(
+  afterId: number,
+  limit: number,
+  excludeIds: string[] = []
+): Promise<{ id: number; conversationId: string }[]> {
+  const db = await getDb();
+  const exclude = excludeIds.filter(Boolean);
+  const rows = await db
+    .select({ id: messengerConversations.id, conversationId: messengerConversations.conversationId })
+    .from(messengerConversations)
+    .where(
+      and(
+        eq(messengerConversations.platform, "instagram"),
+        sql`${messengerConversations.id} > ${afterId}`,
+        exclude.length ? sql`${messengerConversations.conversationId} NOT IN ${exclude}` : sql`1 = 1`
+      )
+    )
+    .orderBy(asc(messengerConversations.id))
+    .limit(limit);
+  return rows;
+}
+
+/**
  * A "conversation" keyed by the studio's OWN account is not a customer.
  *
  * The Instagram import created one: it took the studio for the customer, so

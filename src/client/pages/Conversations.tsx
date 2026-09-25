@@ -3,6 +3,7 @@ import { useSearch } from "wouter";
 import { format, formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import PhotoViewer from "@/components/PhotoViewer";
+import { MessagePhoto } from "@/components/MessagePhoto";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -118,6 +119,19 @@ function PendingReplyCard({
       (m) => m.messageId === draft.customerMessageId && m.senderType === "customer"
     ) ?? [...(thread ?? [])].reverse().find((m) => m.senderType === "customer");
 
+  /**
+   * A follow-up isn't a reply to anything — the studio spoke last and heard
+   * nothing back (or it's the aftercare check-in). Its id is made up, so the
+   * lookup above always falls through to "their newest message", which can be
+   * days older than the studio's last word. Headed THEY SAID, that read as the
+   * thing being answered. Say what it is instead.
+   */
+  const followUp = draft.customerMessageId.startsWith("followup_aftercare_")
+    ? "aftercare"
+    : draft.customerMessageId.startsWith("followup_")
+      ? "cold"
+      : null;
+
   // Reference photos come down with the draft, gathered across the thread —
   // they usually arrive a message or two BEFORE the question ("(sent a
   // photo)" then "a price on those two please"), so keying them to the
@@ -132,7 +146,10 @@ function PendingReplyCard({
   // letting the studio send a stranger a reply to something they wrote in
   // June as though no time had passed.
   const askedAt = answering?.createdAt ? new Date(answering.createdAt) : null;
-  const isStale = !!askedAt && Date.now() - askedAt.getTime() > 14 * 24 * 3600 * 1000;
+  // A follow-up is old by design — that's why it exists — so the "check it
+  // wasn't already answered" warning would be on every one of them.
+  const isStale =
+    !followUp && !!askedAt && Date.now() - askedAt.getTime() > 14 * 24 * 3600 * 1000;
 
   // The agent's first answer plus the other angles it offered, as one list to
   // choose between. The first is what it led with.
@@ -287,7 +304,11 @@ function PendingReplyCard({
         {answering && (
           <div className="rounded-xl bg-surface px-3 py-2">
             <p className="text-[0.6rem] uppercase tracking-[0.18em] text-muted-foreground">
-              They said
+              {followUp === "cold"
+                ? "Follow-up · last from them"
+                : followUp === "aftercare"
+                  ? "Aftercare · last from them"
+                  : "They said"}
             </p>
             <p className="mt-1 whitespace-pre-wrap text-sm text-charcoal">{answering.content}</p>
             {photo >= 0 && (
@@ -302,19 +323,13 @@ function PendingReplyCard({
             {!!recentPhotos.length && (
               <div className="mt-2 flex flex-wrap gap-2">
                 {recentPhotos.map((url, i) => (
-                  <button
+                  <MessagePhoto
                     key={url}
-                    type="button"
-                    onClick={() => setPhoto(i)}
-                    className="rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                  >
-                    <img
-                      src={url}
-                      alt="Reference photo the customer sent"
-                      className="h-28 w-28 rounded-lg border border-border object-cover"
-                      loading="lazy"
-                    />
-                  </button>
+                    src={url}
+                    alt="Reference photo the customer sent"
+                    className="h-28 w-28 rounded-lg border border-border object-cover"
+                    onOpen={() => setPhoto(i)}
+                  />
                 ))}
               </div>
             )}
@@ -904,19 +919,13 @@ export default function Conversations() {
                     {!!m.attachmentUrls?.length && (
                       <div className="mt-2 flex flex-wrap gap-2">
                         {m.attachmentUrls.map((url, i) => (
-                          <button
+                          <MessagePhoto
                             key={url}
-                            type="button"
-                            onClick={() => setThreadPhoto({ urls: m.attachmentUrls ?? [], index: i })}
-                            className="rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                          >
-                            <img
-                              src={url}
-                              alt="Reference photo"
-                              className="h-32 w-32 rounded-lg object-cover"
-                              loading="lazy"
-                            />
-                          </button>
+                            src={url}
+                            alt="Reference photo"
+                            className="h-32 w-32 rounded-lg object-cover"
+                            onOpen={() => setThreadPhoto({ urls: m.attachmentUrls ?? [], index: i })}
+                          />
                         ))}
                       </div>
                     )}

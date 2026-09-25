@@ -466,6 +466,25 @@ customer's now relabels it — an echo is Meta saying in words that we sent it.
 against the Page id alone.** On Instagram it is always false. Use
 `getOwnAccountIds()`.
 
+**The fix only reached the thirty most recent threads.** Brad, the same night,
+with a screenshot: Emily Failli's card, twelve days old, still headed THEY SAID
+over the studio's own "Hello Emily … I'll see you then", with a cold follow-up
+drafted on the strength of it. The poll imports thirty threads; anything older
+that the old import had inverted was never looked at again.
+`sweepOlderInstagramThreads()` (its own cron, every five minutes) walks every
+Instagram conversation in the database through the fixed import, ten at a
+time by row id, asking Meta for each by `user_id` so it never walks the edge.
+Progress lives in `app_settings.ig_relabel_sweep`; it never moves past a batch
+Instagram refused, steps over threads Meta says were deleted, waits until the
+studio's Instagram id is known, and marks itself done when it runs out.
+
+Two card fixes from the same screenshot. A follow-up's `customerMessageId` is
+made up (`followup_cold_…`), so the card always fell back to "their newest
+message" and headed it THEY SAID; it now says "Follow-up · last from them".
+And a photo whose stored copy failed is only Meta's link, which dies in days;
+the browser drew a broken "?" there. `MessagePhoto` shows a "Photo expired"
+tile instead and doesn't offer to open it.
+
 Stand-in note: point `INSTAGRAM_GRAPH_URL` at a different path on the stub
 (`/ig/v21.0`) from `FACEBOOK_GRAPH_URL`, or the code concludes it's on
 Instagram's own host, drops `platform=`, and the stub can't tell the inboxes
