@@ -658,21 +658,120 @@ export async function recordMessage(
  */
 export async function correctMessageSender(
   messageId: string,
-  senderType: "customer" | "bot" | "manual"
+  senderType: "customer" | "bot" | "manual",
+  /**
+   * Which thread it belongs in, when the caller knows.
+   *
+   * The Instagram import used to take the studio's own account for the
+   * customer, and every message it stored for the first time went into a
+   * thread keyed by the studio's own id — a real customer's words, filed
+   * under nobody. Relabelling the sender alone would leave them there, so a
+   * correction that knows the right thread moves the message into it.
+   *
+   * ONLY out of a thread in `from` — the studio's own ids. A message sitting
+   * in one customer's thread is never moved to another's on the strength of
+   * an import: if Graph and the webhook ever disagreed about a person's id,
+   * that would split every conversation in two.
+   */
+  move?: { into: string; from: Set<string> }
 ): Promise<boolean> {
   const db = await getDb();
   const [row] = await db
-    .select({ id: messengerMessages.id, senderType: messengerMessages.senderType })
+    .select({
+      id: messengerMessages.id,
+      senderType: messengerMessages.senderType,
+      conversationId: messengerMessages.conversationId,
+      createdAt: messengerMessages.createdAt,
+    })
     .from(messengerMessages)
     .where(eq(messengerMessages.messageId, messageId))
     .limit(1);
-  if (!row || row.senderType === senderType) return false;
+  if (!row) return false;
+
+  const conversationId = move?.into;
+  const moving =
+    !!move &&
+    !!conversationId &&
+    row.conversationId !== conversationId &&
+    move.from.has(row.conversationId);
+  if (row.senderType === senderType && !moving) return false;
 
   await db
     .update(messengerMessages)
-    .set({ senderType })
+    .set({ senderType, ...(moving ? { conversationId } : {}) })
     .where(eq(messengerMessages.messageId, messageId));
+
+  // The thread it moved into has a message it didn't know about. Same
+  // forward-only clocks as recordMessage, for the same reason.
+  if (moving && row.createdAt) {
+    const when = new Date(row.createdAt);
+    await db
+      .update(messengerConversations)
+      .set({
+        lastMessageAt: sql`GREATEST(COALESCE(${messengerConversations.lastMessageAt}, ${when}), ${when})`,
+        ...(senderType === "customer"
+          ? {
+              lastCustomerMessageAt: sql`GREATEST(COALESCE(${messengerConversations.lastCustomerMessageAt}, ${when}), ${when})`,
+            }
+          : {}),
+      })
+      .where(eq(messengerConversations.conversationId, conversationId!));
+  }
   return true;
+}
+
+/**
+ * A "conversation" keyed by the studio's OWN account is not a customer.
+ *
+ * The Instagram import created one: it took the studio for the customer, so
+ * any message it stored for the first time was filed under the studio's own
+ * id. Nothing can ever be sent there — it would be the studio messaging
+ * itself — so a draft in it is a card that can only mislead, and the thread
+ * must never be offered as one waiting for a reply.
+ *
+ * The messages in it are real people's words, and the import moves each one
+ * to its proper thread as it passes (correctMessageSender). Until then they
+ * are kept, not deleted: there is no second copy of anything here except in
+ * Meta, and Meta only hands back the newest ten per thread. So the thread is
+ * paused rather than removed while it still holds anything, and removed once
+ * it is empty.
+ */
+export async function retireOwnAccountThreads(ownIds: string[]): Promise<{
+  drafts: number;
+  removed: number;
+  stillHolding: number;
+}> {
+  const ids = [...new Set(ownIds.filter(Boolean))];
+  if (!ids.length) return { drafts: 0, removed: 0, stillHolding: 0 };
+  const db = await getDb();
+
+  const [dropped] = (await db.execute(
+    sql`DELETE FROM pending_replies WHERE status = 'pending' AND conversation_id IN ${ids}`
+  )) as unknown as [{ affectedRows?: number }];
+
+  const [emptied] = (await db.execute(
+    sql`DELETE c FROM messenger_conversations c
+         WHERE c.conversation_id IN ${ids}
+           AND NOT EXISTS (SELECT 1 FROM messenger_messages m WHERE m.conversation_id = c.conversation_id)`
+  )) as unknown as [{ affectedRows?: number }];
+
+  // Whatever is left still holds someone's words. Keep it, but off the board
+  // and out of "needs a reply" for good — a manual pause is the one thing
+  // every reader here already obeys.
+  await db.execute(
+    sql`UPDATE messenger_conversations
+           SET bot_paused_until = '2037-12-31 00:00:00', bot_pause_reason = 'manual'
+         WHERE conversation_id IN ${ids}`
+  );
+  const [counted] = (await db.execute(
+    sql`SELECT COUNT(*) AS n FROM messenger_messages WHERE conversation_id IN ${ids}`
+  )) as unknown as [{ n: number | string }[]];
+
+  return {
+    drafts: Number(dropped?.affectedRows ?? 0),
+    removed: Number(emptied?.affectedRows ?? 0),
+    stillHolding: Number(counted?.[0]?.n ?? 0),
+  };
 }
 
 /**

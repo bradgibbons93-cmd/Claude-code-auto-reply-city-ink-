@@ -31,7 +31,9 @@ import {
   replacePendingReplyDraft,
   getUnansweredConversations,
   hasDraftForMessage,
-  explainNotUnanswered
+  explainNotUnanswered,
+  correctMessageSender,
+  dropDraftsAnsweringOurselves
 } from "./db.js";
 import { invokeLLMJson, getLastLlmError, type ChatMessage } from "./llm.js";
 import { availabilityForPrompt, getPastAppointments } from "./calendar.js";
@@ -982,7 +984,23 @@ export async function handleEcho(
 
   await getOrCreateConversation(recipientId);
   const isNew = await recordMessage(recipientId, messageId, "manual", text || "(attachment)");
-  if (!isNew) return;
+  if (!isNew) {
+    /**
+     * Already stored — and an echo is Meta saying in so many words that the
+     * studio sent this. If the row says otherwise, the row is wrong, so put
+     * it right rather than walking away from it. Nothing else here re-runs:
+     * this is a retry, and superseding drafts again could throw away one
+     * written for a newer message since.
+     */
+    if (await correctMessageSender(messageId, "manual").catch(() => false)) {
+      const dropped = await dropDraftsAnsweringOurselves().catch(() => 0);
+      console.log(
+        `[Agent] ${recipientId}: an echo showed message ${messageId.slice(0, 24)}… was ours, not theirs — relabelled` +
+          (dropped ? `, and dropped ${dropped} draft(s) answering it` : "")
+      );
+    }
+    return;
+  }
 
   // Someone — another artist, or Facebook's own automated response — has
   // answered this thread. Any draft waiting on it is now a second answer to

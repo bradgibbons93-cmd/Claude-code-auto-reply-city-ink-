@@ -824,6 +824,161 @@ export async function getPageIdentity(): Promise<{ id: string; name?: string } |
   }
 }
 
+/**
+ * Every id the studio itself goes by, per inbox.
+ *
+ * The Page id is only the studio on MESSENGER. On Instagram the studio is its
+ * Instagram business account, a different number entirely, and code that
+ * asked "is this participant the Page?" of an Instagram thread got "no" for
+ * the studio itself. That is the root of every THEY SAID card this app has
+ * shown: the webhook made that mistake until 22 September, and the Instagram
+ * import went on making it after — taking the studio for the customer and
+ * relabelling every message in the thread the wrong way round every three
+ * minutes. The studio's replies became "the customer said", and real
+ * customers' messages became the studio's and dropped off the board.
+ *
+ * Gathered three ways, because any one can fail on a given day:
+ * - the Page, from its token (`getPageIdentity`);
+ * - the Instagram account linked to that Page, asked of Graph;
+ * - whatever Meta's own webhooks name as the account a delivery is about
+ *   (`entry.id`), remembered in the database so a boot with Graph
+ *   unreachable still knows.
+ */
+export interface OwnAccounts {
+  facebook: Set<string>;
+  instagram: Set<string>;
+  all: Set<string>;
+}
+
+const OWN_IDS_SETTING = "own_account_ids";
+let rememberedOwn: { facebook: Set<string>; instagram: Set<string> } | null = null;
+let linkedInstagram: { key: string; ids: string[] } | null = null;
+
+async function loadRememberedOwn() {
+  if (rememberedOwn) return rememberedOwn;
+  const fresh = { facebook: new Set<string>(), instagram: new Set<string>() };
+  try {
+    const { getSetting } = await import("./db.js");
+    const raw = await getSetting(OWN_IDS_SETTING);
+    const parsed = raw ? (JSON.parse(raw) as { facebook?: string[]; instagram?: string[] }) : {};
+    for (const id of parsed.facebook ?? []) fresh.facebook.add(String(id));
+    for (const id of parsed.instagram ?? []) fresh.instagram.add(String(id));
+  } catch {
+    // A missing or unreadable setting just means nothing remembered yet.
+  }
+  rememberedOwn = fresh;
+  return fresh;
+}
+
+/**
+ * Note an id Meta has told us is the studio's own.
+ *
+ * Called with `entry.id` from every webhook delivery. Only ever the account a
+ * delivery is ABOUT — never a sender — so a customer's id cannot get in here.
+ */
+export async function rememberOwnAccountId(
+  platform: Platform,
+  id: string | number | undefined | null
+): Promise<void> {
+  if (id === undefined || id === null || id === "") return;
+  const own = await loadRememberedOwn();
+  const key = String(id);
+  if (own[platform].has(key)) return;
+  own[platform].add(key);
+  try {
+    const { setSetting } = await import("./db.js");
+    await setSetting(
+      OWN_IDS_SETTING,
+      JSON.stringify({ facebook: [...own.facebook], instagram: [...own.instagram] })
+    );
+    console.log(`[Facebook] Noted ${key} as the studio's own ${platform} account`);
+  } catch (error) {
+    console.error("[Facebook] Couldn't store an own-account id:", (error as Error).message);
+  }
+}
+
+/** The Instagram account(s) behind the saved tokens, asked of Graph. */
+async function lookUpLinkedInstagram(): Promise<string[]> {
+  const config = await getFacebookConfig().catch(() => undefined);
+  if (!config) return [];
+  const key = `${config.pageAccessToken ?? ""}|${config.instagramAccessToken ?? ""}`;
+  if (linkedInstagram?.key === key) return linkedInstagram.ids;
+
+  const found = new Set<string>();
+  let anyAnswered = false;
+
+  // The Instagram account linked to the Page — what the Page-token flow uses.
+  const pageTokens = [config.pageAccessToken];
+  if (config.instagramAccessToken && config.instagramTokenHost === "facebook") {
+    pageTokens.push(config.instagramAccessToken);
+  }
+  for (const token of [...new Set(pageTokens.filter(Boolean))]) {
+    try {
+      const { data } = await axios.get(`${GRAPH}/me`, {
+        params: { fields: "instagram_business_account", access_token: token },
+        timeout: 8000,
+      });
+      anyAnswered = true;
+      if (data?.instagram_business_account?.id) found.add(String(data.instagram_business_account.id));
+    } catch {
+      // Tried again next time — nothing is cached on a failure.
+    }
+  }
+
+  // An Instagram-login token names its own account, under two ids.
+  if (config.instagramAccessToken && config.instagramTokenHost !== "facebook") {
+    try {
+      const { data } = await axios.get(`${IG_GRAPH}/me`, {
+        params: { fields: "id,user_id", access_token: config.instagramAccessToken },
+        timeout: 8000,
+      });
+      anyAnswered = true;
+      if (data?.id) found.add(String(data.id));
+      if (data?.user_id) found.add(String(data.user_id));
+    } catch {
+      // As above.
+    }
+  }
+
+  const ids = [...found];
+  if (anyAnswered) linkedInstagram = { key, ids };
+  return ids;
+}
+
+export async function getOwnAccountIds(): Promise<OwnAccounts> {
+  const own = await loadRememberedOwn();
+  const facebook = new Set(own.facebook);
+  const instagram = new Set(own.instagram);
+
+  const identity = await getPageIdentity().catch(() => null);
+  if (identity?.id) facebook.add(identity.id);
+  for (const id of await lookUpLinkedInstagram().catch(() => [] as string[])) instagram.add(id);
+
+  return { facebook, instagram, all: new Set([...facebook, ...instagram]) };
+}
+
+/**
+ * Which participant in a thread is the customer — or null when that can't
+ * be said for certain.
+ *
+ * Refusing is the point. The import relabels who said what on the strength
+ * of this answer, and a wrong answer inverts a whole thread; a thread left
+ * alone for one pass costs nothing, because the webhook already has it.
+ *
+ * Certain means: we know at least one id the studio uses on this inbox, and
+ * exactly one participant is not one of ours.
+ */
+export function pickCustomer(
+  participants: { id?: string; name?: string }[] | undefined,
+  own: OwnAccounts,
+  platform: Platform
+): { id: string; name?: string } | null {
+  if (own[platform].size === 0) return null;
+  const people = (participants ?? []).filter((p): p is { id: string; name?: string } => !!p.id);
+  const theirs = people.filter((p) => !own.all.has(String(p.id)));
+  return theirs.length === 1 ? { ...theirs[0], id: String(theirs[0].id) } : null;
+}
+
 interface InboxPage {
   data?: { participants?: { data?: { id?: string; name?: string }[] } }[];
   paging?: { next?: string };
@@ -1122,26 +1277,46 @@ export async function importExistingConversations(
    */
   force = false
 ): Promise<ImportedThreads> {
-  const { getOrCreateConversation, recordMessage, correctMessageSender, dropDraftsAnsweringOurselves } =
-    await import("./db.js");
-  const identity = await getPageIdentity();
+  const {
+    getOrCreateConversation,
+    recordMessage,
+    correctMessageSender,
+    dropDraftsAnsweringOurselves,
+    retireOwnAccountThreads,
+  } = await import("./db.js");
+  const own = await getOwnAccountIds();
   const notes: string[] = [];
   let conversations = 0;
   let messages = 0;
   let corrected = 0;
+  const unsure: Record<Platform, number> = { facebook: 0, instagram: 0 };
 
   /**
    * Store one thread the way a live delivery would.
    *
    * False for a thread with nobody in it but us — the Page talking to
-   * itself, which has nothing to answer.
+   * itself, which has nothing to answer — and for one where we can't tell
+   * which participant is the customer.
    */
   async function storeThread(thread: InboxThread, platform: Platform): Promise<boolean> {
-    // Whoever isn't us.
-    const customer = (thread.participants?.data ?? []).find(
-      (p) => p.id && p.id !== identity?.id
-    );
-    if (!customer?.id) return false;
+    /**
+     * Whoever isn't us — where "us" is every id the studio goes by on THIS
+     * inbox, not just the Facebook Page.
+     *
+     * This compared against the Page id alone. On Instagram the studio is its
+     * Instagram account, a different number, so when Meta listed the studio
+     * first it was taken for the customer, and everything below ran the
+     * wrong way round: the studio's replies relabelled "customer" (THEY SAID,
+     * with a draft answering Brad's own words) and the customer's messages
+     * relabelled ours, so real enquiries fell off the board within a poll.
+     * Faith's, mali's and maya's cards on 25 September were the first kind;
+     * Rebecca's and Megan's messages that night were the second.
+     */
+    const customer = pickCustomer(thread.participants?.data, own, platform);
+    if (!customer) {
+      unsure[platform] += 1;
+      return false;
+    }
 
     await getOrCreateConversation(customer.id, realName(customer.name), platform);
     conversations += 1;
@@ -1176,7 +1351,7 @@ export async function importExistingConversations(
       // to an ad." Putting those in the customer's mouth is the worse
       // mistake — the agent reads this back as the conversation and would
       // sit there trying to answer a status line.
-      const fromId = turn.from?.id;
+      const fromId = turn.from?.id ? String(turn.from.id) : undefined;
       const fromUs = fromId !== customer.id;
       // Keep when it was actually said. Stamping the whole thread "now"
       // leaves it with no real order, and these turns are what the agent
@@ -1211,8 +1386,14 @@ export async function importExistingConversations(
         // replies recorded as the customer's, which is what had the agent
         // drafting answers to its own sentences. Pressing Import again is
         // how that gets put right.
+        //
+        // And possibly filed under the wrong thread: the old Instagram import
+        // put anything it stored for the first time under the studio's own
+        // id. Now the customer is known for certain, it goes where it belongs.
         const wanted = fromUs ? "manual" : "customer";
-        if (await correctMessageSender(turn.id, wanted)) corrected += 1;
+        if (await correctMessageSender(turn.id, wanted, { into: customer.id, from: own.all })) {
+          corrected += 1;
+        }
       }
     }
 
@@ -1333,10 +1514,44 @@ export async function importExistingConversations(
     );
   }
 
+  // Said once per pass, in words, so a quiet import is never mistaken for an
+  // empty inbox. The usual cause is not yet knowing the studio's Instagram
+  // id — which the first Instagram webhook after a deploy supplies.
+  for (const platform of ["facebook", "instagram"] as const) {
+    if (!unsure[platform]) continue;
+    const why =
+      own[platform].size === 0
+        ? `the studio's own ${platform} account id isn't known yet, so none of these were touched`
+        : "couldn't tell which participant was the customer, so they were left alone";
+    console.warn(`[Facebook] ${platform} import skipped ${unsure[platform]} thread(s) — ${why}`);
+    notes.push(`${platform}: skipped ${unsure[platform]} — ${why}`);
+  }
+
+  // Any thread filed under the studio's own account is a mistake of the old
+  // import. Take its drafts off the board and keep it out of "needs a reply".
+  try {
+    const retired = await retireOwnAccountThreads([...own.all]);
+    if (retired.drafts || retired.removed) {
+      console.log(
+        `[Facebook] Studio's own account: removed ${retired.drafts} draft(s) addressed to itself` +
+          (retired.removed ? ` and ${retired.removed} empty thread(s)` : "") +
+          (retired.stillHolding ? `; ${retired.stillHolding} message(s) still waiting to be moved to their thread` : "")
+      );
+    }
+  } catch (error) {
+    console.error("[Facebook] Couldn't tidy the studio's own-account thread:", (error as Error).message);
+  }
+
   // Any draft that was answering something we now know we said ourselves is
   // nonsense, and approving one would send a customer a reply to the
   // studio's own words.
   const droppedDrafts = corrected ? await dropDraftsAnsweringOurselves() : 0;
+  if (corrected) {
+    // The poll never said when it relabelled anything, which is why a whole
+    // evening of the import turning threads inside out left no trace in the
+    // log. Every relabel is now a line.
+    console.log(`[Facebook] Import corrected who sent ${corrected} message(s)`);
+  }
   if (corrected) {
     notes.push(
       `corrected who sent ${corrected} message${corrected === 1 ? "" : "s"}` +

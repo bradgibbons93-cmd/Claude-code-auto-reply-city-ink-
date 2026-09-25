@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { verifyWebhookSignature } from "../facebook.js";
 import { handleCustomerMessage, handleEcho } from "../agent.js";
-import { getPageIdentity } from "../facebook.js";
+import { getPageIdentity, rememberOwnAccountId } from "../facebook.js";
 import {
   getFacebookConfig,
   recordWebhookDelivery,
@@ -177,6 +177,11 @@ router.post("/facebook", async (req: RawBodyRequest, res: Response) => {
   if (!platform) return;
 
   for (const entry of req.body.entry ?? []) {
+    // `entry.id` is the account this delivery is ABOUT — the Page, or the
+    // studio's Instagram account. Remembered, so the importer can tell the
+    // studio apart from a customer on Instagram even when Graph won't say.
+    void rememberOwnAccountId(platform, entry?.id);
+
     for (const event of entry.messaging ?? []) {
       const message = event.message;
       if (!message) continue;

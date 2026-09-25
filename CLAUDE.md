@@ -430,6 +430,49 @@ with the same two symptoms he photographed**: stored as `customer`, one draft
 written. It asserts the Page id and the Instagram id are different, so a
 fixture that cannot reproduce the bug fails loudly rather than passing.
 
+**And a third time — the same mistake, one file over, in the IMPORT.** Brad,
+26 September: *"it still says they said on some messages that is clearly from
+ours, it still shows messages that have been replied to."* The webhook was
+right by then. The three-minute import was not: `storeThread` picked the
+customer as "the first participant who isn't the Page", and on Instagram the
+studio's own account (`17841470171377490`) isn't the Page — so when Meta
+listed the studio first, the STUDIO became the customer, and
+`correctMessageSender` relabelled the whole thread the wrong way round, every
+poll, for ever. The live log proved it without a database:
+
+    10:30:20  [Agent] Human replied to 1109326724304489     <- echo, stored manual
+    10:32:13  [Agent] Drafting for 1109326724304489 against "Hi Faith, I'll drawing up…"
+
+— the only thing between those lines is the poll, and the only code that
+changes `sender_type` is the import. It ran the other way too, which is worse:
+Rebecca Laing's and Megan Renee Mose's real messages became "manual" within a
+poll and their drafts were deleted as "answering ourselves". No echo, no log
+line — they simply left the board. And any message the import stored for the
+first time went into a thread keyed by the studio's own id.
+
+The fix is to know every id the studio goes by, per inbox (`getOwnAccountIds`:
+the Page, the Instagram account linked to it via `instagram_business_account`,
+and every webhook `entry.id`, remembered in `app_settings.own_account_ids`),
+and to **refuse rather than guess** (`pickCustomer`): a thread is only
+imported when we know at least one of our ids on that inbox and exactly one
+participant is not ours. A skipped thread costs nothing — the webhook already
+has it. A wrong guess inverts a conversation. The import also moves messages
+OUT of a studio-keyed thread into the right one (never between two customers'
+threads), and `retireOwnAccountThreads` takes drafts off a studio-keyed thread
+and removes it once empty. And an echo for a message already stored as the
+customer's now relabels it — an echo is Meta saying in words that we sent it.
+
+**Rule, now broken three times: never decide "is this us?" by comparing
+against the Page id alone.** On Instagram it is always false. Use
+`getOwnAccountIds()`.
+
+Stand-in note: point `INSTAGRAM_GRAPH_URL` at a different path on the stub
+(`/ig/v21.0`) from `FACEBOOK_GRAPH_URL`, or the code concludes it's on
+Instagram's own host, drops `platform=`, and the stub can't tell the inboxes
+apart. `ownids.mjs` (43 assertions) fails 30 of them on the old code with
+Brad's exact symptoms — Faith's card answering the studio, Rebecca gone,
+"Everyone's been answered" on the home screen.
+
 **`GROUP_CONCAT` truncation killed FIVE repair steps at every single boot,
 and nobody noticed because the line reads like a warning.**
 
