@@ -4,107 +4,116 @@
 
 @layer base {
   /*
-   * Light — the four colours off the logo sheet, exactly:
-   * #1A1A1A ink black, #C6A47D gold, #E7D9C3 cream, #FFFFFF paper.
+   * The studio's palette, off the sheet Brad sent:
+   * COFFEE BROWN #6F5A4B and SILVER GRAY #E9E9EA, with the ink black
+   * #1A1A1A from the logo carrying the type.
+   *
+   * The silver is the ground and the coffee is everything that has to be
+   * looked at — buttons, headings, the hairline under a card. Two colours is
+   * the whole point of a two-colour palette: nothing here gets a third
+   * accent because a panel felt flat.
    */
   :root {
-    /* The ground is parchment, not paper. A pure-white page under studio
-       lights is a glare, and it left the cream borders with nothing to
-       stand against — every card floated on the same white. Dropping the
-       page into the brand's own warm tone gives the cards something to sit
-       on, and lets the gold read as gold rather than as beige-on-white. */
-    --c-background: 243 236 226;
-    --c-surface: 249 244 236;
-    --c-foreground: 26 26 26; /* #1A1A1A */
-    --c-card: 252 248 242;
-    --c-input: 255 253 250;
-    /* Deep enough to draw an edge against the warmer ground. */
-    --c-border: 214 194 166;
-    --c-muted: 118 105 89;
-    --c-accent: 231 217 195; /* #E7D9C3 cream */
-    --c-accent-strong: 176 138 92; /* deeper gold — reads on parchment */
+    /* Silver gray, exactly, as the page. Cards sit a few percent lighter so
+       they lift off it without needing a heavier border. */
+    --c-background: 233 233 234; /* #E9E9EA */
+    --c-surface: 242 242 243;
+    --c-foreground: 26 26 26; /* #1A1A1A ink black */
+    --c-card: 249 249 250;
+    --c-input: 253 253 253;
+    /* Warmed toward the coffee, so an edge belongs to the palette rather
+       than reading as a generic gray rule. */
+    --c-border: 205 200 195;
+    --c-muted: 108 102 97;
+    /* A wash of the coffee, for fills behind an icon or a quiet badge. */
+    --c-accent: 219 210 202;
+    --c-accent-strong: 111 90 75; /* #6F5A4B COFFEE BROWN */
     --c-destructive: 165 70 60;
     --c-success: 74 106 78;
-    --c-primary: 26 26 26;
-    --c-primary-foreground: 252 248 242;
+    /* The primary button is the coffee. It is the one colour on the page
+       that means "this is the thing to press". */
+    --c-primary: 111 90 75;
+    --c-primary-foreground: 249 249 250;
 
-    --c-accent-alt: 176 138 92; /* the gold carries the accent in light */
-    --c-elevated: 255 252 247;
+    /* The counter-light: a lighter coffee, so a gradient has somewhere to
+       travel without introducing a colour that isn't the studio's. */
+    --c-accent-alt: 154 128 108;
+    --c-elevated: 255 255 255;
 
-    /* The banner is its own small palette: an ink slab carrying the gold,
-       which is the studio's actual logo sheet. It stays dark in both themes
-       because a hero that flips to paper stops reading as a banner. */
-    --c-banner: 22 20 19;
-    --c-banner-deep: 8 7 7;
-    --c-banner-fg: 250 246 240;
-    --c-banner-accent: 198 164 125;
+    /* The banner is a slab of the darkest coffee carrying the silver — the
+       palette inverted rather than a different one. It stays dark in both
+       themes, because a hero that flips to paper stops reading as a banner. */
+    --c-banner: 42 33 27;
+    --c-banner-deep: 22 17 13;
+    --c-banner-fg: 233 233 234;
+    --c-banner-accent: 196 169 143;
 
-    /* A touch deeper, so a card lifts off the parchment rather than
-       dissolving into it. */
-    --shadow-soft: 0 1px 2px rgb(58 44 30 / 0.06), 0 8px 24px -12px rgb(58 44 30 / 0.16);
-    --shadow-lift: 0 2px 4px rgb(58 44 30 / 0.08), 0 18px 40px -16px rgb(58 44 30 / 0.22);
-    --shadow-glow: 0 0 0 1px rgb(198 164 125 / 0.55), 0 0 28px -6px rgb(198 164 125 / 0.5);
+    /* Shadows tinted brown rather than neutral, so a lifted card looks warm
+       against the silver instead of sooty. */
+    --shadow-soft: 0 1px 2px rgb(58 44 30 / 0.07), 0 8px 24px -12px rgb(58 44 30 / 0.18);
+    --shadow-lift: 0 2px 4px rgb(58 44 30 / 0.09), 0 18px 40px -16px rgb(58 44 30 / 0.24);
+    --shadow-glow: 0 0 0 1px rgb(111 90 75 / 0.5), 0 0 28px -6px rgb(111 90 75 / 0.4);
     --shadow-inset: inset 0 1px 2px rgb(26 26 26 / 0.05);
 
     --page-wash:
-      radial-gradient(60rem 40rem at 12% -10%, rgb(231 217 195 / 0.5), transparent 60%),
-      radial-gradient(50rem 34rem at 105% 8%, rgb(198 164 125 / 0.2), transparent 62%);
-    --glass-bg: 255 255 255;
-    --glass-alpha: 0.72;
-    --ink-a: 198 164 125;
-    --ink-b: 231 217 195;
-    --ink-opacity: 0.3;
+      radial-gradient(60rem 40rem at 12% -10%, rgb(219 210 202 / 0.75), transparent 62%),
+      radial-gradient(50rem 34rem at 105% 8%, rgb(111 90 75 / 0.14), transparent 62%);
+    --glass-bg: 252 252 252;
+    --glass-alpha: 0.74;
+    --ink-a: 111 90 75;
+    --ink-b: 196 169 143;
+    --ink-opacity: 0.26;
   }
 
   /*
-   * Dark — ink black, lit by violet with the brand gold as counter-light so
-   * the palette has somewhere to travel instead of one flat purple, and the
-   * dark theme still reads as City Ink. Inputs and menus sit BELOW the page
-   * black: a dropdown should read as a hole cut in the surface, not a panel
-   * floating on it.
+   * Dark — the same two colours after hours: an espresso ground with the
+   * silver gray carrying the type, and the coffee lightened so it still
+   * reads against it. The theme used to be violet, which was a third colour
+   * the studio doesn't own.
+   *
+   * Inputs and menus sit BELOW the page black: a dropdown should read as a
+   * hole cut in the surface, not a panel floating on it.
    */
   :root[data-theme="dark"] {
-    --c-background: 8 6 13;
-    --c-surface: 16 12 25;
-    --c-foreground: 242 240 250;
-    --c-card: 15 11 24;
-    --c-input: 5 4 9; /* darker than the page — a recess, not a raise */
-    --c-elevated: 11 8 18; /* dropdowns, popovers, menus */
-    --c-border: 47 37 70;
-    --c-muted: 158 148 180;
-    --c-accent: 167 139 250; /* violet */
-    --c-accent-strong: 201 156 255; /* brighter violet for emphasis */
-    --c-accent-alt: 198 164 125; /* the brand gold, lighting against the violet */
-    --c-destructive: 248 113 113;
-    --c-success: 110 200 140;
-    --c-primary: 167 139 250;
-    --c-primary-foreground: 10 7 17;
+    --c-background: 20 16 14;
+    --c-surface: 30 24 21;
+    --c-foreground: 233 233 234; /* the silver gray, as the type */
+    --c-card: 27 21 18;
+    --c-input: 13 10 8; /* darker than the page — a recess, not a raise */
+    --c-elevated: 25 19 16; /* dropdowns, popovers, menus */
+    --c-border: 60 48 40;
+    --c-muted: 167 156 147;
+    --c-accent: 196 169 143; /* the coffee, lifted to read on espresso */
+    --c-accent-strong: 217 195 172;
+    --c-accent-alt: 159 163 166; /* the silver, lighting against the brown */
+    --c-destructive: 240 130 120;
+    --c-success: 122 190 140;
+    --c-primary: 196 169 143;
+    --c-primary-foreground: 26 21 18;
 
-    /* Same slab, tuned to the violet ground so it sits with the dark theme
-       rather than looking like a cut-out from the light one. */
-    --c-banner: 20 15 33;
-    --c-banner-deep: 8 6 13;
-    --c-banner-fg: 242 240 250;
-    --c-banner-accent: 201 156 255;
+    --c-banner: 33 26 21;
+    --c-banner-deep: 15 11 9;
+    --c-banner-fg: 233 233 234;
+    --c-banner-accent: 217 195 172;
 
-    --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.6), 0 8px 24px -12px rgb(139 92 246 / 0.4);
+    --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.6), 0 8px 24px -12px rgb(120 92 66 / 0.45);
     --shadow-lift:
-      0 2px 6px rgb(0 0 0 / 0.6), 0 20px 46px -18px rgb(167 139 250 / 0.55),
-      0 0 60px -30px rgb(198 164 125 / 0.35);
+      0 2px 6px rgb(0 0 0 / 0.6), 0 20px 46px -18px rgb(196 169 143 / 0.4),
+      0 0 60px -30px rgb(159 163 166 / 0.25);
     --shadow-glow:
-      0 0 0 1px rgb(167 139 250 / 0.5), 0 0 34px -4px rgb(167 139 250 / 0.7),
-      0 0 70px -20px rgb(198 164 125 / 0.3);
+      0 0 0 1px rgb(196 169 143 / 0.45), 0 0 34px -4px rgb(196 169 143 / 0.55),
+      0 0 70px -20px rgb(159 163 166 / 0.2);
     --shadow-inset: inset 0 1px 0 rgb(255 255 255 / 0.04), inset 0 0 20px rgb(0 0 0 / 0.6);
 
     --page-wash:
-      radial-gradient(60rem 40rem at 12% -10%, rgb(139 92 246 / 0.3), transparent 62%),
-      radial-gradient(50rem 34rem at 105% 8%, rgb(198 164 125 / 0.14), transparent 64%),
-      radial-gradient(40rem 30rem at 50% 120%, rgb(109 40 217 / 0.26), transparent 60%);
-    --glass-bg: 15 11 24;
-    --glass-alpha: 0.68;
-    --ink-a: 139 92 246;
-    --ink-b: 198 164 125;
-    --ink-opacity: 0.22;
+      radial-gradient(60rem 40rem at 12% -10%, rgb(120 92 66 / 0.3), transparent 62%),
+      radial-gradient(50rem 34rem at 105% 8%, rgb(159 163 166 / 0.1), transparent 64%),
+      radial-gradient(40rem 30rem at 50% 120%, rgb(84 62 44 / 0.32), transparent 60%);
+    --glass-bg: 27 21 18;
+    --glass-alpha: 0.7;
+    --ink-a: 143 111 84;
+    --ink-b: 159 163 166;
+    --ink-opacity: 0.2;
   }
 
   body {
@@ -164,6 +173,14 @@
   textarea:focus-visible,
   select:focus-visible {
     box-shadow: var(--shadow-inset), 0 0 0 3px rgb(var(--c-accent) / 0.22);
+  }
+
+  /* Checkboxes and radios in the studio's brown rather than the browser's
+     blue — on a two-colour palette the system blue is the loudest thing on
+     the page. */
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: rgb(var(--c-accent-strong));
   }
 
   *:focus-visible {

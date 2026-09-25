@@ -1,5 +1,5 @@
 import { Link } from "wouter";
-import { formatDistanceToNow } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
 import {
   MessageCircle,
   CalendarDays,
@@ -14,14 +14,18 @@ import {
   Globe,
   CheckCircle2,
   ShieldCheck,
+  Smartphone,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import LiveFeed from "@/components/LiveFeed";
 import DashboardBanner from "@/components/DashboardBanner";
+import AgentStatusCard from "@/components/AgentStatusCard";
+import { MessagePhoto } from "@/components/MessagePhoto";
+import StudioTiles from "@/components/StudioTiles";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/Avatar";
-import { cn } from "@/lib/utils";
+import { cn, isUnanswered } from "@/lib/utils";
 import { useReveal } from "@/lib/useReveal";
 
 function greeting() {
@@ -74,7 +78,7 @@ function StatCard({
   const up = (deltaPct ?? 0) >= 0;
   return (
     <Card className="relative overflow-hidden">
-      <CardContent className="pt-6">
+      <CardContent className="px-4 pt-5 sm:px-6 sm:pt-6">
         {/* Icon on its own row above the text. Beside it, a 44px circle plus
             its gap left the label too narrow at four across and "Avg approval
             time" wrapped onto three lines; in the corner it overlapped. */}
@@ -170,6 +174,23 @@ export default function Dashboard() {
   });
   const { data: fb } = trpc.config.facebook.useQuery();
   const { data: timely } = trpc.config.timely.useQuery();
+  const { data: posts } = trpc.posts.getScheduled.useQuery(undefined, { refetchInterval: 60000 });
+  const { data: pushStatus } = trpc.push.status.useQuery();
+
+  // The next three still to go out. getScheduled comes back newest-first over
+  // everything ever queued, so a batch scheduled for next week sits at the
+  // wrong end of it.
+  const queued = (posts ?? [])
+    .filter((post) => post.status === "scheduled" && new Date(post.scheduledAt) > new Date())
+    .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())
+    .slice(0, 3);
+
+  // Only the people nobody has answered. This card listed the five newest
+  // threads with no test at all, so most of what Brad saw on the home screen
+  // was work he had already done — and under a heading that says otherwise,
+  // that reads as the app being behind. `conversations.list` comes back
+  // newest-first, so the order is already right.
+  const unanswered = (conversations ?? []).filter(isUnanswered);
 
   const series = dash?.series.map((point) => point.count) ?? [];
   const nameFor = (conversationId: string) =>
@@ -184,9 +205,15 @@ export default function Dashboard() {
         nextBooking={bookings?.[0] ? { title: bookings[0].title, label: bookings[0].label } : null}
       />
 
+      {/* Is it actually alive, and where is everything. Both questions get
+          answered above the fold, because the failure mode of this app is
+          silence and the place Brad works is a phone. */}
+      <AgentStatusCard />
+      <StudioTiles />
+
       <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
         <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
             <StatCard
               icon={MessageCircle}
               label="Messages today"
@@ -218,62 +245,7 @@ export default function Dashboard() {
             />
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-baseline justify-between gap-2">
-                  <div>
-                    <h2 className="font-display text-base tracking-[0.06em] text-charcoal">
-                      Messenger Inbox
-                    </h2>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      All incoming Facebook messages
-                    </p>
-                  </div>
-                  <Link
-                    href="/messages"
-                    className="text-xs text-sepia underline-offset-2 hover:underline"
-                  >
-                    View all
-                  </Link>
-                </div>
-
-                <div className="mt-4 divide-y divide-border">
-                  {conversations?.length ? (
-                    conversations.slice(0, 5).map((c) => (
-                      <Link
-                        key={c.conversationId}
-                        href="/messages"
-                        className="flex items-center gap-3 py-3 transition-colors hover:bg-beige/10"
-                      >
-                        <Avatar name={c.senderName || "?"} />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm text-charcoal">
-                            {c.senderName || "Unknown customer"}
-                          </p>
-                          {c.bookingDates && (
-                            <p className="truncate text-xs text-muted-foreground">
-                              Wants {c.bookingDates}
-                            </p>
-                          )}
-                        </div>
-                        {c.lastMessageAt && (
-                          <span className="shrink-0 text-xs text-muted-foreground">
-                            {formatDistanceToNow(new Date(c.lastMessageAt))}
-                          </span>
-                        )}
-                      </Link>
-                    ))
-                  ) : (
-                    <p className="py-6 text-sm text-muted-foreground">
-                      No messages yet. Connect the Page in Settings, then message your studio to
-                      test it.
-                    </p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
+          <div className="grid gap-4">
             <Card>
               <CardContent className="pt-6">
                 <div className="flex items-baseline justify-between gap-2">
@@ -313,7 +285,7 @@ export default function Dashboard() {
                         {!!draft.photoUrls?.length && (
                           <div className="mb-2 flex flex-wrap gap-1.5">
                             {draft.photoUrls.map((url) => (
-                              <img
+                              <MessagePhoto
                                 key={url}
                                 src={url}
                                 alt="Reference photo"
@@ -339,29 +311,68 @@ export default function Dashboard() {
                 )}
               </CardContent>
             </Card>
+          </div>
 
-            {/* The studio's own posts, running down the side like a feed. */}
+          <div className="grid gap-4 lg:grid-cols-2">
             <Card>
               <CardContent className="pt-6">
                 <div className="flex items-baseline justify-between gap-2">
-                  <h2 className="font-display text-base tracking-[0.06em] text-charcoal">
-                    Live feed
-                  </h2>
+                  <div>
+                    <h2 className="font-display text-base tracking-[0.06em] text-charcoal">
+                      Waiting on a reply
+                    </h2>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Messenger and Instagram, newest first
+                    </p>
+                  </div>
                   <Link
-                    href="/feed"
+                    href="/messages"
                     className="text-xs text-sepia underline-offset-2 hover:underline"
                   >
-                    See all
+                    View all
                   </Link>
                 </div>
-                <div className="mt-4">
-                  <LiveFeed variant="rail" limit={3} />
+
+                <div className="mt-4 divide-y divide-border">
+                  {unanswered.length ? (
+                    unanswered.slice(0, 5).map((c) => (
+                      <Link
+                        key={c.conversationId}
+                        href="/messages"
+                        className="flex items-center gap-3 py-3 transition-colors hover:bg-beige/10"
+                      >
+                        <Avatar name={c.senderName || "?"} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm text-charcoal">
+                            {c.senderName || "Unknown customer"}
+                          </p>
+                          {c.bookingDates && (
+                            <p className="truncate text-xs text-muted-foreground">
+                              Wants {c.bookingDates}
+                            </p>
+                          )}
+                        </div>
+                        {c.lastMessageAt && (
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {formatDistanceToNow(new Date(c.lastMessageAt))}
+                          </span>
+                        )}
+                      </Link>
+                    ))
+                  ) : conversations?.length ? (
+                    <p className="py-6 text-sm text-muted-foreground">
+                      Everyone's been answered. Older conversations are under Messages.
+                    </p>
+                  ) : (
+                    <p className="py-6 text-sm text-muted-foreground">
+                      No messages yet. Connect the Page in Settings, then message your studio to
+                      test it.
+                    </p>
+                  )}
                 </div>
               </CardContent>
             </Card>
-          </div>
 
-          <div ref={lowerRef} className="grid gap-4 lg:grid-cols-2">
             <Card>
               <CardContent className="pt-6">
                 <div className="flex items-baseline justify-between gap-2">
@@ -398,12 +409,14 @@ export default function Dashboard() {
                 </div>
               </CardContent>
             </Card>
+          </div>
 
+          <div ref={lowerRef} className="grid gap-4 lg:grid-cols-2">
             <Card>
               <CardContent className="pt-6">
                 <div className="flex items-baseline justify-between gap-2">
                   <h2 className="font-display text-base tracking-[0.06em] text-charcoal">
-                    Post scheduler
+                    Going out next
                   </h2>
                   <Link
                     href="/posts"
@@ -412,15 +425,67 @@ export default function Dashboard() {
                     Open
                   </Link>
                 </div>
-                <p className="mt-4 text-sm text-muted-foreground">
-                  Schedule posts to the Page and generate captions in the studio's voice.
-                </p>
+
+                {/* What is actually queued, not an advert for the feature.
+                    A batch scheduled a week ago is invisible until the day it
+                    posts, which is exactly when it's too late to change it. */}
+                <div className="mt-4 divide-y divide-border">
+                  {queued.length ? (
+                    queued.map((post) => (
+                      <div key={post.id} className="flex items-center gap-3 py-3">
+                        {post.imageUrl ? (
+                          <img
+                            src={post.imageUrl}
+                            alt=""
+                            className="h-10 w-10 shrink-0 rounded-lg border border-border object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-beige/30 text-sepia">
+                            <PenLine className="h-4 w-4" />
+                          </span>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm text-charcoal">{post.content}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {format(new Date(post.scheduledAt), "EEE d MMM, HH:mm")}
+                          </p>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="py-6 text-sm text-muted-foreground">
+                      Nothing queued. Photos the artists send in can be scheduled a batch at a
+                      time — one a day, for as many as you pick.
+                    </p>
+                  )}
+                </div>
+
                 <Link href="/posts">
                   <Button variant="outline" className="mt-4 w-full">
-                    Plan a post
+                    {queued.length ? "Plan more" : "Schedule a batch"}
                     <ArrowRight className="ml-2 h-3.5 w-3.5" />
                   </Button>
                 </Link>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-baseline justify-between gap-2">
+                  <h2 className="font-display text-base tracking-[0.06em] text-charcoal">
+                    Live feed
+                  </h2>
+                  <Link
+                    href="/feed"
+                    className="text-xs text-sepia underline-offset-2 hover:underline"
+                  >
+                    See all
+                  </Link>
+                </div>
+                <div className="mt-4">
+                  <LiveFeed variant="rail" limit={3} />
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -433,7 +498,7 @@ export default function Dashboard() {
                 Live activity
               </h2>
               <div className="mt-4 space-y-3">
-                {pending?.length || conversations?.length ? (
+                {pending?.length || unanswered.length ? (
                   <>
                     {pending?.slice(0, 3).map((draft) => (
                       <div key={`d${draft.id}`} className="flex gap-3">
@@ -453,13 +518,15 @@ export default function Dashboard() {
                         )}
                       </div>
                     ))}
-                    {conversations?.slice(0, 3).map((c) => (
+                    {unanswered.slice(0, 3).map((c) => (
                       <div key={`c${c.conversationId}`} className="flex gap-3">
                         <span className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-beige/30 text-sepia">
                           <MessageCircle className="h-3.5 w-3.5" />
                         </span>
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm text-charcoal">Messenger enquiry</p>
+                          <p className="text-sm text-charcoal">
+                            {c.platform === "instagram" ? "Instagram" : "Messenger"} enquiry
+                          </p>
                           <p className="truncate text-xs text-muted-foreground">
                             {c.senderName || "Unknown customer"}
                           </p>
@@ -499,11 +566,22 @@ export default function Dashboard() {
                   connected={!!timely?.calendarIcsUrl}
                   tint="bg-beige/40 text-sepia"
                 />
+                {/* Hardcoded to "not connected" until now, which it kept
+                    saying for days while Instagram DMs were arriving. What
+                    makes Instagram work is the Instagram app secret — its
+                    webhooks are signed with a different one from Facebook's —
+                    so that is what this reports. */}
                 <IntegrationRow
                   icon={Instagram}
                   label="Instagram"
-                  connected={false}
+                  connected={!!fb?.hasInstagramAppSecret || !!fb?.hasInstagramToken}
                   tint="bg-[#E1306C]/10 text-[#E1306C]"
+                />
+                <IntegrationRow
+                  icon={Smartphone}
+                  label="Phone notifications"
+                  connected={!!pushStatus?.count}
+                  tint="bg-beige/40 text-sepia"
                 />
                 <IntegrationRow
                   icon={Globe}

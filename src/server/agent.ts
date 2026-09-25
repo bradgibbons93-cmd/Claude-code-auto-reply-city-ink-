@@ -7,22 +7,36 @@ import {
   getFacebookConfig,
   updateBookingDetails,
   markBookingNotified,
+  claimNotificationSlot,
   setOwnerPsid,
   createPendingReply,
   supersedePendingReplies,
   resolvePendingReply,
+  restorePendingReply,
+  clearSendError,
   findSimilarExchanges,
   getRecentDraftEdits,
+  getPriceCorrections,
+  getColdConversations,
+  getRecentConversations,
+  claimFollowUp,
+  getSetting,
+  isPlaceholderName,
   recordDraftEdit,
   getConversationMessages,
   pauseBot,
+  resumeBot,
   getConversation,
   getPendingReply,
   replacePendingReplyDraft,
   getUnansweredConversations,
+  hasDraftForMessage,
+  explainNotUnanswered,
+  correctMessageSender,
+  dropDraftsAnsweringOurselves
 } from "./db.js";
 import { invokeLLMJson, getLastLlmError, type ChatMessage } from "./llm.js";
-import { availabilityForPrompt } from "./calendar.js";
+import { availabilityForPrompt, getPastAppointments } from "./calendar.js";
 import {
   sendMessengerMessage,
   sendTypingIndicator,
@@ -30,6 +44,7 @@ import {
   publicUrl,
 } from "./facebook.js";
 import { cacheAttachments } from "./attachments.js";
+import { notify, notifyOnce, clearAlert, getNotifySettings } from "./push.js";
 
 const HANDOFF_HOURS = Number(process.env.HANDOFF_PAUSE_HOURS || 12);
 
@@ -78,7 +93,9 @@ async function decide(
   hasPhoto: boolean,
   availability: string,
   examples: Array<{ customerMessage: string; studioReply: string }>,
-  corrections: Array<{ draftText: string; sentText: string }>
+  corrections: Array<{ draftText: string; sentText: string }>,
+  priceCorrections: Array<{ draftText: string; sentText: string }> = [],
+  reviewUrl?: string
 ): Promise<AgentDecision & { ok: boolean }> {
   const missing = [
     !known.name && "their full name",
@@ -127,8 +144,24 @@ ${corrections.map((c) => `You wrote: ${c.draftText}\nThey sent instead: ${c.sent
 
 `
       : ""
+  }${
+    priceCorrections.length
+      ? `PRICES THE STUDIO HAS CORRECTED — these matter more than anything else here. Every one is a job you quoted too low or too high and the studio fixed by hand before it went out. When a new enquiry looks like one of these, price it like the CORRECTED figure, not your own instinct:
+${priceCorrections.map((c) => `You quoted: ${c.draftText}\nThe studio actually charged: ${c.sentText}`).join("\n\n")}
+
+`
+      : ""
   }WHAT THE STUDIO HAS TOLD YOU (this is your only source of facts):
 ${studioFacts || "(nothing configured yet — stay general, don't quote prices, defer to the studio)"}
+
+AFTERCARE — if our last message asked how their tattoo was healing:
+- They answer happily ("it's great", "loving it", "healed perfectly", a heart) → thank them warmly, and ${
+    reviewUrl
+      ? `ask once, lightly, if they'd mind leaving a review — include this exact link and nothing else: ${reviewUrl}. Something like "so glad you're happy with it! 😊 if you get a minute a quick review would mean a lot to us — ${reviewUrl}". Ask ONCE. If they ignore it, never ask again.`
+      : `thank them and leave it there. Do NOT ask for a review and do NOT invent a review link — the studio hasn't saved one.`
+  }
+- They answer with a PROBLEM (it's red, it's scabbing badly, they're worried, they're unhappy) → do NOT ask for a review, do not reassure them medically, and do not diagnose. Be warm, take it seriously, and say the studio will get back to them personally. This one is for Brad, not for you.
+- They answer flatly or briefly with no real sentiment → thank them and leave it. No review ask.
 
 THE BOOKING FLOW — work out which step you're at and do that step:
 1. First enquiry / "get a quote" → ask for a reference photo, rough size, and where on the body. Real example: "Please send over any ideas and/ or reference photos along with a rough size and area you would like for the tattoo."
@@ -153,6 +186,12 @@ Real example: "Mim can do this at 3pm 🙂 would you like to confirm the booking
 6. Deposit paid → confirm the booking with the address and what to expect on the day.
 
 RETURNING CUSTOMERS: if the history shows they've booked or paid a deposit with you before, open warmly and thank them for coming back.
+
+SOMEONE WHO IS ALREADY TATTOOED IS NOT AN ENQUIRY. On Instagram the studio tags people in stories of their finished work, and they reply to that story. So a short, warm message with no question in it — "I love it!", "Thank you!!", "It looks unreal", a row of hearts, a reply to a story — almost always means the tattoo is already done and they are saying thanks. It is NOT someone asking to be booked.
+
+Answer that as Brad would: be pleased for them, and leave the door open. "Aw that's so good, so glad you love it 😊 Hope to see you again in the future!" Do NOT ask what they're thinking of getting, do NOT offer times, and above all do NOT say anything like "let us know when you're ready and we can get you booked in" — they have just been in the chair, and it reads as though nobody looked at the message.
+
+Only treat it as a new enquiry if they actually ask for something — a price, a date, a design, another piece.
 
 WHAT YOU'VE COLLECTED SO FAR FOR THIS BOOKING:
 - ${
@@ -200,6 +239,18 @@ async function notifyOwner(details: {
   dates: string;
   photoUrls: string[];
 }) {
+  // The phone first, and independently of Messenger. This is the one alert
+  // in the app that costs money to miss, and the Messenger route below only
+  // works inside Facebook's 24-hour window — which is closed exactly when
+  // the studio has been quiet.
+  await notify("booking", {
+    title: `Booking — ${details.name}`,
+    body: `${details.phone}\n${details.dates}`,
+    url: "/bookings",
+    tag: `booking-${details.phone}`,
+    urgent: true,
+  }).catch(() => undefined);
+
   const config = await getFacebookConfig();
   if (!config?.ownerPsid) {
     console.warn(
@@ -242,6 +293,13 @@ async function notifyOwner(details: {
  * notification whether it can wait until he's finished the piece he's on.
  */
 async function notifyOwnerOfDraft(customerName?: string) {
+  await notify("draft", {
+    title: "A reply is ready for your OK",
+    body: customerName ? `For ${customerName}. Nothing sends until you approve it.` : "Nothing sends until you approve it.",
+    url: "/messages",
+    tag: "draft",
+  }).catch(() => undefined);
+
   const config = await getFacebookConfig();
   if (!config?.ownerPsid) return;
   try {
@@ -294,6 +352,8 @@ async function composeDraft(
   // a customer getting a reply.
   const examples = text ? await findSimilarExchanges(text).catch(() => []) : [];
   const corrections = await getRecentDraftEdits().catch(() => []);
+  const priceCorrections = await getPriceCorrections().catch(() => []);
+  const reviewUrl = await getSetting("google_review_url").catch(() => undefined);
 
   const turns = await getRecentTurns(senderId, 10);
   const history: ChatMessage[] = turns.map((t) => ({
@@ -317,7 +377,9 @@ async function composeDraft(
   }
 
   if (rule && rule.sendBookingLink) {
-    const decision = await decide(history, "", known, hasPhoto, availability, examples, corrections);
+    const decision = await decide(
+      history, "", known, hasPhoto, availability, examples, corrections, priceCorrections, reviewUrl
+    );
     return {
       reply: rule.responseText,
       intent: "booking",
@@ -338,7 +400,9 @@ async function composeDraft(
     hasPhoto,
     availability,
     examples,
-    corrections
+    corrections,
+    priceCorrections,
+    reviewUrl
   );
 
   return {
@@ -416,10 +480,19 @@ export async function redraftPendingReply(id: number): Promise<{ ok: boolean; re
  * at once because someone pressed a button is not news, it's an alarm.
  */
 export async function draftForUnanswered(
-  limit = 20
+  limit = 20,
+  newerThanMinutes?: number
 ): Promise<{ drafted: number; failed: number; detail: string }> {
-  const ids = await getUnansweredConversations(limit);
+  const ids = await getUnansweredConversations(limit, newerThanMinutes);
   if (!ids.length) {
+    // "Everyone has had a reply" is only worth saying when it's true, and
+    // when it isn't, the silence is the whole problem — a customer's message
+    // plainly in Meta's inbox and a board reading All caught up. Print the
+    // most recent threads and what the query made of each of them.
+    const why = await explainNotUnanswered(5).catch(() => []);
+    for (const t of why) {
+      console.log(`[Board] ${t.name} (${t.conversationId}) — last word: ${t.lastSender} at ${t.lastMessageAt} — ${t.excludedBecause}`);
+    }
     return { drafted: 0, failed: 0, detail: "Everyone who's written in has a reply waiting or has had one." };
   }
 
@@ -431,7 +504,30 @@ export async function draftForUnanswered(
   // work, which is the opposite of reassuring.
   let skipped = 0;
 
+  // Stop STARTING new drafts after two minutes.
+  //
+  // The poll runs every three. A single call can now take up to ninety
+  // seconds — it has to, because a model that reasons before it answers
+  // cannot write eight thousand tokens in twenty — and ten of those in a row
+  // would run a poll straight into the next one. Overlapping polls is a
+  // failure mode this project has already had once, on Instagram's import,
+  // and it is miserable to diagnose because nothing errors; the work just
+  // doubles up.
+  //
+  // Whatever is left over is not lost. The next pass picks it up, because
+  // the thread is still unanswered and that is the whole basis of this query.
+  const startedAt = Date.now();
+  const budgetMs = 2 * 60_000;
+  let ranOutOfTime = 0;
+
   for (const conversationId of ids) {
+    if (Date.now() - startedAt > budgetMs) {
+      ranOutOfTime = ids.length - (drafted + failed + skipped);
+      console.log(
+        `[Agent] Out of time this pass — ${ranOutOfTime} thread(s) left for the next one in three minutes`
+      );
+      break;
+    }
     try {
       const turns = await getRecentTurns(conversationId, 20);
       const answering = [...turns].reverse().find((t) => t.senderType === "customer");
@@ -455,8 +551,53 @@ export async function draftForUnanswered(
       );
       if (composed.llmFailed) {
         failed += 1;
+        // The reason is known here and used to be dropped on the floor, so
+        // "8 failed" was all anyone got. It is the difference between a key
+        // that needs replacing and a model that needs more room.
+        console.error(
+          `[Agent] No draft for ${conversationId} — ${getLastLlmError()?.message ?? "the model didn't answer"}`
+        );
+        // But the person is still waiting, and this used to `continue` —
+        // no card, no name on the board, nothing. The AI having a bad minute
+        // is not a reason for a customer to vanish from the studio's screen.
+        //
+        // Brad's rule, in his words: "if there's a new message that is
+        // unrequited within the last twenty four hours, it will show." So the
+        // card goes up with an empty box and the reason on it, exactly as the
+        // webhook path has always done, and he writes that one himself.
+        await supersedePendingReplies(conversationId).catch(() => undefined);
+        await createPendingReply(
+          conversationId,
+          answering.messageId,
+          "",
+          composed.sensitive,
+          undefined,
+          true
+        ).catch(() => undefined);
         continue;
       }
+      await clearAlert("llm").catch(() => undefined);
+
+      // Clear whatever was already waiting on this thread first.
+      //
+      // The webhook path has always done this — "Replaced 1 stale draft(s)" —
+      // and this one never did. So a customer who was drafted for yesterday,
+      // answered by hand, and then wrote again ended up with TWO pending
+      // drafts: yesterday's, answering the question Brad had already replied
+      // to himself, and today's, answering what she actually just said. The
+      // board shows one card per person and Brad got the wrong one — a
+      // fortnight-old question with a price against it, while her real
+      // message sat unanswered.
+      //
+      // The newest draft is written against the whole thread, so it is
+      // strictly better than anything it replaces.
+      const dropped = await supersedePendingReplies(conversationId);
+      if (dropped) console.log(`[Agent] Replaced ${dropped} stale draft(s) on ${conversationId}`);
+
+      console.log(
+        `[Agent] Drafting for ${conversationId} against "${answering.content.slice(0, 60)}" ` +
+          `(${answering.messageId}, said ${answering.createdAt ? new Date(answering.createdAt).toISOString() : "unknown"})`
+      );
 
       const queued = await createPendingReply(
         conversationId,
@@ -474,17 +615,38 @@ export async function draftForUnanswered(
     }
   }
 
+  // Whatever the model last objected to, in the sentence the studio sees.
+  // "The AI couldn't write any of them" sent Brad to a Test button to find
+  // out something the server already knew.
+  const why = failed ? getLastLlmError()?.message : undefined;
+
   const detail =
     drafted && failed
-      ? `Drafted ${drafted}. ${failed} the AI couldn't write — try those again in a moment.`
+      ? `Drafted ${drafted}. ${failed} the AI couldn't write${why ? ` — ${why}` : " — try those again in a moment."}`
       : drafted
         ? `Drafted ${drafted} repl${drafted === 1 ? "y" : "ies"} — none sent, they're all waiting for your OK.`
         : failed
-          ? `The AI couldn't write any of them. Settings → AI has a Test button that says why.`
+          ? `The AI couldn't write any of them${why ? ` — ${why}` : ". Settings → AI has a Test button that says why."}`
           : `Nothing new to draft — everyone who's written in already has a reply waiting, or has had one.`;
   void skipped;
 
   console.log(`[Agent] Bulk draft: ${drafted} written, ${failed} failed`);
+
+  // Tell the phone, once a day. When the AI provider stops answering — an
+  // account out of credit, a key revoked — every enquiry from that moment on
+  // lands with an empty box, and nothing said so: the studio found out by
+  // noticing that the drafts had quietly stopped being written. The alert is
+  // held to one a day by notifyOnce, because the poll retries every three
+  // minutes and forty buzzes is the same as none.
+  if (failed && !drafted && why) {
+    await notifyOnce("llm", {
+      title: "City Ink — the AI has stopped drafting",
+      body: `${why} Messages are still arriving and waiting for you.`,
+      url: "/settings",
+      tag: "llm",
+    }).catch(() => undefined);
+  }
+
   return { drafted, failed, detail };
 }
 
@@ -492,6 +654,66 @@ export async function draftForUnanswered(
  * BUG FIX #6 — the original sent one message with no history, so every reply
  * forgot the last. This loads the recent turns first.
  */
+/**
+ * One buzz per enquiry, not one per message.
+ *
+ * The throttle is claimed in the database rather than held in memory, so a
+ * restart between two photos doesn't reopen the gate — and so two webhook
+ * deliveries landing together can't both decide they're the first.
+ *
+ * The studio's own account is skipped: Brad messages the Page to test things
+ * and to register for alerts, and being notified about himself is the fastest
+ * way to teach someone the notifications are noise.
+ */
+async function notifyOfCustomerMessage(
+  senderId: string,
+  senderName: string | undefined,
+  text: string,
+  photoCount: number,
+  platform: "facebook" | "instagram"
+): Promise<void> {
+  try {
+    const config = await getFacebookConfig().catch(() => undefined);
+    if (config?.ownerPsid && config.ownerPsid === senderId) return;
+
+    const settings = await getNotifySettings();
+    // Two more ways to send nothing and say nothing about it. A studio that
+    // didn't get buzzed cannot tell "switched off" from "already buzzed for
+    // this thread" from "it failed" — and looking for the reason afterwards
+    // meant looking for a line that was never written.
+    if (!settings.onMessage) {
+      console.log(`[Push] Not sent (message): ${senderName || senderId} — new-message alerts are switched off in Settings`);
+      return;
+    }
+    if (!(await claimNotificationSlot(senderId, settings.throttleMinutes))) {
+      console.log(
+        `[Push] Not sent (message): ${senderName || senderId} — this thread was already buzzed ` +
+          `within the last ${settings.throttleMinutes} minutes`
+      );
+      return;
+    }
+
+    const who = senderName || (platform === "instagram" ? "An Instagram DM" : "A new enquiry");
+    const preview = text.trim()
+      ? text.trim().slice(0, 140)
+      : photoCount === 1
+        ? "Sent a photo."
+        : `Sent ${photoCount} photos.`;
+
+    await notify("message", {
+      title: platform === "instagram" ? `${who} — Instagram` : who,
+      body: preview,
+      url: "/messages",
+      // Per thread, so a second message replaces the first on the lock
+      // screen instead of stacking two half-read lines.
+      tag: `thread-${senderId}`,
+    });
+  } catch (error) {
+    // Never let a notification stop a customer's message being handled.
+    console.warn("[Push] Couldn't announce a new message:", (error as Error).message);
+  }
+}
+
 export async function handleCustomerMessage(
   senderId: string,
   messageId: string,
@@ -523,14 +745,64 @@ export async function handleCustomerMessage(
     keptPhotos
   );
   if (!isNew) {
-    console.log(`[Agent] Duplicate delivery ignored: ${messageId}`);
-    return;
+    // Stored already — but stored is NOT handled, and treating the two as the
+    // same thing lost a real customer's message.
+    //
+    // Maureen wrote at 17:35. The three-minute Messenger import reached her
+    // message a few seconds before Facebook's webhook did and stored it, so
+    // when the webhook arrived the insert hit the unique index and this
+    // returned — before the phone was buzzed, before the handoff pause from
+    // the studio's own earlier reply was lifted, and before anything was
+    // drafted. The message sat in the database, the board said nothing was
+    // waiting, and the poll skipped the thread because it was still paused.
+    // Every part working exactly as written, and a customer ignored.
+    //
+    // A genuine Facebook retry still has to stop here, or approving a draft
+    // and then getting the same delivery again would throw away the version
+    // the studio had edited. The test for that is whether this message has
+    // ever been drafted for — not whether its text is in the table.
+    if (await hasDraftForMessage(messageId)) {
+      console.log(`[Agent] Duplicate delivery ignored: ${messageId}`);
+      return;
+    }
+    console.log(
+      `[Agent] ${messageId} was already stored (the inbox poll got there first) but never handled — handling it now`
+    );
   }
 
+  // Brad's phone, not the dashboard tab nobody has open. Deliberately before
+  // the pause check below: a thread a person has taken over still deserves
+  // to announce itself, because "someone replied an hour ago" is not the
+  // same as "this has been answered".
+  await notifyOfCustomerMessage(senderId, senderName, text, keptPhotos.length, platform);
+
   // BUG FIX #7 — a human took this thread over, so stay out of it.
-  if (conversation?.botPausedUntil && new Date(conversation.botPausedUntil) > new Date()) {
-    console.log(`[Agent] Paused on ${senderId} — a person is handling this one`);
-    return;
+  //
+  // But "stay out of it" has to end when the customer speaks again, and it
+  // didn't. The studio answers plenty of people by hand from Meta's own
+  // inbox; each of those replies muted the thread for twelve hours, so when
+  // the customer wrote back there was no draft, the board said "All caught
+  // up", and the phone stayed quiet while Meta showed the message unread.
+  //
+  // Nothing in this app reaches a customer without approval, so holding the
+  // draft back bought nothing at all — it only took away the help. A new
+  // customer message means they are waiting on an answer, which is exactly
+  // when a draft is wanted, so the automatic pause lifts here.
+  //
+  // A pause the studio set by hand is a different thing: that one is an
+  // instruction and is obeyed until it runs out.
+  const pausedUntil = conversation?.botPausedUntil
+    ? new Date(conversation.botPausedUntil)
+    : null;
+  if (pausedUntil && pausedUntil > new Date()) {
+    if (conversation?.botPauseReason === "manual") {
+      console.log(`[Agent] Paused on ${senderId} by hand — leaving it alone until ${pausedUntil.toISOString()}`);
+      return;
+    }
+    await resumeBot(senderId).catch(() => undefined);
+    console.log(
+      `[Agent] ${senderId} was handed over earlier, but they've written again — drafting`
+    );
   }
 
   // Self-registration for booking alerts: send this exact phrase from your
@@ -645,11 +917,31 @@ export async function approveDraft(id: number, editedText?: string): Promise<voi
   // A reply goes back to the inbox it came from. Sending an Instagram answer
   // down the Messenger pipe reaches nobody.
   const thread = await getConversation(resolved.conversationId);
-  await sendMessengerMessage(
-    resolved.conversationId,
-    resolved.text,
-    thread?.platform === "instagram" ? "instagram" : "facebook"
-  );
+
+  // Resolving first is deliberate — it claims the draft so a double tap
+  // can't send twice — but it means a failed send has to put the card back.
+  // It didn't, so a reply Meta refused vanished from the board looking sent,
+  // and the customer was never answered by anyone.
+  try {
+    await sendMessengerMessage(
+      resolved.conversationId,
+      resolved.text,
+      thread?.platform === "instagram" ? "instagram" : "facebook"
+    );
+  } catch (error) {
+    const detail = (error as Error).message;
+    await restorePendingReply(id, detail).catch(() => undefined);
+    console.error(`[Agent] Reply to ${resolved.conversationId} did NOT send — put back on the board: ${detail}`);
+    await notify("problem", {
+      title: "A reply didn't send",
+      body: detail.slice(0, 160),
+      url: "/messages",
+      tag: `send-fail-${id}`,
+    }).catch(() => undefined);
+    throw new Error(detail);
+  }
+
+  await clearSendError(id).catch(() => undefined);
   await recordMessage(resolved.conversationId, `draft_${id}_sent`, "bot", resolved.text, resolved.text);
 
   // Edits made while testing against your own account aren't real feedback,
@@ -692,7 +984,23 @@ export async function handleEcho(
 
   await getOrCreateConversation(recipientId);
   const isNew = await recordMessage(recipientId, messageId, "manual", text || "(attachment)");
-  if (!isNew) return;
+  if (!isNew) {
+    /**
+     * Already stored — and an echo is Meta saying in so many words that the
+     * studio sent this. If the row says otherwise, the row is wrong, so put
+     * it right rather than walking away from it. Nothing else here re-runs:
+     * this is a retry, and superseding drafts again could throw away one
+     * written for a newer message since.
+     */
+    if (await correctMessageSender(messageId, "manual").catch(() => false)) {
+      const dropped = await dropDraftsAnsweringOurselves().catch(() => 0);
+      console.log(
+        `[Agent] ${recipientId}: an echo showed message ${messageId.slice(0, 24)}… was ours, not theirs — relabelled` +
+          (dropped ? `, and dropped ${dropped} draft(s) answering it` : "")
+      );
+    }
+    return;
+  }
 
   // Someone — another artist, or Facebook's own automated response — has
   // answered this thread. Any draft waiting on it is now a second answer to
@@ -702,7 +1010,9 @@ export async function handleEcho(
     console.log(`[Agent] ${recipientId} was answered elsewhere — dropped ${dropped} draft(s)`);
   }
 
-  const until = await pauseBot(recipientId, HANDOFF_HOURS);
+  // Labelled "handoff", so a new message from the customer lifts it. A pause
+  // the studio set by hand is not overridden that way.
+  const until = await pauseBot(recipientId, HANDOFF_HOURS, "handoff");
   console.log(`[Agent] Human replied to ${recipientId} — paused until ${until.toISOString()}`);
 }
 
@@ -723,6 +1033,8 @@ export async function practiceReply(
   const availability = await availabilityForPrompt().catch(() => "");
   const examples = await findSimilarExchanges(message).catch(() => []);
   const corrections = await getRecentDraftEdits().catch(() => []);
+  const priceCorrections = await getPriceCorrections().catch(() => []);
+  const reviewUrl = await getSetting("google_review_url").catch(() => undefined);
 
   const history: ChatMessage[] = [...priorTurns, { role: "user", content: message }];
 
@@ -733,7 +1045,9 @@ export async function practiceReply(
     false,
     availability,
     examples,
-    corrections
+    corrections,
+    priceCorrections,
+    reviewUrl
   );
 
   return {
@@ -814,4 +1128,209 @@ Reply with JSON only:
 
   if (!ok) throw new Error("Couldn't reach the AI — check the connection in Settings.");
   return data.ideas ?? [];
+}
+
+/* ------------------------------------------------------------------ */
+/* Follow-ups — the two messages nobody ever gets round to sending      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Both of these put a DRAFT on the board. Neither sends.
+ *
+ * That is not a limitation to be worked around later. A follow-up is the
+ * message most likely to read as automated if it lands wrong — nudging
+ * someone who booked yesterday by phone, or asking after a tattoo that never
+ * happened because the appointment was cancelled — and this app's whole
+ * promise is that a person reads every word before a customer does. The
+ * scans find the person and write the words; Brad still taps approve.
+ */
+
+/** Ask the model for one message, in the studio's voice, for one situation. */
+async function draftFollowUpText(
+  conversationId: string,
+  instruction: string
+): Promise<string | null> {
+  const turns = await getRecentTurns(conversationId, 20).catch(() => []);
+  const knowledge = await getStudioKnowledge().catch(() => []);
+  const studioFacts = knowledge.map((k) => `Q: ${k.question}\nA: ${k.answer}`).join("\n\n");
+
+  const history = turns
+    .map((t) => `${t.senderType === "customer" ? "THEM" : "US"}: ${t.content}`)
+    .join("\n");
+
+  const { ok, data } = await invokeLLMJson<{ reply?: string }>(
+    [
+      {
+        role: "user",
+        content: `You write messages for City Ink Tattoo in Geelong, in their voice: warm, short, lower case where it reads naturally, an emoji at most. Australian.
+
+THE CONVERSATION SO FAR:
+${history || "(nothing stored)"}
+
+WHAT THE STUDIO KNOWS:
+${studioFacts || "(nothing configured)"}
+
+${instruction}
+
+Reply with JSON: {"reply": "the message"}`,
+      },
+    ],
+    {} as { reply?: string },
+    { maxTokens: 2000 }
+  );
+
+  if (!ok) return null;
+  const reply = (data.reply ?? "").trim();
+  return reply || null;
+}
+
+/**
+ * Customers who went quiet on us, once a day.
+ *
+ * The opposite shape to the board's usual job: here WE spoke last and heard
+ * nothing back. For a tattoo studio that is a quote sent into silence, which
+ * is the commonest way a booking is quietly lost.
+ */
+export async function draftColdFollowUps(
+  limit = 10
+): Promise<{ drafted: number; detail: string }> {
+  const cold = await getColdConversations(limit);
+  if (!cold.length) {
+    return { drafted: 0, detail: "Nobody has gone cold — every thread is either answered or still live." };
+  }
+
+  let drafted = 0;
+
+  for (const thread of cold) {
+    try {
+      const turns = await getRecentTurns(thread.conversationId, 20).catch(() => []);
+      // Follow up on what THEY last said, not on our own message, so the
+      // draft is anchored to a real question of theirs.
+      const theirs = [...turns].reverse().find((t) => t.senderType === "customer");
+      if (!theirs) continue;
+
+      // Claim before drafting. If the model falls over we still don't come
+      // back tomorrow and try the same person again — one nudge is a nudge,
+      // a daily one is harassment.
+      if (!(await claimFollowUp(thread.conversationId, "cold"))) continue;
+
+      const days = Math.round(
+        (Date.now() - new Date(thread.lastAt).getTime()) / 86_400_000
+      );
+
+      const text = await draftFollowUpText(
+        thread.conversationId,
+        `We replied to this person about ${days} day(s) ago and they never wrote back. Write ONE short, low-pressure follow-up that gently reopens it. Refer to what they actually asked about. Do NOT apologise for chasing, do NOT offer a discount, do NOT invent a price or a date that isn't already in the conversation. If they were mid-way through booking, offer to pick it back up. Something like "hey, just checking in on this one 😊 still keen to sort something out?" but specific to them.`
+      );
+
+      if (!text) {
+        // The card still goes up. Brad's rule: a waiting customer always gets
+        // a card, even when the AI can't write one.
+        await createPendingReply(
+          thread.conversationId, `followup_cold_${thread.conversationId}`, "", false, undefined, true
+        ).catch(() => undefined);
+        continue;
+      }
+
+      const queued = await createPendingReply(
+        thread.conversationId,
+        `followup_cold_${thread.conversationId}`,
+        text
+      );
+      if (queued) drafted += 1;
+    } catch (error) {
+      console.error(
+        `[Agent] Cold follow-up failed for ${thread.conversationId}:`,
+        (error as Error).message
+      );
+    }
+  }
+
+  console.log(`[Agent] Cold follow-ups: ${drafted} drafted from ${cold.length} quiet thread(s)`);
+  return {
+    drafted,
+    detail: drafted
+      ? `Drafted ${drafted} follow-up${drafted === 1 ? "" : "s"} for people who went quiet — all waiting for your OK.`
+      : "Found quiet threads but couldn't draft for them.",
+  };
+}
+
+/**
+ * Three days after someone was tattooed, ask how it's healing.
+ *
+ * The calendar is the only record of who actually sat in the chair, so a past
+ * appointment is the signal and the event title is the only name to match on.
+ * Anyone we can't confidently match to a conversation is skipped rather than
+ * guessed at — sending "how's your tattoo?" to the wrong person is worse than
+ * sending nothing.
+ */
+export async function draftAftercareMessages(
+  daysAfter = 3
+): Promise<{ drafted: number; detail: string }> {
+  const appointments = await getPastAppointments(daysAfter).catch(() => []);
+  if (!appointments.length) {
+    return { drafted: 0, detail: `Nobody was tattooed ${daysAfter} days ago.` };
+  }
+
+  const conversations = await getRecentConversations(400).catch(() => []);
+  const reviewUrl = await getSetting("google_review_url").catch(() => undefined);
+
+  let drafted = 0;
+  let unmatched = 0;
+
+  for (const appointment of appointments) {
+    try {
+      const title = appointment.title.toLowerCase();
+      // Match the calendar's name against a thread's. Both halves have to be
+      // a real name — "a customer" matches everybody and nobody.
+      const match = conversations.find((c: { senderName: string | null; conversationId: string }) => {
+        const name = (c.senderName ?? "").toLowerCase().trim();
+        if (name.length < 4 || isPlaceholderName(c.senderName)) return false;
+        const first = name.split(" ")[0];
+        return title.includes(name) || (first.length >= 4 && title.includes(first));
+      });
+
+      if (!match) {
+        unmatched += 1;
+        continue;
+      }
+
+      if (!(await claimFollowUp(match.conversationId, "aftercare"))) continue;
+
+      const text = await draftFollowUpText(
+        match.conversationId,
+        `This person was tattooed at the studio ${daysAfter} days ago. Write ONE short, warm message asking how the tattoo is healing and how they're finding it. Do NOT ask them to book anything, do NOT mention a price, and do NOT ask for a review in this message — that only happens if they answer happily. Something like "hey! just checking in, how's the tattoo healing up? 😊".`
+      );
+
+      const queued = await createPendingReply(
+        match.conversationId,
+        `followup_aftercare_${match.conversationId}`,
+        text ?? "",
+        false,
+        undefined,
+        !text
+      );
+      if (queued) drafted += 1;
+    } catch (error) {
+      console.error(
+        `[Agent] Aftercare draft failed for "${appointment.title}":`,
+        (error as Error).message
+      );
+    }
+  }
+
+  const note = unmatched
+    ? ` ${unmatched} appointment(s) couldn't be matched to a conversation — skipped rather than guessed.`
+    : "";
+  const reviewNote = reviewUrl
+    ? ""
+    : " (No Google review link saved yet — Settings → Studio. Without it the agent can't offer one when they reply happily.)";
+
+  console.log(
+    `[Agent] Aftercare: ${drafted} drafted, ${unmatched} unmatched, from ${appointments.length} appointment(s)`
+  );
+  return {
+    drafted,
+    detail: `Drafted ${drafted} aftercare check-in${drafted === 1 ? "" : "s"}.${note}${reviewNote}`,
+  };
 }
