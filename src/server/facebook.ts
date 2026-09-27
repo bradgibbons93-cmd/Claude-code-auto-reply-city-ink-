@@ -1100,6 +1100,20 @@ export async function getThreadParticipant(
       return null;
     }
 
+    // The same "there is no such account" that getSenderProfile records, on
+    // the other path to the same person. Only that one — it is about the
+    // person, so it is remembered per id; anything about the APP belongs in
+    // the platform back-off above, or it would mute everybody else.
+    if (/\(#9010\)|No matching Instagram user/i.test(detail)) {
+      if (!profileGone.has(userId)) {
+        console.warn(
+          `[Facebook] ${userId} has no Instagram account any more — not asking about them again`
+        );
+      }
+      profileGone.add(userId);
+      return null;
+    }
+
     console.error(`[Facebook] ${platform} thread lookup for ${userId} failed — ${detail}`);
     return null;
   }

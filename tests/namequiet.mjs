@@ -24,10 +24,24 @@ process.env.FACEBOOK_GRAPH_URL = "http://127.0.0.1:4440";
 const GONE = "1107893608468299";     // (#9010), from the live log
 const CONSENT = "1634877124875070";  // (#230),  from the live log
 const FINE = "5550001111";
+const GONE_THREAD = "1107893608468300"; // (#9010) on the OTHER lookup path
 
 const asked = new Map();
 const graph = http.createServer((req, res) => {
   res.setHeader("content-type", "application/json");
+
+  // getThreadParticipant asks a different way — /me/conversations?user_id=…
+  // It is the other road to the same person, so it earns the same answers.
+  const viaThread = (req.url.match(/\/me\/conversations\?.*\buser_id=(\d+)/) || [])[1];
+  if (viaThread) {
+    asked.set(viaThread, (asked.get(viaThread) ?? 0) + 1);
+    if (viaThread === GONE_THREAD) {
+      res.statusCode = 400;
+      return res.end(JSON.stringify({ error: { message: "(#9010) No matching Instagram user", type: "OAuthException", code: 9010 } }));
+    }
+    return res.end(JSON.stringify({ data: [] }));
+  }
+
   const id = (req.url.match(/^\/(\d+)\?/) || [])[1];
   if (!id) return res.end(JSON.stringify({ id: "PAGE", name: "City Ink" }));
   asked.set(id, (asked.get(id) ?? 0) + 1);
@@ -74,6 +88,17 @@ check("a different customer is still looked up normally",
   stillWorks?.name === "Real Customer", JSON.stringify(stillWorks));
 check("which is the point: one deleted account must not mute the rest",
   (asked.get(FINE) ?? 0) >= 1, "never asked");
+
+/* ---------- and the same on the other road to the same person ---------- */
+// getThreadParticipant CHECKED profileGone but never wrote to it, so a
+// (#9010) arriving here was retried for ever — the asymmetry is the bug.
+await fb.getThreadParticipant(GONE_THREAD, "instagram");
+const threadFirst = asked.get(GONE_THREAD) ?? 0;
+check("the thread lookup asks once", threadFirst >= 1, String(threadFirst));
+
+for (let i = 0; i < 10; i++) await fb.getThreadParticipant(GONE_THREAD, "instagram");
+check("and then remembers, the same as the profile lookup does",
+  asked.get(GONE_THREAD) === threadFirst, `asked ${asked.get(GONE_THREAD)} times`);
 
 /* ---------- a consent refusal backs off the whole platform ---------- */
 const before = asked.get(CONSENT) ?? 0;
