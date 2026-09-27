@@ -149,7 +149,8 @@ export const appRouter = t.router({
     count: publicProcedure.query(() => countFeed()),
     refresh: publicProcedure
       .input(z.object({ days: z.number().min(1).max(365).default(120) }).default({ days: 120 }))
-      .mutation(({ input }) => syncFeed(input.days)),
+      // force: pressing Refresh IS the instruction to try now.
+      .mutation(({ input }) => syncFeed(input.days, true)),
   }),
 
   /**

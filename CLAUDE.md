@@ -150,6 +150,42 @@ failures every couple of minutes, and the real faults were unreadable in the
 red. `getSenderProfile` believes a permission refusal for an hour, per
 platform, and says so once. It recovers by itself when Advanced Access lands.
 
+**Two of the three refusals it actually gets were never on the permanent
+list**, so the back-off above was covering the rarest case and retrying the
+two commonest ones for ever. Five days of live log, every couple of minutes:
+
+    [Facebook] No name for 1634877124875070 — HTTP 403: (#230) User consent
+               is required to access user profile
+    [Facebook] No name for 1107893608468299 — HTTP 400: (#9010) No matching
+               Instagram user
+
+They are permanent in **different** ways, and collapsing them would be a
+worse bug than the noise. `(#230)` is about the APP — the same answer for
+everyone, so it joins the hour-long per-platform back-off. `(#9010)` is about
+the PERSON: they deleted the account. That one is remembered per id in
+`profileGone`, because filing it as an app-level refusal would stop the app
+naming **everybody else** the moment one customer deletes their Instagram.
+`namequiet.mjs` asserts exactly that difference — that a `(#9010)` leaves the
+next person's lookup working, and a `(#230)` doesn't.
+
+**The Live feed asked Meta for a permission it doesn't have, once an hour,
+for ever.** `pages_read_engagement` is rejected (see App Review below), so
+every hourly sync spent a Graph call earning the same refusal and printing it
+next to the real faults. `blockedByReview()` recognises that specific class of
+refusal and `feedWall` rests the sync for twelve hours, reporting "Waiting on
+Meta" without touching Graph. Two things keep it honest: any successful sync
+clears the wall immediately, so it resumes by itself the day approval lands
+and needs nobody to notice; and **pressing Refresh ignores it**, because the
+button is the instruction to try now — the same rule the Instagram import's
+back-off already follows.
+
+Fixing it turned up a third bare-`OAuthException` landmine, in the same shape
+as the one under "OAuthException is Meta's error CLASS": a rejected permission
+was being reported as an expired token. It now requires the token's own words
+(`Session has expired`, `Error validating access token`, code 190) before it
+says that. That is three files this mistake has been made in. Match the thing,
+never the family.
+
 **Who spoke last is decided by when a message was SAID, never by row id.**
 `MAX(id)` is insert order, and insert order is not message order — a thread
 pulled in across two imports can have an older message on a higher id. Two
@@ -1187,8 +1223,19 @@ of those had crept in and were the only non-brand colours on the page.
 
 ## Testing
 
-There is no CI. Suites live in the session scratchpad, not the repo, and run
-against a real MariaDB with stand-in Graph and LLM servers on localhost.
+There is no CI. Suites live in **`tests/`, in the repo**, and run against a
+real MariaDB with stand-in Graph and LLM servers on localhost. `tests/run-all.sh`
+runs the lot; they import from `dist/`, so `npm run build` first.
+
+**They used to live in the session scratchpad, and a container rebuild deleted
+every one of them.** Five suites went with it — the reproduction of Brad's
+THEY SAID screenshots, the one that pins `group_concat_max_len` to Railway's
+1024, the twelve-page browser walk — and with them the only evidence that five
+real fixes had ever been proved. The fixes were still in the repo; nothing that
+holds them in place was. That is the same shape as `sendfail.mjs` asserting the
+wrong wording, one level up: a test that isn't there cannot stop the next
+person undoing the fix. Anything written to prove a fix goes in `tests/` and is
+committed with it.
 Pattern worth keeping: stand up a fake `graph.facebook.com` on a port, point
 `FACEBOOK_GRAPH_URL` at it, and drive the real server. Webhook deliveries must
 be **HMAC-signed with the app secret** or they're rejected — an unsigned test

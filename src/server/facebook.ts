@@ -453,8 +453,32 @@ export function getLastProfileError() {
 const profileLookupBlocked = new Map<Platform, { until: number; why: string }>();
 
 function profileRefusalIsPermanent(detail: string): boolean {
-  return /Advanced Access|does not have the capability|\(#3\)/i.test(detail);
+  return (
+    /Advanced Access|does not have the capability|\(#3\)/i.test(detail) ||
+    // "(#230) User consent is required to access user profile" — Meta will
+    // not hand a consent-gated profile to a business inbox, and there is no
+    // flow for a business to ask. That answer is about the APP, so it is the
+    // same for the next person and the next. It was not on this list, so the
+    // backfill asked five threads every run for five days and wrote a red
+    // line each time for an answer that could never change.
+    /\(#230\)|User consent is required/i.test(detail)
+  );
 }
+
+/**
+ * People Meta has told us it has no account for.
+ *
+ * "(#9010) No matching Instagram user" is permanent too, but it is permanent
+ * about THIS PERSON — a deleted or deactivated account — not about the app.
+ * Putting it in `profileRefusalIsPermanent` would have been the easy move and
+ * the wrong one: it backs off the whole platform for an hour, so one deleted
+ * account would stop the app naming everyone else. Remembered per person
+ * instead, so the other lookups carry on.
+ *
+ * In memory on purpose. A restart costs one more ask each, which is nothing,
+ * and it avoids a schema change to record an absence.
+ */
+const profileGone = new Set<string>();
 
 export async function getSenderProfile(
   senderId: string,
@@ -465,6 +489,10 @@ export async function getSenderProfile(
 
   const blocked = profileLookupBlocked.get(platform);
   if (blocked && Date.now() < blocked.until) return null;
+
+  // Meta has already said there is no such account. Asking again is a
+  // guaranteed red line for an answer we have.
+  if (profileGone.has(senderId)) return null;
 
   // Facebook is inconsistent about which name fields a Page token may read,
   // and it varies with how the app was reviewed. Try the split fields, then
@@ -517,6 +545,15 @@ export async function getSenderProfile(
         `[Facebook] ${blame} won't name anyone to this app yet — not asking again for an hour. ${lastDetail}`
       );
     }
+    return null;
+  }
+
+  // The account is gone. Permanent, but about this person only.
+  if (/\(#9010\)|No matching Instagram user/i.test(lastDetail)) {
+    profileGone.add(senderId);
+    console.warn(
+      `[Facebook] ${senderId} has no Instagram account any more — not asking about them again`
+    );
     return null;
   }
 
@@ -1014,6 +1051,10 @@ export async function getThreadParticipant(
   // noise this file already warns makes real faults unreadable.
   const blocked = profileLookupBlocked.get(platform);
   if (blocked && Date.now() < blocked.until) return null;
+
+  // Meta has already said there is no such account. Asking again is a
+  // guaranteed red line for an answer we have.
+  if (profileGone.has(userId)) return null;
 
   const identity = await getPageIdentity().catch(() => null);
 

@@ -171,10 +171,47 @@ async function store(
 }
 
 /**
+ * A refusal only App Review can lift.
+ *
+ * The Live feed needs `pages_read_engagement`, which Meta has not granted.
+ * So the hourly sync could not succeed, and went on failing every hour
+ * anyway: about 120 times between two visits, each one a 900-character error
+ * naming three edges. That is the exact "red that makes real faults
+ * unreadable" this project has already been bitten by twice, and the next
+ * genuine fault would have been buried in it.
+ *
+ * Nothing the studio can do changes this answer, so there is no point asking
+ * again at the same rate. It backs off to twice a day and recovers by itself
+ * the moment Meta grants the permission.
+ */
+function blockedByReview(problems: string[]): boolean {
+  const all = problems.join(" ");
+  return /pages_read_engagement|Page Public Content Access|pages_manage_posts/i.test(all);
+}
+
+let feedWall: { until: number; since: number } | null = null;
+const WALL_REST_HOURS = 12;
+
+/**
  * Pull the studio's posts in. Safe to run repeatedly — posts are keyed by
  * their own id, so a refresh updates counts rather than duplicating a feed.
+ *
+ * `force` is what the Refresh button passes: pressing it is the instruction
+ * to try now, whatever the back-off says. Same rule as a manual Import.
  */
-export async function syncFeed(days = BACKFILL_DAYS): Promise<FeedSyncResult> {
+export async function syncFeed(days = BACKFILL_DAYS, force = false): Promise<FeedSyncResult> {
+  if (!force && feedWall && Date.now() < feedWall.until) {
+    const hours = Math.round((Date.now() - feedWall.since) / 3_600_000);
+    return {
+      facebook: 0,
+      instagram: 0,
+      detail:
+        `Waiting on Meta. The Live feed needs the pages_read_engagement permission, which ` +
+        `App Review has not granted, so there is nothing to pull yet — it has been refused ` +
+        `for ${hours} hour${hours === 1 ? "" : "s"}. This clears itself the moment the ` +
+        `permission lands. Press Refresh to try now anyway.`,
+    };
+  }
   const config = await getFacebookConfig();
   if (!config?.pageAccessToken) {
     return { facebook: 0, instagram: 0, detail: "Facebook isn't connected yet." };
@@ -255,6 +292,12 @@ export async function syncFeed(days = BACKFILL_DAYS): Promise<FeedSyncResult> {
 
   const total = facebook + instagram;
   if (!problems.length) {
+    // Recovers by itself. When App Review grants the permission the next run
+    // succeeds and the back-off simply stops existing.
+    if (feedWall) {
+      console.log("[Feed] The Page's posts are readable again — back to the hourly refresh");
+      feedWall = null;
+    }
     const detail = `${facebook} from Facebook, ${instagram} from Instagram.`;
     console.log(`[Feed] Sync: ${detail}`);
     return { facebook, instagram, detail };
@@ -263,6 +306,23 @@ export async function syncFeed(days = BACKFILL_DAYS): Promise<FeedSyncResult> {
   // Log what Facebook actually said before turning it into advice. An earlier
   // version kept only the advice, so a wrong guess was indistinguishable from
   // a right one and the logs couldn't settle it.
+  if (blockedByReview(problems)) {
+    const first = !feedWall;
+    feedWall = {
+      until: Date.now() + WALL_REST_HOURS * 3_600_000,
+      since: feedWall?.since ?? Date.now(),
+    };
+    // Said once, in full, and then twice a day instead of twenty-four times.
+    console.warn(
+      first
+        ? `[Feed] Sync failed. Graph said: ${problems.join(" · ")}`
+        : `[Feed] Still waiting on pages_read_engagement — asking again in ${WALL_REST_HOURS}h`
+    );
+    const detail = `${total} post${total === 1 ? "" : "s"} in. ${explain(problems)}`;
+    return { facebook, instagram, detail };
+  }
+
+  // Log what Facebook actually said before turning it into advice.
   console.warn(`[Feed] Sync failed. Graph said: ${problems.join(" · ")}`);
 
   const facts = await inspectToken(token, config.appId, config.appSecret);
@@ -353,7 +413,17 @@ function explain(problems: string[], facts?: TokenFacts): string {
     );
   }
 
-  if (/Session has expired|Error validating access token|OAuthException/i.test(all)) {
+  /*
+   * An expired token says so, or carries code 190.
+   *
+   * This matched a bare "OAuthException", which is the class on nearly every
+   * Graph failure — including the (#10) permission refusal handled just
+   * above. One reordering and this would have told Brad his token had
+   * expired while the token worked perfectly, which is precisely the wrong
+   * turn `explainProfileFailure()` was fixed for on 22 September. Two copies
+   * of a mistake is how it survives being fixed once.
+   */
+  if (/Session has expired|Error validating access token|code.{0,4}190/i.test(all)) {
     return (
       "The saved Page access token has expired. Generate a fresh one in the Meta app " +
       "dashboard and paste it into the Facebook Page box above."
