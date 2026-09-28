@@ -263,10 +263,13 @@ export default function Dashboard() {
                 {pending?.length ? (
                   <div className="mt-4 space-y-3">
                     {pending.slice(0, 2).map((draft) => (
-                      <div
+                      // Straight into that person's conversation, draft and
+                      // options open — not the top of a list to hunt through.
+                      <Link
                         key={draft.id}
+                        href={`/messages?thread=${encodeURIComponent(draft.conversationId)}`}
                         className={cn(
-                          "rounded-xl border p-3",
+                          "block rounded-xl border p-3 transition-colors hover:border-sepia/50",
                           draft.isSensitive
                             ? "border-destructive/40 bg-destructive/5"
                             : "border-border bg-surface"
@@ -295,7 +298,7 @@ export default function Dashboard() {
                           </div>
                         )}
                         <p className="line-clamp-3 text-sm text-charcoal">{draft.draftText}</p>
-                      </div>
+                      </Link>
                     ))}
                     <Link href="/messages">
                       <Button className="w-full">
@@ -338,10 +341,10 @@ export default function Dashboard() {
                     unanswered.slice(0, 5).map((c) => (
                       <Link
                         key={c.conversationId}
-                        href="/messages"
+                        href={`/messages?thread=${encodeURIComponent(c.conversationId)}`}
                         className="flex items-center gap-3 py-3 transition-colors hover:bg-beige/10"
                       >
-                        <Avatar name={c.senderName || "?"} />
+                        <Avatar name={c.senderName || "?"} src={c.avatarUrl} />
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm text-charcoal">
                             {c.senderName || "Unknown customer"}

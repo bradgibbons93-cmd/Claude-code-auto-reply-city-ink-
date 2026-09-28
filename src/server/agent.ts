@@ -35,7 +35,7 @@ import {
   correctMessageSender,
   dropDraftsAnsweringOurselves
 } from "./db.js";
-import { invokeLLMJson, getLastLlmError, type ChatMessage } from "./llm.js";
+import { invokeLLMJson, getLastLlmError, type ChatImage, type ChatMessage } from "./llm.js";
 import { availabilityForPrompt, getPastAppointments } from "./calendar.js";
 import {
   sendMessengerMessage,
@@ -43,7 +43,7 @@ import {
   resolveCustomerName,
   publicUrl,
 } from "./facebook.js";
-import { cacheAttachments } from "./attachments.js";
+import { cacheAttachments, readAttachment } from "./attachments.js";
 import { notify, notifyOnce, clearAlert, getNotifySettings } from "./push.js";
 
 const HANDOFF_HOURS = Number(process.env.HANDOFF_PAUSE_HOURS || 12);
@@ -164,8 +164,8 @@ AFTERCARE — if our last message asked how their tattoo was healing:
 - They answer flatly or briefly with no real sentiment → thank them and leave it. No review ask.
 
 THE BOOKING FLOW — work out which step you're at and do that step:
-1. First enquiry / "get a quote" → ask for a reference photo, rough size, and where on the body. Real example: "Please send over any ideas and/ or reference photos along with a rough size and area you would like for the tattoo."
-2. Photo + details received → thank them and give a BALLPARK RANGE of about $100 wide, e.g. "Hey ${"${name}"} 😊 thanks for sending this through! You would be looking at about $200 - $250, would that suit you?" Only quote from the price guidance above — if there's none, say the team will confirm a price shortly.
+1. First enquiry / "get a quote" with NO photo yet → ask for a reference photo, rough size, and where on the body. Real example: "Please send over any ideas and/ or reference photos along with a rough size and area you would like for the tattoo."
+2. Photo received → thank them and give a BALLPARK RANGE of about $100 wide for the size you can see in it (see READING THEIR PHOTOS), e.g. "Hey ${"${name}"} 😊 thanks for sending this through! You would be looking at about $200 - $250, would that suit you?" Don't hold the price back to ask for measurements. Only quote from the price guidance above — if there's none, say the team will confirm a price shortly.
 3. They push back on price or give a lower budget → don't just say no. Ask what their budget is, stay warm about it, and only offer a cheaper option if one is actually listed in the studio facts above. If nothing cheaper is listed, do NOT invent an artist, an apprentice, a discount, or a payment plan — say you'll check with the team and come back to them. Real tone: "Okay cool no worries at all 😊 if you have a set budget how much your wanting to spend feel free to let us know and we will see what we can do 👌"
 4. Happy with the price → offer times. ${
     availability
@@ -204,6 +204,13 @@ WHAT YOU'VE COLLECTED SO FAR FOR THIS BOOKING:
 - Still needed: ${missing.length ? missing.join(", ") : "nothing — everything's in"}
 Ask only for what's still missing, one or two things at a time, and never re-ask for something they've already given.
 ${hasPhoto ? "- They just sent a photo — acknowledge you've got it before anything else." : ""}
+
+READING THEIR PHOTOS — when the customer has sent reference photos, you can SEE them: they're attached to their latest message. Read them the way a tattooist would:
+- Work out the rough size and placement yourself. A design drawn or stencilled on skin, a similar tattoo on someone, or a shot of the spot on their body tells you the size well enough — a small wrist piece a few cm across, a fine line running down the forearm, something palm-sized. Say what you're going off in a few words, the way Brad would ("these look like a small wrist piece and a longer fine-line piece down the forearm").
+- Then give the ballpark straight away for that size, from the studio's price facts and the corrections above. Do NOT ask them for exact centimetres — a rough read of the photo is exactly what a quote at this stage is.
+- Only ask about size or placement when the photos genuinely can't tell you — a flat design or screenshot with nothing to scale it against and no spot mentioned. Even then, give the range for the size it most likely is and ask them to confirm, rather than asking with no number at all.
+- If a photo isn't a tattoo idea at all (a receipt, a screenshot of a chat, a selfie), don't price it.
+- The hard line still holds: the SIZE is your read of the photo; every DOLLAR figure comes only from the studio facts.
 
 Classify the customer's latest message as exactly one intent:
 - "booking" — they want to make, move, or ask about an appointment, OR they're answering something you still need (a name, a number, a day) while a booking is already in progress
@@ -332,6 +339,48 @@ interface ComposedDraft {
   alternatives: { label: string; text: string }[];
 }
 
+/** The types every provider will read. HEIC and friends are left out. */
+const MODEL_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+
+/**
+ * The customer's most recent reference photos from these turns, as bytes the
+ * model can look at — at most four, the same ones the draft card shows.
+ *
+ * Only the copies this app kept (`/api/attachments/…`). Meta's own links
+ * expire and are fetched with no cookie, so anything that never got cached
+ * is skipped rather than guessed at: a draft without a picture is still a
+ * draft, a draft that waited on a dead link is not.
+ */
+async function photosForModel(
+  turns: Array<{ senderType: string; attachmentUrls?: unknown }>
+): Promise<ChatImage[]> {
+  // A JSON column comes back parsed from MySQL and as text from MariaDB.
+  const listOf = (value: unknown): string[] => {
+    if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string");
+    if (typeof value !== "string") return [];
+    try {
+      return listOf(JSON.parse(value));
+    } catch {
+      return [];
+    }
+  };
+  const urls = [
+    ...new Set(
+      turns.filter((t) => t.senderType === "customer").flatMap((t) => listOf(t.attachmentUrls))
+    ),
+  ].slice(-4);
+
+  const images: ChatImage[] = [];
+  for (const url of urls) {
+    const id = url.match(/\/api\/attachments\/([^/?#]+)/)?.[1];
+    if (!id) continue;
+    const kept = await readAttachment(id).catch(() => undefined);
+    if (!kept?.bytes?.length || !MODEL_IMAGE_TYPES.has(kept.contentType)) continue;
+    images.push({ mediaType: kept.contentType, data: Buffer.from(kept.bytes).toString("base64") });
+  }
+  return images;
+}
+
 /**
  * Writes one draft against the whole thread. Split out from the message
  * handler so a draft the model failed to write can simply be asked for again
@@ -360,6 +409,20 @@ async function composeDraft(
     role: t.senderType === "customer" ? "user" : "assistant",
     content: t.content,
   }));
+
+  // Let the model SEE what they sent. It used to get "(sent a photo)" and
+  // nothing else, so the best it could do was ask how big the tattoo was —
+  // under two photos that plainly showed it. The photos ride on their latest
+  // message, the one being answered, because "how much for those two?"
+  // usually lands a message or two after the pictures do.
+  const photos = await photosForModel(turns).catch((error) => {
+    console.warn(`[Agent] Couldn't load photos for the model: ${(error as Error).message}`);
+    return [] as ChatImage[];
+  });
+  if (photos.length) {
+    const lastFromThem = history.map((m) => m.role).lastIndexOf("user");
+    if (lastFromThem >= 0) history[lastFromThem] = { ...history[lastFromThem], images: photos };
+  }
 
   // A plain rule (no booking flag) is a fixed answer — no need to spend an
   // LLM call on it. A rule marked to start the booking hand-off still uses

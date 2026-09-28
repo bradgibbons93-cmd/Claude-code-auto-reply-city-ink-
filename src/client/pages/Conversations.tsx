@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { useSearch } from "wouter";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useLocation, useSearch } from "wouter";
 import { format, formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import PhotoViewer from "@/components/PhotoViewer";
@@ -9,8 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { cn, isPaused, isUnanswered } from "@/lib/utils";
-import { useReveal } from "@/lib/useReveal";
+import { awaitsStudio, cn, isPaused, previewLine, shortAgo } from "@/lib/utils";
 import { Avatar } from "@/components/Avatar";
 import { StampBadge } from "@/components/Logo";
 import {
@@ -23,35 +22,9 @@ import {
   RefreshCw,
   Copy,
   Check,
+  ArrowLeft,
+  Search,
 } from "lucide-react";
-
-function StatTile({
-  label,
-  value,
-  hint,
-  emphasise,
-}: {
-  label: string;
-  value: number | undefined;
-  hint?: string;
-  emphasise?: boolean;
-}) {
-  return (
-    <Card className={cn(emphasise && value ? "border-sepia/40 shadow-glow" : undefined)}>
-      <CardContent className="pt-6">
-        {value === undefined ? (
-          <div className="shimmer h-9 w-14 animate-shimmer rounded-md bg-beige/25" />
-        ) : (
-          <p className="font-display text-3xl text-charcoal tabular-nums">{value}</p>
-        )}
-        <p className="mt-2 text-[0.65rem] uppercase tracking-[0.18em] text-muted-foreground">
-          {label}
-        </p>
-        {hint && <p className="mt-1 text-xs text-sepia">{hint}</p>}
-      </CardContent>
-    </Card>
-  );
-}
 
 function PendingReplyCard({
   draft,
@@ -59,6 +32,7 @@ function PendingReplyCard({
   avatarUrl,
   platform,
   onOpenThread,
+  inThread = false,
 }: {
   draft: {
     id: number;
@@ -76,6 +50,15 @@ function PendingReplyCard({
   platform?: string | null;
   avatarUrl?: string | null;
   onOpenThread: (conversationId: string) => void;
+  /**
+   * Shown inside the open conversation, under the messages. The thread is
+   * right there, so the card drops its own header and "They said" block and
+   * shows the other versions as full cards you can read and tap — Brad:
+   * "when I click into a message, it comes up with the auto replied message
+   * and a few different options". Chips with the text in a hover title were
+   * unreadable on a phone, which has no hover.
+   */
+  inThread?: boolean;
 }) {
   const utils = trpc.useUtils();
   const [text, setText] = useState(draft.draftText);
@@ -162,6 +145,9 @@ function PendingReplyCard({
     onSuccess: () => {
       toast.success("Sent");
       utils.pendingReplies.list.invalidate();
+      // The thread moves to Replied the moment it's answered.
+      utils.conversations.list.invalidate();
+      utils.conversations.messages.invalidate();
     },
     onError: (error) => {
       // The draft is put back on the board by the server when a send fails,
@@ -188,6 +174,7 @@ function PendingReplyCard({
     onSuccess: () => {
       toast("Discarded — nothing was sent");
       utils.pendingReplies.list.invalidate();
+      utils.conversations.list.invalidate();
     },
   });
 
@@ -261,6 +248,8 @@ function PendingReplyCard({
           </div>
         )}
 
+        {!inThread && (
+          <>
         <div className="flex items-center justify-between gap-3">
           <button
             onClick={() => onOpenThread(draft.conversationId)}
@@ -336,6 +325,9 @@ function PendingReplyCard({
           </div>
         )}
 
+          </>
+        )}
+
         <div>
           <p className="mb-1.5 flex items-center gap-1.5 text-[0.6rem] uppercase tracking-[0.18em] text-sepia">
             <Sparkles className="h-3 w-3" />
@@ -344,14 +336,57 @@ function PendingReplyCard({
           <Textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            className="min-h-24"
+            // Tall enough in a conversation to read the whole reply without
+            // scrolling inside the box.
+            className={inThread ? "min-h-40" : "min-h-24"}
             placeholder={draft.llmFailed ? `Write your reply to ${senderName}…` : undefined}
             aria-label={`Draft reply to ${senderName}`}
           />
 
+          {/* In a conversation: every version as a card you can read and tap.
+              Picking one loads it into the box above to edit — nothing sends
+              until Approve is pressed. */}
+          {inThread && options.length > 1 && (
+            <div className="mt-3 space-y-2">
+              <p className="text-[0.6rem] uppercase tracking-[0.18em] text-muted-foreground">
+                Or pick another version
+              </p>
+              {options.map((option, index) => {
+                const chosen = text === option.text;
+                return (
+                  <button
+                    key={option.label + index}
+                    type="button"
+                    onClick={() => setText(option.text)}
+                    aria-pressed={chosen}
+                    className={cn(
+                      "w-full rounded-xl border px-3 py-2 text-left transition-colors",
+                      chosen
+                        ? "border-sepia bg-sepia/10"
+                        : "border-border bg-surface hover:border-sepia/60"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "flex items-center gap-1.5 text-[0.62rem] uppercase tracking-[0.14em]",
+                        chosen ? "text-sepia" : "text-muted-foreground"
+                      )}
+                    >
+                      {chosen && <Check className="h-3 w-3" />}
+                      {option.label}
+                    </span>
+                    <span className="mt-0.5 line-clamp-3 block text-xs text-charcoal">
+                      {option.text}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {/* Other ways of answering the same message. Picking one loads it
               above to edit — nothing sends until Approve is pressed. */}
-          {options.length > 1 && (
+          {!inThread && options.length > 1 && (
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               <span className="text-[0.6rem] uppercase tracking-[0.18em] text-muted-foreground">
                 Or say it like
@@ -434,6 +469,141 @@ function PendingReplyCard({
   );
 }
 
+type InboxThread = {
+  conversationId: string;
+  senderName?: string | null;
+  avatarUrl?: string | null;
+  platform?: string | null;
+  lastMessageAt?: string | Date | null;
+  lastSenderType?: string | null;
+  lastPreview?: string | null;
+  lastPhotoCount?: number | null;
+  botPausedUntil?: string | Date | null;
+};
+
+/**
+ * One line of the inbox, laid out the way Meta's own inbox is: picture with
+ * the app it came from in the corner, the name, the last thing said and how
+ * long ago, and a dot when it's waiting on the studio.
+ *
+ * Brad, with a screen recording of Meta Business Suite: "I WANT IT BASICALLY
+ * TO LOOK LIKE THE SAME ORDER AND EVERYTHING AS METAS INBOX". He works the two
+ * side by side all day; a list that reads differently is a second thing to
+ * learn and a second place to miss someone.
+ */
+function InboxRow({
+  thread,
+  hasDraft,
+  isFollowUp,
+  active,
+  now,
+  onOpen,
+}: {
+  thread: InboxThread;
+  hasDraft: boolean;
+  isFollowUp: boolean;
+  active: boolean;
+  now: number;
+  onOpen: (conversationId: string) => void;
+}) {
+  const waiting = awaitsStudio(thread);
+  const name = thread.senderName || "Unknown customer";
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(thread.conversationId)}
+      className={cn(
+        "flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left transition-colors",
+        active ? "bg-beige/25" : "hover:bg-beige/10"
+      )}
+    >
+      <span className="relative shrink-0">
+        <Avatar name={name} src={thread.avatarUrl} className="h-12 w-12 text-sm" />
+        {/* Which inbox it's in, in the corner, as Meta does it. */}
+        <span
+          className={cn(
+            "absolute -bottom-0.5 -right-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 border-background text-white",
+            thread.platform === "instagram"
+              ? "bg-gradient-to-tr from-[#f58529] via-[#dd2a7b] to-[#8134af]"
+              : "bg-[#0a7cff]"
+          )}
+        >
+          {thread.platform === "instagram" ? (
+            <Instagram className="h-2.5 w-2.5" aria-label="Instagram" />
+          ) : (
+            <Facebook className="h-2.5 w-2.5" aria-label="Messenger" />
+          )}
+        </span>
+      </span>
+
+      <span className="min-w-0 flex-1">
+        <span
+          className={cn(
+            "block truncate text-sm text-charcoal",
+            waiting && "font-semibold"
+          )}
+        >
+          {name}
+        </span>
+        <span className="flex min-w-0 items-baseline gap-1.5 text-xs">
+          <span
+            className={cn(
+              "truncate",
+              waiting ? "font-medium text-charcoal" : "text-muted-foreground"
+            )}
+          >
+            {previewLine(thread)}
+          </span>
+          <span className="shrink-0 text-muted-foreground">
+            {shortAgo(thread.lastMessageAt, now)}
+          </span>
+        </span>
+      </span>
+
+      <span className="flex shrink-0 flex-col items-end gap-1">
+        {hasDraft && (
+          <span className="rounded-full bg-sepia/15 px-2 py-0.5 text-[0.58rem] uppercase tracking-[0.12em] text-sepia">
+            {isFollowUp ? "Follow-up" : "Draft ready"}
+          </span>
+        )}
+        {isPaused(thread.botPausedUntil) && (
+          <Badge className="border-sepia/40 bg-beige/30 text-[0.58rem] text-sepia">You</Badge>
+        )}
+        {waiting && <span className="h-2.5 w-2.5 rounded-full bg-destructive" aria-label="Needs a reply" />}
+      </span>
+    </button>
+  );
+}
+
+function SectionHeading({
+  title,
+  count,
+  note,
+  action,
+}: {
+  title: string;
+  count: number;
+  note: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="flex items-end justify-between gap-3 px-2 pb-1 pt-4">
+      <div className="min-w-0">
+        <h2 className="font-display text-base tracking-[0.08em] text-charcoal">
+          {title}
+          <span className="ml-2 text-sm text-sepia">{count}</span>
+        </h2>
+        <p className="text-[0.7rem] text-muted-foreground">{note}</p>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+// The Replied list runs to a couple of hundred. Meta loads it as you scroll;
+// this shows a screenful and grows on request.
+const REPLIED_PAGE = 40;
+
 export default function Conversations() {
   // ?thread=… so a search result, a notification, or a link from the
   // dashboard opens the right conversation — and survives a refresh, which
@@ -442,31 +612,46 @@ export default function Conversations() {
     new URLSearchParams(window.location.search).get("thread")
   );
   const [search, setSearch] = useState("");
-  // The split Brad works from: who is waiting on whom. Derived from who
-  // spoke last, so there's nothing to keep up to date by hand.
-  // Opens on the people nobody has answered. It opened on "all", which put
-  // a couple of hundred threads the studio had already replied to above the
-  // handful that were actually waiting — Brad: "only show us the most recent
-  // messages that have not been replied to". The history is one tap away on
-  // All, and a name search reaches it without switching tab.
-  const [filter, setFilter] = useState<"all" | "needs" | "waiting" | "mine">("needs");
-  const inboxRef = useReveal<HTMLDivElement>();
-  // Navigating to /messages?thread=… while already on the page doesn't
-  // remount, so the initial state above wouldn't fire a second time.
+  const [repliedShown, setRepliedShown] = useState(REPLIED_PAGE);
+  const [, navigate] = useLocation();
+
+  // The address follows the open thread, so a phone's own back gesture
+  // closes the conversation instead of leaving the inbox.
   const routeSearch = useSearch();
   useEffect(() => {
-    const thread = new URLSearchParams(routeSearch).get("thread");
-    if (thread) setSelected(thread);
+    setSelected(new URLSearchParams(routeSearch).get("thread"));
   }, [routeSearch]);
+  // Whether the open thread was reached from this list. If it was, Back is
+  // one step back in history; if it came from a link, Back replaces it.
+  const openedHere = useRef(false);
+  const open = (conversationId: string) => {
+    openedHere.current = true;
+    navigate(`/messages?thread=${encodeURIComponent(conversationId)}`);
+  };
+  const close = () => {
+    if (openedHere.current) {
+      openedHere.current = false;
+      window.history.back();
+    } else {
+      navigate("/messages", { replace: true });
+    }
+  };
+
   const utils = trpc.useUtils();
 
-  const { data: stats } = trpc.stats.useQuery({} as never, { refetchInterval: 30000 });
   const { data: conversations, refetch } = trpc.conversations.list.useQuery(undefined, {
     refetchInterval: 20000,
   });
-  // How far back the thread view is currently reading. Null means "the most
-  // recent window"; a number is the oldest message id already on screen, and
-  // the query then fetches the window before it.
+  const {
+    data: pendingReplies,
+    refetch: refetchPending,
+    isFetching: pendingFetching,
+    dataUpdatedAt: pendingUpdatedAt,
+  } = trpc.pendingReplies.list.useQuery(undefined, {
+    refetchInterval: 10000,
+  });
+
+  // How far back the thread view is currently reading.
   //
   // `windowSize` grows instead of stitching pages together in state. It keeps
   // the ten-second refetch honest — a stitched list would have to decide what
@@ -478,19 +663,10 @@ export default function Conversations() {
   const [threadPhoto, setThreadPhoto] = useState<{ urls: string[]; index: number } | null>(null);
 
   /*
-   * Brad: "I can't scroll up in the messages to see previous."
-   *
-   * The thread had no scroll area of its own, so on a phone it was just more
-   * page. Opening a thread left the view wherever it already was — thousands
-   * of pixels up, on the dashboard counters and the draft board — and
-   * scrolling up inside a conversation walked back out of it into the board
-   * instead of reaching older messages. "Load older messages" was real and
-   * sat at the top of that buried block, so he never saw it.
-   *
-   * Two effects fix it, and both are what a messaging app does:
-   *   - opening a thread brings it into view and lands on the NEWEST message
-   *   - the message list scrolls itself, so up means further back in the
-   *     conversation, every time
+   * Opening a thread lands on the NEWEST message, and the message list
+   * scrolls itself, so up means further back in the conversation — what a
+   * messaging app does. (Brad: "I can't scroll up in the messages to see
+   * previous.")
    */
   const threadPanel = useRef<HTMLDivElement>(null);
   const messageList = useRef<HTMLDivElement>(null);
@@ -498,7 +674,6 @@ export default function Conversations() {
   useEffect(() => {
     if (!selected) return;
     threadPanel.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    // Newest last, so the bottom is where the conversation actually is.
     const list = messageList.current;
     if (list) list.scrollTop = list.scrollHeight;
   }, [selected]);
@@ -527,27 +702,18 @@ export default function Conversations() {
     list.scrollTop = list.scrollHeight - pinnedFromBottom.current;
     pinnedFromBottom.current = null;
   }, [messages]);
-  const {
-    data: pendingReplies,
-    refetch: refetchPending,
-    isFetching: pendingFetching,
-    dataUpdatedAt: pendingUpdatedAt,
-  } = trpc.pendingReplies.list.useQuery(undefined, {
-    refetchInterval: 10000,
-  });
 
-  // The board already refreshes itself every ten seconds, but there is no way
-  // to SEE that from the outside — so when a card looked wrong, the honest
-  // question was "is this just old?" and there was nothing on the page that
-  // answered it. Now the page says when it last checked, and there is a
-  // button to check again, so a wrong card is known to be wrong rather than
-  // suspected of being stale.
+  // The page says when it last checked, and there's a button to check
+  // again, so a wrong card is known to be wrong rather than suspected of
+  // being stale. The same clock keeps "7h" on each row honest.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const tick = setInterval(() => setNow(Date.now()), 5000);
     return () => clearInterval(tick);
   }, []);
-  const secondsSincePending = pendingUpdatedAt ? Math.max(0, Math.round((now - pendingUpdatedAt) / 1000)) : null;
+  const secondsSincePending = pendingUpdatedAt
+    ? Math.max(0, Math.round((now - pendingUpdatedAt) / 1000))
+    : null;
   const updatedLabel =
     secondsSincePending === null
       ? "checking…"
@@ -557,9 +723,8 @@ export default function Conversations() {
           ? `${secondsSincePending}s ago`
           : `${Math.round(secondsSincePending / 60)}m ago`;
 
-  // The people who asked something and never got an answer. Importing
-  // brought their threads in but deliberately wrote nothing — this is the
-  // second, separate press that says "now go and draft for them".
+  // Anyone in the top section without a draft yet — the poll writes them
+  // within a few minutes, and this does it now.
   const draftUnanswered = trpc.pendingReplies.draftUnanswered.useMutation({
     onSuccess: (result) => {
       if (result.drafted) toast.success(result.detail);
@@ -583,371 +748,344 @@ export default function Conversations() {
     },
   });
 
-  const needle = search.trim().toLowerCase();
-  const matchesFilter = (c: { lastSenderType?: string | null; botPausedUntil?: string | Date | null }) => {
-    if (filter === "mine") return isPaused(c.botPausedUntil);
-    if (isPaused(c.botPausedUntil)) return filter === "all";
-    if (filter === "needs") return isUnanswered(c);
-    if (filter === "waiting") return !!c.lastSenderType && c.lastSenderType !== "customer";
-    return true;
-  };
-  // A typed name searches the whole inbox, not just the open tab. With the
-  // tab defaulting to "needs", filtering the search too would have made
-  // everyone the studio has already answered unfindable by name — a
-  // regression hidden inside a fix.
-  const shownConversations = needle
-    ? (conversations ?? []).filter((c) => (c.senderName || "").toLowerCase().includes(needle))
-    : (conversations ?? []).filter(matchesFilter);
+  // One live draft per person — the server already collapses them.
+  const draftFor = new Map((pendingReplies ?? []).map((d) => [d.conversationId, d]));
 
-  const counts = {
-    needs: (conversations ?? []).filter(isUnanswered).length,
-    waiting: (conversations ?? []).filter(
-      (c) => !isPaused(c.botPausedUntil) && !!c.lastSenderType && c.lastSenderType !== "customer"
-    ).length,
-    mine: (conversations ?? []).filter((c) => isPaused(c.botPausedUntil)).length,
-  };
+  // A typed name searches the whole inbox, both sections, so anyone the
+  // studio has already answered is still findable by name.
+  const needle = search.trim().toLowerCase();
+  const shown = (conversations ?? []).filter(
+    (c) => !needle || (c.senderName || "").toLowerCase().includes(needle)
+  );
+  // `conversations.list` is newest-first already — Meta's order.
+  const needsReply = shown.filter(awaitsStudio);
+  const replied = shown.filter((c) => !awaitsStudio(c));
+  const missingDrafts = needsReply.filter(
+    (c) => !draftFor.has(c.conversationId) && !isPaused(c.botPausedUntil)
+  ).length;
 
   const active = conversations?.find((c) => c.conversationId === selected);
-  const senderNameFor = (conversationId: string) =>
-    conversations?.find((c) => c.conversationId === conversationId)?.senderName || "a customer";
-  const avatarFor = (conversationId: string) =>
-    conversations?.find((c) => c.conversationId === conversationId)?.avatarUrl ?? null;
+  const activeDraft = selected ? draftFor.get(selected) : undefined;
+  const activeName = active?.senderName || "Customer";
 
-  const waiting = pendingReplies?.length ?? 0;
-  const sensitiveCount = pendingReplies?.filter((d) => d.isSensitive).length ?? 0;
-  const failedCount = pendingReplies?.filter((d) => d.llmFailed && !d.isSensitive).length ?? 0;
+  const rowFor = (c: InboxThread) => {
+    const draft = draftFor.get(c.conversationId);
+    return (
+      <InboxRow
+        key={c.conversationId}
+        thread={c}
+        hasDraft={!!draft}
+        isFollowUp={!!draft?.customerMessageId.startsWith("followup_")}
+        active={selected === c.conversationId}
+        now={now}
+        onOpen={open}
+      />
+    );
+  };
 
   return (
-    <div className="space-y-8">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatTile label="Threads" value={stats?.conversations} />
-        <StatTile label="Messages" value={stats?.messages} />
-        <StatTile
-          label="Awaiting your OK"
-          value={pendingReplies?.length}
-          hint={
-            [
-              sensitiveCount ? `${sensitiveCount} needs a person` : "",
-              failedCount ? `${failedCount} the AI couldn't write` : "",
-            ]
-              .filter(Boolean)
-              .join(" · ") || undefined
-          }
-          emphasise
-        />
-        <StatTile label="Posts queued" value={stats?.pendingPosts} />
-      </div>
-
-      {/* Imported threads arrive with no draft, on purpose — importing writes
-          to nobody. But some of those people asked something weeks ago and
-          were missed, and they're the ones worth answering. Separate press,
-          so it can never happen by accident. */}
-      {/* Stacked on a phone. `flex-1` let the paragraph shrink under the
-          button, so at 390px this was six words wide and eleven lines tall
-          next to a button that kept its full size. The button goes under the
-          text where there is room for both. */}
-      <div className="flex flex-col items-start gap-3 rounded-xl border border-border bg-beige/20 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center">
-        <p className="w-full min-w-0 text-xs text-muted-foreground sm:flex-1">
-          Someone asked a question and never got an answer? This writes a draft for each of
-          them from the last fortnight — nothing sends, they all wait for your OK like any
-          other. Older threads are left alone: they've usually been answered by hand somewhere
-          this app can't see.
-        </p>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => draftUnanswered.mutate({ limit: 20, withinDays: 14 })}
-          disabled={draftUnanswered.isPending}
-        >
-          <Sparkles
-            className={cn("mr-2 h-3.5 w-3.5", draftUnanswered.isPending && "animate-pulse")}
-          />
-          {draftUnanswered.isPending ? "Drafting…" : "Draft the unanswered"}
-        </Button>
-      </div>
-
-      {waiting > 0 && (
-        <section className="space-y-3">
-          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-            <h2 className="font-display text-lg tracking-[0.1em] text-charcoal">
-              Waiting for your OK
-              <span className="ml-2 text-sepia">({waiting})</span>
-            </h2>
-            <div className="flex items-center gap-2 text-xs text-sepia">
-              <span>Updated {updatedLabel}</span>
-              <button
-                type="button"
-                onClick={() => {
-                  void refetchPending();
-                  void utils.stats.invalidate();
-                  void utils.conversations.list.invalidate();
-                }}
-                disabled={pendingFetching}
-                className="rounded-full border border-line px-3 py-1 text-xs text-charcoal transition hover:bg-surface disabled:opacity-60"
-              >
-                {pendingFetching ? "Checking…" : "Refresh"}
-              </button>
-            </div>
+    <div className="grid gap-6 md:grid-cols-[360px_1fr]">
+      {/* The list. On a phone it steps aside while a conversation is open,
+          the way every messaging app does. */}
+      <section className={cn("min-w-0", selected && "hidden md:block")}>
+        <div className="flex items-center justify-between gap-3 px-2">
+          <h1 className="font-display text-2xl tracking-[0.06em] text-charcoal">Inbox</h1>
+          <div className="flex items-center gap-2 text-[0.7rem] text-sepia">
+            <span>Updated {updatedLabel}</span>
+            <button
+              type="button"
+              onClick={() => {
+                void refetchPending();
+                void refetch();
+                void utils.stats.invalidate();
+              }}
+              disabled={pendingFetching}
+              className="rounded-full border border-line px-3 py-1 text-xs text-charcoal transition hover:bg-surface disabled:opacity-60"
+            >
+              {pendingFetching ? "Checking…" : "Refresh"}
+            </button>
           </div>
-          <div className="grid items-start gap-3 lg:grid-cols-2">
-            {pendingReplies?.map((draft) => (
-              <PendingReplyCard
-                key={draft.id}
-                draft={draft}
-                senderName={senderNameFor(draft.conversationId)}
-                avatarUrl={avatarFor(draft.conversationId)}
-                platform={
-                  conversations?.find((c) => c.conversationId === draft.conversationId)?.platform
-                }
-                onOpenThread={setSelected}
-              />
+        </div>
+
+        <label className="mt-3 flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 focus-within:border-sepia">
+          <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name"
+            aria-label="Search conversations by name"
+            className="w-full bg-transparent text-sm text-charcoal outline-none"
+          />
+        </label>
+
+        {!conversations ? (
+          <div className="mt-4 space-y-2 px-2">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="shimmer h-14 animate-shimmer rounded-xl bg-beige/20" />
             ))}
           </div>
-        </section>
+        ) : !conversations.length ? (
+          <Card className="mt-4">
+            <CardContent className="pt-6">
+              <StampBadge className="mx-auto mb-4 h-24 w-24 text-sepia opacity-70" />
+              <p className="text-sm text-muted-foreground">
+                No messages yet. Connect the Page in Settings, then send your studio a test
+                message.
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            <SectionHeading
+              title="Needs a reply"
+              count={needsReply.length}
+              note="They wrote last. Newest at the top, same as Meta."
+              action={
+                missingDrafts > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => draftUnanswered.mutate({ limit: 10, withinDays: 7 })}
+                    disabled={draftUnanswered.isPending}
+                    className="flex shrink-0 items-center gap-1 rounded-full border border-sepia/50 px-2.5 py-1 text-[0.68rem] text-sepia transition hover:bg-sepia/10 disabled:opacity-60"
+                  >
+                    <Sparkles
+                      className={cn("h-3 w-3", draftUnanswered.isPending && "animate-pulse")}
+                    />
+                    {draftUnanswered.isPending
+                      ? "Drafting…"
+                      : `Draft ${missingDrafts} now`}
+                  </button>
+                ) : undefined
+              }
+            />
+            <div className="border-b border-border pb-3">
+              {needsReply.length ? (
+                needsReply.map(rowFor)
+              ) : (
+                <p className="px-2 py-4 text-sm text-muted-foreground">
+                  {needle ? `Nobody here matching "${search.trim()}".` : "Everyone's been answered. 🙌"}
+                </p>
+              )}
+            </div>
+
+            <SectionHeading
+              title="Replied"
+              count={replied.length}
+              note="You've answered, or it's over a week old and Meta won't let the app reply."
+            />
+            <div className="opacity-90">
+              {replied.length ? (
+                replied.slice(0, needle ? replied.length : repliedShown).map(rowFor)
+              ) : (
+                <p className="px-2 py-4 text-sm text-muted-foreground">
+                  {needle ? `Nobody here matching "${search.trim()}".` : "Nothing here yet."}
+                </p>
+              )}
+              {!needle && replied.length > repliedShown && (
+                <div className="px-2 pt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={() => setRepliedShown((n) => n + REPLIED_PAGE)}
+                  >
+                    Show more ({replied.length - repliedShown} older)
+                  </Button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </section>
+
+      {threadPhoto && (
+        <PhotoViewer
+          urls={threadPhoto.urls}
+          index={threadPhoto.index}
+          onIndex={(i) => setThreadPhoto({ ...threadPhoto, index: i })}
+          onClose={() => setThreadPhoto(null)}
+          alt="Photo from the conversation"
+        />
       )}
 
-      <div ref={inboxRef} className="grid gap-6 md:grid-cols-[290px_1fr]">
-        <div className="space-y-2">
-          <h2 className="px-1 font-display text-sm tracking-[0.14em] text-muted-foreground">
-            INBOX{shownConversations.length ? ` (${shownConversations.length})` : ""}
-          </h2>
-
-          {/* Who's waiting on whom. The same split Messenger gives you, but
-              worked out from the thread rather than typed in by hand. */}
-          <div className="flex flex-wrap gap-1.5">
-            {(
-              [
-                ["all", `All${conversations?.length ? ` ${conversations.length}` : ""}`],
-                ["needs", `Needs a reply${counts.needs ? ` ${counts.needs}` : ""}`],
-                ["waiting", `Waiting on them${counts.waiting ? ` ${counts.waiting}` : ""}`],
-                ["mine", `You're on it${counts.mine ? ` ${counts.mine}` : ""}`],
-              ] as const
-            ).map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setFilter(key)}
-                className={cn(
-                  "rounded-full border px-2.5 py-1 text-[0.68rem] transition-colors",
-                  filter === key
-                    ? "border-sepia bg-sepia/10 text-sepia"
-                    : "border-border text-muted-foreground hover:border-sepia/60 hover:text-charcoal"
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {/* A hundred threads is not a list you scroll on a phone. Without
-              this, a customer you can see in Meta's inbox looks lost. */}
-          {(conversations?.length ?? 0) > 8 && (
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name…"
-              aria-label="Search conversations by name"
-              className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-charcoal outline-none transition-colors focus:border-sepia"
-            />
-          )}
-
-          {shownConversations.length ? (
-            shownConversations.map((c) => (
-              <button
-                key={c.conversationId}
-                onClick={() => setSelected(c.conversationId)}
-                className={cn(
-                  "flex w-full items-center gap-3 rounded-2xl border p-3 text-left transition-all duration-300",
-                  selected === c.conversationId
-                    ? "border-sepia/45 bg-beige/20 shadow-soft"
-                    : "border-border bg-card hover:border-beige hover:shadow-soft"
-                )}
-              >
-                <Avatar name={c.senderName || "?"} src={c.avatarUrl} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      {/* Which inbox this is really in. Half the studio's
-                          enquiries come through Instagram, and the reply
-                          goes back to wherever it came from. */}
-                      {c.platform === "instagram" ? (
-                        <Instagram className="h-3 w-3 shrink-0 text-sepia" aria-label="Instagram" />
-                      ) : (
-                        <Facebook className="h-3 w-3 shrink-0 text-sepia" aria-label="Messenger" />
-                      )}
-                      <span className="truncate text-sm text-charcoal">
-                        {c.senderName || "Unknown customer"}
-                      </span>
-                    </span>
-                    {isPaused(c.botPausedUntil) && (
-                      <Badge className="border-sepia/40 bg-beige/30 text-[0.6rem] text-sepia">
-                        You
-                      </Badge>
-                    )}
-                  </div>
-                  {c.lastMessageAt && (
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {formatDistanceToNow(new Date(c.lastMessageAt), { addSuffix: true })}
-                    </p>
-                  )}
-                </div>
-              </button>
-            ))
-          ) : search.trim() ? (
-            <p className="px-1 py-3 text-sm text-muted-foreground">
-              Nobody matching "{search.trim()}".
-            </p>
-          ) : filter !== "all" && conversations?.length ? (
-            <p className="px-1 py-3 text-sm text-muted-foreground">
-              {filter === "needs"
-                ? "Everyone's been answered."
-                : filter === "waiting"
-                  ? "Nobody's waiting on a reply from you."
-                  : "You haven't taken over any threads."}
-            </p>
-          ) : (
-            <Card>
-              <CardContent className="pt-6">
-                <StampBadge className="mx-auto mb-4 h-24 w-24 text-sepia opacity-70" />
-                <p className="text-sm text-muted-foreground">
-                  No messages yet. Connect the Page in Settings, then send your studio a test
-                  message.
-                </p>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-
-        {threadPhoto && (
-          <PhotoViewer
-            urls={threadPhoto.urls}
-            index={threadPhoto.index}
-            onIndex={(i) => setThreadPhoto({ ...threadPhoto, index: i })}
-            onClose={() => setThreadPhoto(null)}
-            alt="Photo from the conversation"
-          />
-        )}
-
-        <div>
-          {!selected ? (
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-sm text-muted-foreground">Pick a thread to read it.</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-4" ref={threadPanel}>
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <Avatar name={active?.senderName || "Customer"} src={active?.avatarUrl} />
-                  <h2 className="font-display text-lg tracking-[0.08em] text-charcoal">
-                    {active?.senderName || "Customer"}
+      {/* The open conversation: the thread, then the drafted reply with its
+          other versions underneath. */}
+      <section className={cn("min-w-0", !selected && "hidden md:block")}>
+        {!selected ? (
+          <Card>
+            <CardContent className="pt-6">
+              <p className="text-sm text-muted-foreground">
+                Tap someone on the left to open the conversation and their drafted reply.
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          // scroll-mt clears the sticky header, which otherwise sat on top
+          // of the person's name when the thread scrolled into view.
+          <div className="scroll-mt-28 space-y-4" ref={threadPanel}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={close}
+                  className="-ml-1 flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-sm text-sepia hover:bg-beige/20 md:hidden"
+                  aria-label="Back to the inbox"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Inbox
+                </button>
+                <Avatar name={activeName} src={active?.avatarUrl} />
+                <div className="min-w-0">
+                  <h2 className="truncate font-display text-lg tracking-[0.06em] text-charcoal">
+                    {activeName}
                   </h2>
-                </div>
-                {isPaused(active?.botPausedUntil) ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => resume.mutate({ conversationId: selected })}
-                  >
-                    Hand back to agent
-                  </Button>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => pause.mutate({ conversationId: selected, hours: 12 })}
-                  >
-                    Take over
-                  </Button>
-                )}
-              </div>
-
-              {/* Its own scroll area, so "up" means further back in the
-                  conversation rather than back out into the board. Capped in
-                  viewport height so a long thread never pushes the reply box
-                  off the bottom of a phone. */}
-              <div
-                ref={messageList}
-                className="max-h-[60vh] space-y-3 overflow-y-auto overscroll-contain pr-1 sm:max-h-[65vh]"
-              >
-                {/* Older messages, on request. The thread opens on the most
-                    recent fifty — the studio nearly always wants the bottom
-                    of a conversation — and reaches further back only when
-                    asked, so a customer with a year of history doesn't cost
-                    a year of messages on every open. */}
-                {hasOlder && (
-                  <div className="flex flex-col items-center gap-1 pb-1">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        // Remember the distance from the bottom so the
-                        // messages already on screen stay put when fifty
-                        // more land above them.
-                        const list = messageList.current;
-                        pinnedFromBottom.current = list
-                          ? list.scrollHeight - list.scrollTop
-                          : null;
-                        setWindowSize((n) => n + 50);
-                      }}
-                    >
-                      Load older messages
-                    </Button>
-                    <span className="text-[0.7rem] text-muted-foreground">
-                      Showing the last {messages?.length ?? 0} of {totalMessages}
-                    </span>
-                  </div>
-                )}
-                {!hasOlder && totalMessages > 50 && (
-                  <p className="pb-1 text-center text-[0.7rem] text-muted-foreground">
-                    The start of the conversation — all {totalMessages} messages
+                  <p className="flex items-center gap-1 text-[0.7rem] text-muted-foreground">
+                    {active?.platform === "instagram" ? (
+                      <Instagram className="h-3 w-3" />
+                    ) : (
+                      <Facebook className="h-3 w-3" />
+                    )}
+                    {active?.platform === "instagram" ? "Instagram" : "Messenger"}
+                    {active?.lastMessageAt && <> · {shortAgo(active.lastMessageAt, now)}</>}
                   </p>
-                )}
-                {messages?.map((m) => (
-                  <div
-                    key={m.id}
+                </div>
+              </div>
+              {isPaused(active?.botPausedUntil) ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => resume.mutate({ conversationId: selected })}
+                >
+                  Hand back
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => pause.mutate({ conversationId: selected, hours: 12 })}
+                >
+                  Take over
+                </Button>
+              )}
+            </div>
+
+            {/* Its own scroll area, so "up" means further back in the
+                conversation. Shorter when a draft sits under it, so the
+                reply is on the same phone screen as what it's answering. */}
+            <div
+              ref={messageList}
+              className={cn(
+                "space-y-3 overflow-y-auto overscroll-contain rounded-2xl border border-border bg-surface/40 p-3",
+                activeDraft ? "max-h-[42vh] sm:max-h-[50vh]" : "max-h-[65vh]"
+              )}
+            >
+              {hasOlder && (
+                <div className="flex flex-col items-center gap-1 pb-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const list = messageList.current;
+                      pinnedFromBottom.current = list ? list.scrollHeight - list.scrollTop : null;
+                      setWindowSize((n) => n + 50);
+                    }}
+                  >
+                    Load older messages
+                  </Button>
+                  <span className="text-[0.7rem] text-muted-foreground">
+                    Showing the last {messages?.length ?? 0} of {totalMessages}
+                  </span>
+                </div>
+              )}
+              {!hasOlder && totalMessages > 50 && (
+                <p className="pb-1 text-center text-[0.7rem] text-muted-foreground">
+                  The start of the conversation — all {totalMessages} messages
+                </p>
+              )}
+              {messages?.map((m) => (
+                <div
+                  key={m.id}
+                  className={cn(
+                    "max-w-[85%] animate-fade-up rounded-2xl px-4 py-2.5 text-sm",
+                    m.senderType === "customer"
+                      ? "border border-border bg-card text-charcoal shadow-soft"
+                      : "ml-auto bg-primary text-primary-foreground"
+                  )}
+                >
+                  <p className="whitespace-pre-wrap">{m.content}</p>
+                  {!!m.attachmentUrls?.length && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {m.attachmentUrls.map((url, i) => (
+                        <MessagePhoto
+                          key={url}
+                          src={url}
+                          alt="Reference photo"
+                          className="h-32 w-32 rounded-lg object-cover"
+                          onOpen={() => setThreadPhoto({ urls: m.attachmentUrls ?? [], index: i })}
+                        />
+                      ))}
+                    </div>
+                  )}
+                  <p
                     className={cn(
-                      "max-w-[85%] animate-fade-up rounded-2xl px-4 py-2.5 text-sm",
+                      "mt-1 text-[0.65rem]",
                       m.senderType === "customer"
-                        ? "border border-border bg-card text-charcoal shadow-soft"
-                        : "ml-auto bg-primary text-primary-foreground"
+                        ? "text-muted-foreground"
+                        : "text-primary-foreground/60"
                     )}
                   >
-                    <p className="whitespace-pre-wrap">{m.content}</p>
-                    {!!m.attachmentUrls?.length && (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {m.attachmentUrls.map((url, i) => (
-                          <MessagePhoto
-                            key={url}
-                            src={url}
-                            alt="Reference photo"
-                            className="h-32 w-32 rounded-lg object-cover"
-                            onOpen={() => setThreadPhoto({ urls: m.attachmentUrls ?? [], index: i })}
-                          />
-                        ))}
-                      </div>
-                    )}
-                    <p
-                      className={cn(
-                        "mt-1 text-[0.65rem]",
-                        m.senderType === "customer" ? "text-muted-foreground" : "text-primary-foreground/60"
-                      )}
-                    >
-                      {m.senderType === "manual"
-                        ? "Studio (typed)"
-                        : m.senderType === "bot"
-                          ? "Sent by agent"
-                          : "Customer"}
-                    </p>
-                  </div>
-                ))}
-              </div>
+                    {m.senderType === "manual"
+                      ? "Studio (typed)"
+                      : m.senderType === "bot"
+                        ? "Sent by agent"
+                        : "Customer"}
+                    {m.createdAt && <> · {format(new Date(m.createdAt), "d MMM, h:mm a")}</>}
+                  </p>
+                </div>
+              ))}
             </div>
-          )}
-        </div>
-      </div>
+
+            {activeDraft ? (
+              <PendingReplyCard
+                key={activeDraft.id}
+                draft={activeDraft}
+                senderName={activeName}
+                avatarUrl={active?.avatarUrl}
+                platform={active?.platform}
+                onOpenThread={open}
+                inThread
+              />
+            ) : active && awaitsStudio(active) ? (
+              <Card>
+                <CardContent className="flex flex-col items-start gap-3 pt-6">
+                  <p className="text-sm text-muted-foreground">
+                    No draft yet — the agent writes one within a few minutes of a message
+                    landing.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => draftUnanswered.mutate({ limit: 10, withinDays: 7 })}
+                    disabled={draftUnanswered.isPending}
+                  >
+                    <Sparkles
+                      className={cn("mr-2 h-3.5 w-3.5", draftUnanswered.isPending && "animate-pulse")}
+                    />
+                    {draftUnanswered.isPending ? "Drafting…" : "Draft it now"}
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : active ? (
+              <p className="px-1 text-center text-xs text-muted-foreground">
+                {active.lastSenderType === "customer"
+                  ? "Over a week old — Meta won't let the app reply. Answer from the Instagram or Messenger app if it still needs one."
+                  : "You've replied — nothing waiting on you here."}
+              </p>
+            ) : null}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

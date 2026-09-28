@@ -40,6 +40,13 @@ export function realName(name: string | undefined | null): string | undefined {
   return isPlaceholderName(name) ? undefined : name!.trim();
 }
 
+/**
+ * How long after a customer's last message Meta lets the app answer them.
+ * Past it, every send is refused — so past it a thread can't "need a reply"
+ * from this app. The client's `REPLY_WINDOW_DAYS` must match.
+ */
+export const REPLY_WINDOW_DAYS = 7;
+
 let _db: ReturnType<typeof drizzle> | null = null;
 
 export async function getDb() {
@@ -472,7 +479,13 @@ export async function getRecentConversations(limit = 250) {
     .from(messengerConversations)
     .orderBy(desc(messengerConversations.lastMessageAt))
     .limit(limit);
-  if (!rows.length) return rows.map((r) => ({ ...r, lastSenderType: null as string | null }));
+  if (!rows.length)
+    return rows.map((r) => ({
+      ...r,
+      lastSenderType: null as string | null,
+      lastPreview: null as string | null,
+      lastPhotoCount: 0,
+    }));
 
   // Who spoke last in each thread. That single fact is what separates "they
   // asked something and nobody has answered" from "the ball is in their
@@ -489,8 +502,13 @@ export async function getRecentConversations(limit = 250) {
   // answered by hand came back up as needing a reply, and how genuinely
   // unanswered threads sat in "waiting on them" and were never drafted for.
   const ids = rows.map((r) => r.conversationId);
+  //
+  // The text and photo count come along too: Meta's inbox shows the last line
+  // of every thread under the name ("LIV sent 2 photos."), and Brad wants
+  // this list to read the same.
   const [lastRows] = (await db.execute(
-    sql`SELECT m.conversation_id AS conversationId, m.sender_type AS senderType
+    sql`SELECT m.conversation_id AS conversationId, m.sender_type AS senderType,
+               LEFT(m.content, 160) AS content, m.attachment_urls AS attachmentUrls
           FROM messenger_messages m
           JOIN (
             SELECT s.conversation_id,
@@ -503,13 +521,34 @@ export async function getRecentConversations(limit = 250) {
                           FROM messenger_messages
                          WHERE conversation_id IN ${ids}) s
           ) t ON t.last_id = m.id`
-  )) as unknown as [{ conversationId: string; senderType: string }[]];
+  )) as unknown as [
+    { conversationId: string; senderType: string; content: string | null; attachmentUrls: unknown }[],
+  ];
 
-  const lastBy = new Map((lastRows ?? []).map((r) => [r.conversationId, r.senderType]));
-  return rows.map((r) => ({
-    ...r,
-    lastSenderType: lastBy.get(r.conversationId) ?? null,
-  }));
+  // MySQL hands a JSON column back parsed; MariaDB stores it as text and
+  // hands back a string. Count either.
+  const photoCount = (raw: unknown): number => {
+    let value = raw;
+    if (typeof value === "string") {
+      try {
+        value = JSON.parse(value);
+      } catch {
+        return 0;
+      }
+    }
+    return Array.isArray(value) ? value.length : 0;
+  };
+
+  const lastBy = new Map((lastRows ?? []).map((r) => [r.conversationId, r]));
+  return rows.map((r) => {
+    const last = lastBy.get(r.conversationId);
+    return {
+      ...r,
+      lastSenderType: last?.senderType ?? null,
+      lastPreview: last?.content ?? null,
+      lastPhotoCount: photoCount(last?.attachmentUrls),
+    };
+  });
 }
 
 /**
@@ -1126,7 +1165,50 @@ export async function getPendingReplies() {
     replies.map((r) => [r.conversationId, r.at ? new Date(r.at).getTime() : 0])
   );
 
+  // When the CUSTOMER last spoke in each thread — the board's order, and the
+  // clock Meta's reply window runs on.
+  const asked = await db
+    .select({
+      conversationId: messengerMessages.conversationId,
+      at: sql<string>`MAX(${messengerMessages.createdAt})`,
+    })
+    .from(messengerMessages)
+    .where(
+      and(
+        inArray(messengerMessages.conversationId, conversationIds),
+        eq(messengerMessages.senderType, "customer")
+      )
+    )
+    .groupBy(messengerMessages.conversationId);
+  const askedAt = new Map(
+    asked.map((r) => [r.conversationId, r.at ? new Date(r.at).getTime() : 0])
+  );
+
+  const cutoff = Date.now() - REPLY_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
   const live = drafts.filter((draft) => {
+    /**
+     * A reply to someone who last wrote more than a week ago is dead.
+     *
+     * Brad, with the board open on Nett and Paige — a thread with a deposit
+     * receipt from months back, above a draft asking her what size she
+     * wanted: "Always remove messages that have been replied to already."
+     * Those threads HAD been answered, by hand, somewhere this app never saw
+     * (the Instagram app, mostly). There is no echo to catch after the fact.
+     *
+     * What IS certain is Meta's rule: seven days after a customer's last
+     * message the app may not answer them at all — the send is refused
+     * ("it's been more than 7 days since they last messaged"). So a draft
+     * past that point can't do its one job, and on a board sorted like Meta's
+     * inbox it only buries the people who can still be answered.
+     *
+     * Follow-ups are exempt: they're written for a quiet thread on purpose,
+     * and the studio sends them by hand if Meta won't.
+     */
+    const isFollowUp = draft.customerMessageId.startsWith("followup_");
+    const lastAsked = askedAt.get(draft.conversationId);
+    if (!isFollowUp && lastAsked && lastAsked < cutoff) return false;
+
     const lastReply = answeredAt.get(draft.conversationId);
     if (!lastReply || !draft.createdAt) return true;
     // Something answered this thread after the draft was written.
@@ -1149,7 +1231,13 @@ export async function getPendingReplies() {
     if (!held || at >= heldAt) newestPerConversation.set(draft.conversationId, draft);
   }
 
-  const queue = [...newestPerConversation.values()];
+  // Newest first, the way Meta's inbox reads — by when the customer last
+  // wrote, not when the draft was made. Oldest-first put a months-old thread
+  // at the top of the home screen and the person who wrote ten minutes ago
+  // at the bottom of sixty-seven.
+  const at = (d: (typeof live)[number]) =>
+    askedAt.get(d.conversationId) || (d.createdAt ? new Date(d.createdAt).getTime() : 0);
+  const queue = [...newestPerConversation.values()].sort((a, b) => at(b) - at(a));
 
   // The reference photos belong on the card, not two clicks away — you can't
   // price a tattoo you can't see. They usually arrive a message or two before

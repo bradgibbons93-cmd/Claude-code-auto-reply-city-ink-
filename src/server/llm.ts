@@ -1,6 +1,50 @@
 import axios from "axios";
 
-export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+/**
+ * A photo sent along with a message, as the provider wants it: base64 bytes
+ * and their type. Only JPEG, PNG, GIF and WebP — the four every provider
+ * takes.
+ */
+export type ChatImage = { mediaType: string; data: string };
+
+/**
+ * `images` rides on a user turn. A tattoo enquiry usually IS the picture,
+ * and a model that only ever read "(sent a photo)" could do nothing but ask
+ * the customer how big it was — Brad: "She clearly sent photos with basically
+ * the exact size".
+ */
+export type ChatMessage = {
+  role: "system" | "user" | "assistant";
+  content: string;
+  images?: ChatImage[];
+};
+
+const hasImages = (messages: ChatMessage[]) => messages.some((m) => m.images?.length);
+const withoutImages = (messages: ChatMessage[]): ChatMessage[] =>
+  messages.map(({ role, content }) => ({ role, content }));
+
+/**
+ * The same call, and if the provider turns the PHOTOS down, the same call
+ * again without them.
+ *
+ * A picture is extra help, never a condition of getting a draft. A model or
+ * gateway that can't take images — or one photo it won't read — must cost the
+ * picture, not the customer's reply.
+ */
+export async function invokeLLM(
+  messages: ChatMessage[],
+  opts: { maxTokens?: number; temperature?: number } = {}
+): Promise<string> {
+  try {
+    return await invokeLLMOnce(messages, opts);
+  } catch (error) {
+    const status = (error as { response?: { status?: number } }).response?.status;
+    const said = JSON.stringify((error as { response?: { data?: unknown } }).response?.data ?? "");
+    if (!hasImages(messages) || status !== 400 || !/image/i.test(said)) throw error;
+    console.warn(`[LLM] The provider wouldn't take the photos — drafting from the words alone. ${said.slice(0, 160)}`);
+    return invokeLLMOnce(withoutImages(messages), opts);
+  }
+}
 
 /**
  * Read at call time rather than at import, so what /health and the Settings
@@ -65,7 +109,7 @@ function saysTemperatureUnwanted(error: unknown): boolean {
  * "openai" also covers anything OpenAI-compatible (OpenRouter, Groq, Together,
  * Google's compatibility endpoint) — just point LLM_BASE_URL at it.
  */
-export async function invokeLLM(
+async function invokeLLMOnce(
   messages: ChatMessage[],
   opts: { maxTokens?: number; temperature?: number } = {}
 ): Promise<string> {
@@ -103,7 +147,20 @@ export async function invokeLLM(
       max_tokens: maxTokens,
       ...(withTemperature ? { temperature } : {}),
       system: system || undefined,
-      messages: rest.map((m) => ({ role: m.role, content: m.content })),
+      messages: rest.map((m) =>
+        m.images?.length
+          ? {
+              role: m.role,
+              content: [
+                ...m.images.map((image) => ({
+                  type: "image",
+                  source: { type: "base64", media_type: image.mediaType, data: image.data },
+                })),
+                { type: "text", text: m.content || "(sent a photo)" },
+              ],
+            }
+          : { role: m.role, content: m.content }
+      ),
     });
     const headers = {
       "x-api-key": process.env.LLM_API_KEY || "",
@@ -151,7 +208,22 @@ export async function invokeLLM(
     endpoint("chat/completions"),
     {
       model: llmModel(),
-      messages,
+      // Only the fields the API knows. `images` becomes the OpenAI-style
+      // content array; left on the message as-is, it would be refused.
+      messages: messages.map((m) =>
+        m.images?.length
+          ? {
+              role: m.role,
+              content: [
+                { type: "text", text: m.content || "(sent a photo)" },
+                ...m.images.map((image) => ({
+                  type: "image_url",
+                  image_url: { url: `data:${image.mediaType};base64,${image.data}` },
+                })),
+              ],
+            }
+          : { role: m.role, content: m.content }
+      ),
       max_tokens: maxTokens,
       temperature,
     },

@@ -1004,6 +1004,47 @@ Express's own HTML "Payload Too Large" page — while the code underneath
 apologised with "that photo is over 8MB", which was never the reason. The two
 photo routes are stepped over now and keep the limit they declare.
 
+**The Messages page reads like Meta's inbox, on purpose.** Brad, 29 September,
+with a screen recording of Meta Business Suite: *"I WANT IT BASICALLY TO LOOK
+LIKE THE SAME ORDER AND EVERYTHING AS METAS INBOX! But when I click into a
+message, it comes up with the auto replied message and a few different
+options."* He works the two side by side all day. So: one list, newest first,
+split into **Needs a reply** (they wrote last, inside Meta's seven days) and
+**Replied** (we spoke last, or it's past seven days), each row a picture with
+the inbox badge, the name, Meta's preview line ("LIV sent 2 photos.") and a
+short clock ("7h"). Tapping opens the thread with the draft underneath and
+every other version as a full card — chips with the text in a hover title were
+unreadable on a phone. The 67-card grid above the list is gone; a draft lives
+inside its conversation. `awaitsStudio()` in `lib/utils.ts` is the one test for
+the top section, and `isUnanswered()` is built on it, so the home screen and
+the inbox cannot disagree.
+
+**A draft for someone who last wrote over seven days ago is off the board.**
+Brad, over a card for a thread with a months-old deposit receipt in it asking
+her what size she wanted: *"Always remove messages that have been replied to
+already."* Those threads were answered by hand in the Instagram app, where no
+echo reaches us. There is no way to prove that after the fact — but Meta's
+rule is certain: past seven days the app may not reply at all. So
+`getPendingReplies` drops them (follow-ups excepted, they're for quiet threads
+by design) and sorts by when the customer last wrote, newest first. The rows
+stay `pending`, so nothing is deleted and the poll still reads "a draft is
+already waiting" rather than drafting them again. `REPLY_WINDOW_DAYS` is 7 in
+both `db.ts` and `lib/utils.ts`.
+
+**The model SEES the customer's photos.** It never had: `invokeLLM` sent text
+only, so a customer who sent two photos showing exactly the size got *"If you
+can give me a rough size (cm) for both pieces I can work out an accurate
+price"* — the only thing a model reading "(sent a photo)" could say. Brad:
+*"base it roughly from what they send and give a rough estimate price"*.
+`composeDraft` now loads up to four of the customer's kept photos
+(`/api/attachments/…` only — Meta's own links expire) and puts them on their
+latest message; the prompt's READING THEIR PHOTOS section says to judge size
+from them and quote straight away. The size is the model's read; every dollar
+still comes only from the studio facts. If a provider refuses an image,
+`invokeLLM` asks once more without the pictures — a photo is help, never a
+condition of getting a draft. `tests/inboxmeta.mjs` asserts on the request
+body that actually reached the provider.
+
 ## The login
 
 Off unless `DASHBOARD_PASSWORD` is set in Railway. Deliberately dormant while
@@ -1309,6 +1350,12 @@ stand-in push service has to be a TLS server with a self-signed certificate
 and `NODE_TLS_REJECT_UNAUTHORIZED=0` in the test process only. Against a plain
 `http://` listener it fails with an OpenSSL "packet length too long", which
 reads like a bug in the app and isn't.
+
+**Run the database and the suites on UTC, as Railway does.** This machine's
+clock is Brisbane time. Node's timestamps and MySQL's `NOW()` then disagree by
+ten hours, and a draft answered by hand "an hour ago" reads as answered
+tomorrow. Start MariaDB with `--default-time-zone=+00:00` under `TZ=UTC`;
+`inboxmeta.mjs` sets `process.env.TZ` itself.
 
 ## Working with Brad
 
