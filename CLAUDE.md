@@ -1050,6 +1050,47 @@ still comes only from the studio facts. If a provider refuses an image,
 condition of getting a draft. `tests/inboxmeta.mjs` asserts on the request
 body that actually reached the provider.
 
+**"We'll check with Mim" emails Mim a picture of the conversation.** Brad,
+29 September: *"If anything is written that we will check with Mim (please
+fix spelling in the app) then take a screenshot and send Mim an email
+checking."* Mim is the artist. `checkWith.ts` holds all of it:
+
+- **The prompt names her.** Every deferral that used to say "check with the
+  team" says "check with Mim" when a name is saved, and a CHECKING WITH
+  section says when to use it. `fixNameSpelling()` corrects "mim"/"MIM" in the
+  draft and its alternatives — whole word only, so "Mimi" and "mimic" survive.
+  The sensitive-message holding line still says "someone from the team" on
+  purpose: that one is for Brad.
+- **Sent, not drafted.** The email goes when a reply that says so actually
+  leaves: `approveDraft` and `handleEcho` (Brad copies drafts into Instagram by
+  hand all day, and those come back as echoes). A draft he rewrites or
+  discards promised nobody anything. `mentionsCheckWith()` is deliberately
+  narrow — "Mim can do 3pm" is an answer, not a deferral. The client has a copy
+  in `lib/utils.ts` for the line on the draft card; keep them in step.
+- **Once per promise.** Instagram echoes a reply the app sent under a
+  different id from `draft_N_sent`, so `check_alerts` is keyed on thread +
+  words + day, not message id.
+- **Railway blocks SMTP below the Pro plan** (their docs, in as many words),
+  so Gmail's SMTP is out. The mail goes through an Apps Script web app in
+  Brad's own Google account, over HTTPS: it sends as him, so Mim sees who it's
+  from and her reply lands with him. Settings → Inbox → "Checking with Mim"
+  shows the script (with a key the app generates once — regenerating it would
+  silently break the script) and takes the `/exec` address. Google answers a
+  web-app POST with a 302; fetch follows it. An HTML answer is Google's sign-in
+  page, which means the deployment's "Who has access" isn't Anyone — the error
+  says exactly that.
+- **The picture is drawn, not screenshotted.** `snapshot.ts`: satori lays out
+  the bubbles, sharp paints the PNG. The font (`@fontsource/inter`) and the
+  emoji (`@twemoji/svg`) come from npm, because the Railway container has no
+  fonts and anything that asks the system for one draws blank boxes.
+- With email not connected nothing throws: the miss is recorded in
+  `check_alerts`, Settings lists it, and Brad's phone gets one buzz a day.
+  "Send to Mim" in a thread uses the phone's share sheet until then.
+- `CHECK_WITH_NAME` / `CHECK_WITH_EMAIL` / `MAIL_RELAY_URL` are defaults for
+  the three boxes; a saved empty name turns the whole thing off.
+
+`mimcheck.mjs` (49) and `mimbrowser.mjs` (15, phone-sized browser) prove it.
+
 ## Accounts, studios and the login
 
 Built 29 September from Brad's "Final product pass" brief: a landing page,

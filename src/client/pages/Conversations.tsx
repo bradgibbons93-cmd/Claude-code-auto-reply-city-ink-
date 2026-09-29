@@ -9,7 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { awaitsStudio, cn, isPaused, previewLine, shortAgo } from "@/lib/utils";
+import { awaitsStudio, cn, isPaused, mentionsCheckWith, previewLine, shortAgo } from "@/lib/utils";
 import { Avatar } from "@/components/Avatar";
 import { useSession } from "@/lib/session";
 import { StudioMark } from "@/components/StudioSwitcher";
@@ -25,6 +25,7 @@ import {
   Check,
   ArrowLeft,
   Search,
+  Mail,
 } from "lucide-react";
 
 function PendingReplyCard({
@@ -64,6 +65,11 @@ function PendingReplyCard({
   const utils = trpc.useUtils();
   const [text, setText] = useState(draft.draftText);
   const [copied, setCopied] = useState(false);
+  // Who the studio checks with (Mim), so the card can say before Approve is
+  // pressed that sending this one emails her.
+  const { data: checkWith } = trpc.config.checkWith.useQuery(undefined, { staleTime: 5 * 60_000 });
+  const checker = checkWith?.name;
+  const emailsChecker = !!checker && mentionsCheckWith(text, checker);
 
   // Why the model couldn't write this one. Only read when a draft actually
   // failed, so a healthy board never asks.
@@ -343,6 +349,14 @@ function PendingReplyCard({
             placeholder={draft.llmFailed ? `Write your reply to ${senderName}…` : undefined}
             aria-label={`Draft reply to ${senderName}`}
           />
+          {emailsChecker && (
+            <p className="mt-2 flex items-start gap-1.5 text-xs text-sepia">
+              <Mail className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              {checkWith?.ready
+                ? `Sending this emails ${checker} a picture of the conversation to check.`
+                : `This says you'll check with ${checker}, but email isn't set up yet — ${checker} won't hear about it. Settings → Inbox.`}
+            </p>
+          )}
 
           {/* In a conversation: every version as a card you can read and tap.
               Picking one loads it into the box above to edit — nothing sends
@@ -750,6 +764,41 @@ export default function Conversations() {
     },
   });
 
+  // "Send to Mim": this conversation, as a picture, to whoever the studio
+  // checks with. Emailed when email is connected; otherwise the phone's own
+  // share sheet, so it can still go by text or the Mail app today.
+  const { data: checkWith } = trpc.config.checkWith.useQuery(undefined, { staleTime: 5 * 60_000 });
+  const sendToChecker = trpc.config.sendToChecker.useMutation({
+    onSuccess: (result) => (result.ok ? toast.success(result.detail) : toast.error(result.detail, { duration: 10000 })),
+    onError: (error) => toast.error(error.message || "Couldn't send it."),
+  });
+  const [sharing, setSharing] = useState(false);
+  const shareWithChecker = async (conversationId: string, who: string) => {
+    if (checkWith?.ready) return sendToChecker.mutate({ conversationId });
+    setSharing(true);
+    try {
+      const response = await fetch(`/api/snapshot/${encodeURIComponent(conversationId)}.png`, { credentials: "include" });
+      if (!response.ok) throw new Error("Couldn't draw the conversation.");
+      const file = new File([await response.blob()], `${who.replace(/[^\w -]/g, "") || "conversation"}.png`, { type: "image/png" });
+      const title = `Can you check this one? — ${who}`;
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title, text: `${checkWith?.name ? `Hi ${checkWith.name}, c` : "C"}an you check this one for us?` });
+      } else {
+        const url = URL.createObjectURL(file);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = file.name;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 10_000);
+        toast("Saved the picture. Connect email in Settings → Inbox to send it straight to them.");
+      }
+    } catch (error) {
+      if ((error as Error).name !== "AbortError") toast.error((error as Error).message || "Couldn't share it.");
+    } finally {
+      setSharing(false);
+    }
+  };
+
   // One live draft per person — the server already collapses them.
   const draftFor = new Map((pendingReplies ?? []).map((d) => [d.conversationId, d]));
 
@@ -928,8 +977,10 @@ export default function Conversations() {
           // scroll-mt clears the sticky header, which otherwise sat on top
           // of the person's name when the thread scrolled into view.
           <div className="scroll-mt-28 space-y-4" ref={threadPanel}>
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-2">
+            {/* Wraps on a phone rather than cutting the name to "Jess Ta…" —
+                the buttons drop to their own line when there isn't room. */}
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+              <div className="flex min-w-0 flex-1 basis-[17rem] items-center gap-2">
                 <button
                   type="button"
                   onClick={close}
@@ -955,23 +1006,40 @@ export default function Conversations() {
                   </p>
                 </div>
               </div>
-              {isPaused(active?.botPausedUntil) ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => resume.mutate({ conversationId: selected })}
-                >
-                  Hand back
-                </Button>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => pause.mutate({ conversationId: selected, hours: 12 })}
-                >
-                  Take over
-                </Button>
-              )}
+              <div className="ml-auto flex shrink-0 items-center gap-2">
+                {checkWith?.name && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => shareWithChecker(selected, activeName)}
+                    disabled={sharing || sendToChecker.isPending}
+                    aria-label={`Send this conversation to ${checkWith.name}`}
+                    title={`Send this conversation to ${checkWith.name}`}
+                  >
+                    <Mail className="mr-1.5 h-3.5 w-3.5" />
+                    <span>
+                      {sendToChecker.isPending || sharing ? "Sending…" : `Send to ${checkWith.name}`}
+                    </span>
+                  </Button>
+                )}
+                {isPaused(active?.botPausedUntil) ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => resume.mutate({ conversationId: selected })}
+                  >
+                    Hand back
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => pause.mutate({ conversationId: selected, hours: 12 })}
+                  >
+                    Take over
+                  </Button>
+                )}
+              </div>
             </div>
 
             {/* Its own scroll area, so "up" means further back in the
