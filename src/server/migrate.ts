@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "./db.js";
+import { ensureStudios } from "./studios.js";
 
 /**
  * Creates the tables if they aren't there yet.
@@ -20,6 +21,55 @@ const STATEMENTS = [
     last_signed_in TIMESTAMP NULL,
     created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY users_open_id_unique (open_id)
+  )`,
+
+  // Accounts, studios and their branding.
+  `CREATE TABLE IF NOT EXISTS sessions (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id INT NOT NULL,
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL,
+    user_agent VARCHAR(255),
+    KEY sessions_user_idx (user_id)
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS studios (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    location VARCHAR(255),
+    address VARCHAR(255),
+    phone VARCHAR(64),
+    email VARCHAR(255),
+    instagram VARCHAR(255),
+    website VARCHAR(255),
+    tagline VARCHAR(255),
+    logo_asset_id VARCHAR(64),
+    cover_asset_id VARCHAR(64),
+    theme VARCHAR(32),
+    mode VARCHAR(8),
+    accent VARCHAR(16),
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS studio_members (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    studio_id INT NOT NULL,
+    user_id INT NOT NULL,
+    role VARCHAR(16) NOT NULL DEFAULT 'owner',
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY studio_member_idx (studio_id, user_id),
+    KEY studio_member_user_idx (user_id)
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS brand_assets (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id INT NOT NULL,
+    kind VARCHAR(16) NOT NULL,
+    content_type VARCHAR(128) NOT NULL,
+    bytes MEDIUMBLOB NOT NULL,
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP
   )`,
 
   `CREATE TABLE IF NOT EXISTS messenger_conversations (
@@ -240,6 +290,12 @@ const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
     column: "platform",
     ddl: "ENUM('facebook','instagram') DEFAULT 'facebook'",
   },
+  // Accounts, on the template's users table.
+  { table: "users", column: "password_hash", ddl: "VARCHAR(255)" },
+  { table: "users", column: "avatar_asset_id", ddl: "VARCHAR(64)" },
+  { table: "users", column: "current_studio_id", ddl: "INT" },
+  { table: "users", column: "onboarding_step", ddl: "VARCHAR(32)" },
+  { table: "users", column: "onboarding_completed_at", ddl: "TIMESTAMP NULL" },
 ];
 
 /*
@@ -253,17 +309,20 @@ const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
  * every message in the thread and sorts them, on a query that runs on every
  * poll and every board load.
  */
-const INDEXES: { table: string; name: string; ddl: string }[] = [
+const INDEXES: { table: string; name: string; ddl: string; unique?: boolean }[] = [
   {
     table: "messenger_messages",
     name: "msg_conv_recent_idx",
     ddl: "(conversation_id, created_at, id)",
   },
+  // One account per email. Enforced here as well as in code, so two sign-ups
+  // racing each other can't both win.
+  { table: "users", name: "users_email_unique", ddl: "(email)", unique: true },
 ];
 
 async function ensureIndexes(): Promise<void> {
   const db = await getDb();
-  for (const { table, name, ddl } of INDEXES) {
+  for (const { table, name, ddl, unique } of INDEXES) {
     const [rows] = (await db.execute(
       sql.raw(
         `SELECT COUNT(*) AS cnt FROM information_schema.statistics
@@ -271,7 +330,7 @@ async function ensureIndexes(): Promise<void> {
       )
     )) as unknown as [Array<{ cnt: number }>];
     if (Number(rows[0]?.cnt) === 0) {
-      await db.execute(sql.raw(`ALTER TABLE ${table} ADD INDEX ${name} ${ddl}`));
+      await db.execute(sql.raw(`ALTER TABLE ${table} ADD ${unique ? "UNIQUE " : ""}INDEX ${name} ${ddl}`));
       console.log(`[DB] Added index ${table}.${name}`);
     }
   }
@@ -448,5 +507,7 @@ export async function ensureTables(): Promise<void> {
   await clearPlaceholderNames();
   await repairConversationClocks();
   await dropDraftsAnsweringOurselves();
+  // The studio the existing inbox belongs to, as a record of its own.
+  await ensureStudios();
   console.log(`[DB] Schema ready (${STATEMENTS.length} tables checked)`);
 }

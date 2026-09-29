@@ -1,4 +1,6 @@
-import { initTRPC, TRPCError } from "@trpc/server";
+import { TRPCError } from "@trpc/server";
+import { t, studioProcedure } from "./trpc.js";
+import { accountRouter, onboardingRouter, studiosRouter } from "./accountRouter.js";
 import { z } from "zod";
 import {
   getRecentConversations,
@@ -116,21 +118,24 @@ async function withInstagramHost<T extends { instagramAccessToken?: string; appI
   };
 }
 
-const t = initTRPC.create();
-const publicProcedure = t.procedure;
 
 export const appRouter = t.router({
-  stats: publicProcedure.query(() => getStats()),
-  dashboard: publicProcedure.query(() => getDashboardStats()),
+  // Accounts and studios — reachable before a studio has an inbox.
+  account: accountRouter,
+  onboarding: onboardingRouter,
+  studios: studiosRouter,
+
+  stats: studioProcedure.query(() => getStats()),
+  dashboard: studioProcedure.query(() => getDashboardStats()),
 
   calendar: t.router({
-    upcoming: publicProcedure.query(() => getUpcomingBookings()),
-    freeSlots: publicProcedure.query(() => findFreeSlots({ limit: 5 })),
+    upcoming: studioProcedure.query(() => getUpcomingBookings()),
+    freeSlots: studioProcedure.query(() => findFreeSlots({ limit: 5 })),
   }),
 
   llm: t.router({
     // Cheap: reports the settings without calling anyone.
-    status: publicProcedure.query(() => ({
+    status: studioProcedure.query(() => ({
       provider: llmProvider(),
       model: llmModel(),
       baseUrl: llmBaseUrl(),
@@ -138,16 +143,16 @@ export const appRouter = t.router({
       lastError: getLastLlmError(),
     })),
     // A mutation so it only ever fires on a click, never on a page load.
-    test: publicProcedure.mutation(() => testLlm()),
+    test: studioProcedure.mutation(() => testLlm()),
   }),
 
   /**
    * The studio's own posts. Read from our copy; refreshing goes to Facebook.
    */
   feed: t.router({
-    list: publicProcedure.query(() => listFeed()),
-    count: publicProcedure.query(() => countFeed()),
-    refresh: publicProcedure
+    list: studioProcedure.query(() => listFeed()),
+    count: studioProcedure.query(() => countFeed()),
+    refresh: studioProcedure
       .input(z.object({ days: z.number().min(1).max(365).default(120) }).default({ days: 120 }))
       // force: pressing Refresh IS the instruction to try now.
       .mutation(({ input }) => syncFeed(input.days, true)),
@@ -159,21 +164,21 @@ export const appRouter = t.router({
    * looking through them, marking what's been used, clearing what hasn't.
    */
   uploads: t.router({
-    list: publicProcedure
+    list: studioProcedure
       .input(z.object({ unusedOnly: z.boolean().default(false) }).default({ unusedOnly: false }))
       .query(({ input }) => listArtistUploads({ unusedOnly: input.unusedOnly })),
-    countToday: publicProcedure.query(() => countUploadsToday()),
-    markUsed: publicProcedure
+    countToday: studioProcedure.query(() => countUploadsToday()),
+    markUsed: studioProcedure
       .input(z.object({ id: z.string(), used: z.boolean() }))
       .mutation(({ input }) => markUploadUsed(input.id, input.used)),
-    remove: publicProcedure
+    remove: studioProcedure
       .input(z.object({ id: z.string() }))
       .mutation(({ input }) => deleteArtistUpload(input.id)),
   }),
 
   conversations: t.router({
-    list: publicProcedure.query(() => getRecentConversations()),
-    messages: publicProcedure
+    list: studioProcedure.query(() => getRecentConversations()),
+    messages: studioProcedure
       .input(
         z.object({
           conversationId: z.string(),
@@ -191,27 +196,27 @@ export const appRouter = t.router({
         const total = await countConversationMessages(input.conversationId);
         return { messages, total };
       }),
-    pause: publicProcedure
+    pause: studioProcedure
       .input(z.object({ conversationId: z.string(), hours: z.number().default(12) }))
       // Pressed by a person, so it is obeyed even when the customer writes
       // back — unlike the automatic handoff pause, which lifts.
       .mutation(({ input }) => pauseBot(input.conversationId, input.hours, "manual")),
-    resume: publicProcedure
+    resume: studioProcedure
       .input(z.object({ conversationId: z.string() }))
       .mutation(({ input }) => resumeBot(input.conversationId)),
   }),
 
   pendingReplies: t.router({
-    list: publicProcedure.query(() => getPendingReplies()),
-    approve: publicProcedure
+    list: studioProcedure.query(() => getPendingReplies()),
+    approve: studioProcedure
       .input(z.object({ id: z.number(), editedText: z.string().optional() }))
       .mutation(({ input }) => approveDraft(input.id, input.editedText)),
-    reject: publicProcedure
+    reject: studioProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => rejectDraft(input.id)),
     // Ask the model again on a card it failed to write, rather than making
     // the studio start from a blank box.
-    redraft: publicProcedure
+    redraft: studioProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => redraftPendingReply(input.id)),
     // Imported threads get no draft — importing writes to nobody. This is
@@ -225,7 +230,7 @@ export const appRouter = t.router({
      * by hand from Meta's own inbox, where this app can't see it — on the
      * board as though it had just come in.
      */
-    draftUnanswered: publicProcedure
+    draftUnanswered: studioProcedure
       .input(
         z
           .object({
@@ -238,8 +243,8 @@ export const appRouter = t.router({
   }),
 
   autoReply: t.router({
-    getRules: publicProcedure.query(() => getActiveAutoReplyRules()),
-    createRule: publicProcedure
+    getRules: studioProcedure.query(() => getActiveAutoReplyRules()),
+    createRule: studioProcedure
       .input(
         z.object({
           triggerKeywords: z.array(z.string()).min(1),
@@ -250,14 +255,14 @@ export const appRouter = t.router({
       .mutation(({ input }) =>
         createAutoReplyRule(input.triggerKeywords, input.responseText, input.sendBookingLink)
       ),
-    deleteRule: publicProcedure
+    deleteRule: studioProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteAutoReplyRule(input.id)),
   }),
 
   posts: t.router({
-    getScheduled: publicProcedure.query(() => getScheduledPosts()),
-    create: publicProcedure
+    getScheduled: studioProcedure.query(() => getScheduledPosts()),
+    create: studioProcedure
       .input(
         z.object({
           content: z.string().min(1),
@@ -278,7 +283,7 @@ export const appRouter = t.router({
       .mutation(({ input }) =>
         createScheduledPost(input.content, input.scheduledAt, input.imageUrl, input.aiGenerated)
       ),
-    updateStatus: publicProcedure
+    updateStatus: studioProcedure
       .input(
         z.object({
           id: z.number(),
@@ -286,13 +291,13 @@ export const appRouter = t.router({
         })
       )
       .mutation(({ input }) => updatePostStatus(input.id, input.status)),
-    remove: publicProcedure
+    remove: studioProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deletePost(input.id)),
-    generateCaption: publicProcedure
+    generateCaption: studioProcedure
       .input(z.object({ prompt: z.string().min(1) }))
       .mutation(async ({ input }) => ({ caption: await generateCaption(input.prompt) })),
-    suggest: publicProcedure.mutation(() => suggestPosts()),
+    suggest: studioProcedure.mutation(() => suggestPosts()),
 
     /**
      * A week of posts in one go.
@@ -301,7 +306,7 @@ export const appRouter = t.router({
      * was missing was any way to turn eleven of them into eleven posts
      * without opening the composer eleven times.
      */
-    bulkSchedule: publicProcedure
+    bulkSchedule: studioProcedure
       .input(
         z.object({
           photos: z
@@ -375,7 +380,7 @@ export const appRouter = t.router({
    * Nothing here can reach a customer — practice never queues or sends.
    */
   practice: t.router({
-    draft: publicProcedure
+    draft: studioProcedure
       .input(
         z.object({
           message: z.string().min(1),
@@ -395,7 +400,7 @@ export const appRouter = t.router({
     // Thumbs up saves it as an example. An edit saves the corrected version
     // AND records the difference, which is weighted more heavily than
     // anything else the agent reads.
-    keep: publicProcedure
+    keep: studioProcedure
       .input(
         z.object({
           customerMessage: z.string().min(1),
@@ -425,15 +430,15 @@ export const appRouter = t.router({
   push: t.router({
     /** What the browser needs to subscribe. Public by design — it identifies
      * this server to the push service and grants nothing on its own. */
-    key: publicProcedure.query(async () => ({ publicKey: (await getVapidKeys()).publicKey })),
+    key: studioProcedure.query(async () => ({ publicKey: (await getVapidKeys()).publicKey })),
 
-    status: publicProcedure.query(async () => ({
+    status: studioProcedure.query(async () => ({
       devices: await listSubscriptions(),
       count: await countSubscriptions(),
       settings: await getNotifySettings(),
     })),
 
-    subscribe: publicProcedure
+    subscribe: studioProcedure
       .input(
         z.object({
           endpoint: z.string().url().max(2000),
@@ -445,14 +450,14 @@ export const appRouter = t.router({
         saveSubscription({ endpoint: input.endpoint, keys: input.keys }, input.label)
       ),
 
-    unsubscribe: publicProcedure
+    unsubscribe: studioProcedure
       .input(z.object({ endpoint: z.string().max(2000) }))
       .mutation(async ({ input }) => {
         await removeSubscription(input.endpoint);
         return { ok: true };
       }),
 
-    saveSettings: publicProcedure
+    saveSettings: studioProcedure
       .input(
         z.object({
           onMessage: z.boolean().optional(),
@@ -472,7 +477,7 @@ export const appRouter = t.router({
     // It reports what actually happened. Saying "no devices are registered"
     // when a device was registered and the push service refused it sent the
     // studio to fix the one thing that wasn't broken.
-    test: publicProcedure.mutation(async () => {
+    test: studioProcedure.mutation(async () => {
       const devices = await countSubscriptions();
       const { sent, dropped } = await sendPush({
         title: "City Ink — test",
@@ -485,16 +490,16 @@ export const appRouter = t.router({
   }),
 
   /** The header search box, which until now was decorative. */
-  search: publicProcedure
+  search: studioProcedure
     .input(z.object({ query: z.string().max(200) }))
     .query(({ input }) => searchInbox(input.query)),
 
   knowledge: t.router({
-    list: publicProcedure.query(() => getStudioKnowledge()),
-    create: publicProcedure
+    list: studioProcedure.query(() => getStudioKnowledge()),
+    create: studioProcedure
       .input(z.object({ question: z.string().min(1), answer: z.string().min(1) }))
       .mutation(({ input }) => createKnowledge(input.question, input.answer)),
-    update: publicProcedure
+    update: studioProcedure
       .input(
         z.object({
           id: z.number(),
@@ -503,25 +508,25 @@ export const appRouter = t.router({
         })
       )
       .mutation(({ input }) => updateKnowledge(input.id, input.question, input.answer)),
-    remove: publicProcedure
+    remove: studioProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteKnowledge(input.id)),
   }),
 
   history: t.router({
-    count: publicProcedure.query(() => countExampleExchanges()),
-    edits: publicProcedure.query(() => getRecentDraftEdits(20)),
+    count: studioProcedure.query(() => countExampleExchanges()),
+    edits: studioProcedure.query(() => getRecentDraftEdits(20)),
     // A correction outweighs everything else the agent reads, so a wrong one
     // has to be fixable — not just visible.
-    updateEdit: publicProcedure
+    updateEdit: studioProcedure
       .input(z.object({ id: z.number(), sentText: z.string().min(1) }))
       .mutation(({ input }) => updateDraftEdit(input.id, input.sentText)),
-    removeEdit: publicProcedure
+    removeEdit: studioProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteDraftEdit(input.id)),
     // Pairs are extracted in the browser so a big export never has to be
     // uploaded whole; only the useful message/reply pairs come over.
-    import: publicProcedure
+    import: studioProcedure
       .input(
         z.object({
           source: z.string().optional(),
@@ -531,15 +536,15 @@ export const appRouter = t.router({
         })
       )
       .mutation(({ input }) => importExampleExchanges(input.pairs, input.source)),
-    clear: publicProcedure.mutation(() => clearExampleExchanges()),
+    clear: studioProcedure.mutation(() => clearExampleExchanges()),
     // Everything the app already holds. Uploading Facebook's export was the
     // only way to teach it, while thousands of real exchanges sat unused in
     // its own database.
-    learnFromInbox: publicProcedure.mutation(() => learnFromStoredChats()),
+    learnFromInbox: studioProcedure.mutation(() => learnFromStoredChats()),
   }),
 
   config: t.router({
-    facebook: publicProcedure.query(async () => {
+    facebook: studioProcedure.query(async () => {
       const config = await getFacebookConfig();
       if (!config) return null;
       // Never ship secrets to the browser — token and app secret stay out.
@@ -589,7 +594,7 @@ export const appRouter = t.router({
         })(),
       };
     }),
-    saveFacebook: publicProcedure
+    saveFacebook: studioProcedure
       .input(
         z.object({
           pageId: z.string().min(1),
@@ -674,20 +679,20 @@ export const appRouter = t.router({
       }),
     // Go and fetch names for the threads already sitting there as
     // "a customer" — a webhook is never coming to fix those on its own.
-    refreshNames: publicProcedure.mutation(() => backfillCustomerNames()),
+    refreshNames: studioProcedure.mutation(() => backfillCustomerNames()),
     // Everyone who wrote in before the app was watching. A webhook only ever
     // carries what happens next, so without this they stay invisible until
     // they happen to message again.
     // Forced: pressing the button is the instruction to try now, whatever
     // the poll's back-off has decided about this inbox.
-    importThreads: publicProcedure.mutation(() => importExistingConversations(1000, true)),
+    importThreads: studioProcedure.mutation(() => importExistingConversations(1000, true)),
 
     /**
      * Is Facebook actually delivering? Verifying the webhook URL is only half
      * of it — the Page must also be subscribed to the app, and until it is,
      * Facebook sends nothing and says nothing.
      */
-    messengerDelivery: publicProcedure.query(async () => ({
+    messengerDelivery: studioProcedure.query(async () => ({
       ...(await getMessengerSubscription()),
       // Whatever this process has seen, or failing that what the database
       // remembers from before the last deploy. Held only in memory, this read
@@ -697,9 +702,9 @@ export const appRouter = t.router({
       // Facebook not delivering, and the opposite of "nothing is arriving".
       rejected: await getWebhookRejections(),
     })),
-    subscribeMessenger: publicProcedure.mutation(() => subscribePageToApp()),
-    timely: publicProcedure.query(() => getTimelyConfig().catch(() => null)),
-    saveTimely: publicProcedure
+    subscribeMessenger: studioProcedure.mutation(() => subscribePageToApp()),
+    timely: studioProcedure.query(() => getTimelyConfig().catch(() => null)),
+    saveTimely: studioProcedure
       .input(
         z.object({
           bookingPageUrl: z.string().url(),
@@ -723,10 +728,10 @@ export const appRouter = t.router({
      * handles (it thanks them and stops), so removing the link has to be
      * possible without editing the database.
      */
-    reviewUrl: publicProcedure.query(async () => ({
+    reviewUrl: studioProcedure.query(async () => ({
       url: (await getSetting("google_review_url").catch(() => undefined)) ?? "",
     })),
-    saveReviewUrl: publicProcedure
+    saveReviewUrl: studioProcedure
       .input(z.object({ url: z.string().url().or(z.literal("")) }))
       .mutation(async ({ input }) => {
         await setSetting("google_review_url", input.url.trim());

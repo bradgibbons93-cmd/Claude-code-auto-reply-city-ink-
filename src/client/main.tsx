@@ -5,6 +5,7 @@ import { httpBatchLink } from "@trpc/client";
 import { Toaster } from "sonner";
 import { trpc } from "@/lib/trpc";
 import App from "./App";
+import { SessionProvider } from "@/lib/session";
 import "./index.css";
 
 function Root() {
@@ -19,7 +20,9 @@ function Root() {
         {/* Follows the page rather than being pinned dark — on the light
             palette a black toast was the only black rectangle on screen. */}
         <Toaster theme="system" position="bottom-right" richColors />
-        <App />
+        <SessionProvider>
+          <App />
+        </SessionProvider>
       </QueryClientProvider>
     </trpc.Provider>
   );

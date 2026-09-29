@@ -14,9 +14,14 @@ export default {
         // The wordmark is a Didone — thick stems, hairline serifs, wide
         // tracking. Bodoni Moda matches it; Cormorant was tried first and is
         // too low-contrast. Swap here if the studio licenses the real face.
-        display: ["'Bodoni Moda'", "Didot", "Georgia", "serif"],
-        sans: ["Montserrat", "system-ui", "sans-serif"],
+        //
+        // Both now resolve through variables, so a studio's theme can bring
+        // its own display face. The defaults live in index.css :root.
+        display: ["var(--font-display)"],
+        sans: ["var(--font-sans)"],
         serif: ["'Bodoni Moda'", "Didot", "Georgia", "serif"],
+        // Runnit's own face — the landing page, sign up and onboarding.
+        runnit: ["'Inter Tight'", "system-ui", "sans-serif"],
       },
       colors: {
         background: withOpacity("--c-background"),
@@ -84,6 +89,28 @@ export default {
           from: { opacity: "0", transform: "translateY(16px) scale(0.98)", filter: "blur(6px)" },
           to: { opacity: "1", transform: "none", filter: "blur(0)" },
         },
+        // Onboarding: each step slides in from the side it's coming from.
+        "step-in": {
+          from: { opacity: "0", transform: "translateX(28px)" },
+          to: { opacity: "1", transform: "none" },
+        },
+        "step-back": {
+          from: { opacity: "0", transform: "translateX(-28px)" },
+          to: { opacity: "1", transform: "none" },
+        },
+        "emblem-in": {
+          from: { opacity: "0", transform: "scale(0.82) rotate(-8deg)", filter: "blur(8px)" },
+          to: { opacity: "1", transform: "none", filter: "blur(0)" },
+        },
+        spark: {
+          "0%": { opacity: "0", transform: "rotate(var(--r)) translateY(-10px) scale(1)" },
+          "20%": { opacity: "1" },
+          "100%": { opacity: "0", transform: "rotate(var(--r)) translateY(-96px) scale(0.3)" },
+        },
+        "menu-in": {
+          from: { opacity: "0", transform: "translateY(-6px) scale(0.98)" },
+          to: { opacity: "1", transform: "none" },
+        },
       },
       animation: {
         "fade-up": "fade-up 0.5s cubic-bezier(0.22,1,0.36,1) both",
@@ -91,6 +118,11 @@ export default {
         shimmer: "shimmer 2.8s linear infinite",
         "ink-swell": "ink-swell 4.5s ease-in-out infinite",
         "ink-rise": "ink-rise 0.65s cubic-bezier(0.22,1,0.36,1) both",
+        "step-in": "step-in 0.45s cubic-bezier(0.22,1,0.36,1) both",
+        "step-back": "step-back 0.45s cubic-bezier(0.22,1,0.36,1) both",
+        "emblem-in": "emblem-in 0.9s cubic-bezier(0.22,1,0.36,1) both",
+        spark: "spark 1.1s cubic-bezier(0.22,1,0.36,1) both",
+        "menu-in": "menu-in 0.18s cubic-bezier(0.22,1,0.36,1) both",
       },
     },
   },

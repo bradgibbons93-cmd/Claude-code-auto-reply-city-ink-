@@ -16,7 +16,10 @@ import QRCode from "qrcode";
 import { getLastLlmError, llmProvider, llmModel, llmBaseUrl, reportModelAvailability } from "./llm.js";
 import { reportPushReadiness } from "./push.js";
 import { reportAppIdentity } from "./token.js";
-import { mountAuth, requireStudio, requireStudioOrSignedLink } from "./auth.js";
+import { requireStudio, requireStudioOrSignedLink } from "./auth.js";
+import { createContext } from "./trpc.js";
+import { userFromRequest, AccountError } from "./accounts.js";
+import { saveBrandAsset, readBrandAsset, type BrandKind } from "./studios.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -48,17 +51,57 @@ const globalJson = express.json({
  *
  * So those two paths are stepped over, and keep the limit they declare.
  */
-const PHOTO_ROUTES = new Set(["/api/uploads", "/api/post-image"]);
+const PHOTO_ROUTES = new Set(["/api/uploads", "/api/post-image", "/api/brand"]);
 app.use((req, res, next) => {
   if (PHOTO_ROUTES.has(req.path)) return next();
   return globalJson(req, res, next);
 });
 app.use(express.urlencoded({ extended: true }));
 
-// Before the guard: Meta has to be able to reach the webhook, and the
-// browser has to be able to ask whether a password is even set.
+// Before any guard: Meta has to be able to reach the webhook.
 app.use("/api/webhook", webhookRouter);
-mountAuth(app);
+
+/**
+ * Logos, banners and profile pictures.
+ *
+ * Uploading needs an account — any account, because setting up a studio is
+ * the first thing a new one does. Reading is open: these are shown on the
+ * owner's own pages, the ids are random 160-bit strings, and a studio's logo
+ * is not a secret. Customers' photos never come through here.
+ */
+app.post("/api/brand", express.json({ limit: "16mb" }), async (req, res) => {
+  try {
+    const { user } = await userFromRequest(req, res);
+    if (!user) return res.status(401).json({ error: "Log in first." });
+    const { kind, dataUrl } = (req.body ?? {}) as { kind?: string; dataUrl?: string };
+    if (kind !== "logo" && kind !== "cover" && kind !== "avatar") {
+      return res.status(400).json({ error: "Unknown image type." });
+    }
+    const match = /^data:([^;,]+);base64,(.+)$/s.exec(String(dataUrl ?? ""));
+    if (!match) return res.status(400).json({ error: "That didn't come through as an image." });
+    const saved = await saveBrandAsset(user.id, kind as BrandKind, match[1], Buffer.from(match[2], "base64"));
+    return res.json(saved);
+  } catch (error) {
+    if (error instanceof AccountError) return res.status(error.status).json({ error: error.message });
+    console.error("[Brand] Upload failed:", (error as Error).message);
+    return res.status(500).json({ error: "Couldn't save that image — try again." });
+  }
+});
+
+app.get<{ id: string }>("/api/brand/:id", async (req, res) => {
+  try {
+    if (!/^[0-9a-f]{40}$/.test(req.params.id)) return res.sendStatus(404);
+    const asset = await readBrandAsset(req.params.id);
+    if (!asset) return res.sendStatus(404);
+    res.setHeader("Content-Type", asset.contentType);
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    return res.end(asset.bytes);
+  } catch (error) {
+    console.error("[Brand] Serve failed:", (error as Error).message);
+    return res.sendStatus(500);
+  }
+});
 
 /**
  * Artists' end-of-day photos.
@@ -198,11 +241,16 @@ app.get<{ id: string }>("/api/attachments/:id", requireStudioOrSignedLink, async
 
 app.use(
   "/api/trpc",
-  // Everything the studio can read or change goes through here.
-  requireStudio,
+  // Everything goes through here. Each procedure says who may call it
+  // (trpc.ts): signing in is open, a person's own studios need an account,
+  // and the connected inbox needs membership of the studio it belongs to.
   createExpressMiddleware({
     router: appRouter,
+    createContext,
     onError({ error, path: procPath }) {
+      // Being signed out, or looking at a studio without an inbox, is an
+      // answer, not a fault — logging it buried the real errors.
+      if (error.code === "UNAUTHORIZED" || error.code === "FORBIDDEN") return;
       console.error(`[tRPC] ${procPath}:`, error.message);
     },
   })
@@ -236,7 +284,7 @@ if (process.env.NODE_ENV === "production") {
 const port = Number(process.env.PORT || 3000);
 
 app.listen(port, async () => {
-  console.log(`\n  City Ink agent listening on http://localhost:${port}`);
+  console.log(`\n  Runnit listening on http://localhost:${port}`);
   console.log(`  Webhook:  /api/webhook/facebook`);
   console.log(`  Health:   /health\n`);
 

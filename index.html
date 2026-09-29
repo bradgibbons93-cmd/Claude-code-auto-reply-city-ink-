@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#E9E9EA" />
     <link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 130" fill="%236F5A4B"><path d="M70 42 A30 34 0 1 0 70 88 L70 79 A22 26 0 1 1 70 51 Z"/><rect x="45.5" y="18" width="6" height="94"/><rect x="34" y="18" width="29" height="5.5"/><rect x="34" y="106.5" width="29" height="5.5"/></svg>' />
-    <title>City Ink — Front of House</title>
+    <title>Runnit — the front desk for tattoo studios</title>
+    <meta name="description" content="Runnit answers your studio's Instagram and Messenger DMs in your voice, quotes from your price list, and books from your calendar. Nothing sends without your OK." />
     <!-- Installable, because iOS will only deliver a push notification to a
          page that has been added to the home screen. Without this the
          "Turn on notifications" button in Settings simply cannot work on an
@@ -13,20 +14,32 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="City Ink" />
+    <meta name="apple-mobile-web-app-title" content="Runnit" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <!-- Bodoni Moda for the wordmark (the sheet's Didone), Montserrat for
-         everything else — the brand body face. -->
+    <!-- Bodoni Moda and Montserrat are City Ink's own faces. Inter Tight is
+         Runnit's (landing, sign up, onboarding); Fraunces and Syne give the
+         studio themes a display face each. -->
     <link
-      href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,400;6..96,500;6..96,600&family=Montserrat:wght@300;400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,400;6..96,500;6..96,600&family=Montserrat:wght@300;400;500;600&family=Inter+Tight:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Syne:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
     <script>
-      // Applied before first paint so a saved dark theme doesn't flash white
-      // while React boots. Mirrors the logic in lib/useTheme.ts.
+      // Applied before first paint so the studio's saved look doesn't flash
+      // the default colours while React boots. lib/themes.ts writes this
+      // cache every time it applies a look; the fallback is the old
+      // light/dark switch.
       (function () {
         try {
+          var cached = JSON.parse(localStorage.getItem("runnit-look") || "null");
+          var root = document.documentElement;
+          if (cached && cached.vars) {
+            for (var name in cached.vars) root.style.setProperty(name, cached.vars[name]);
+            root.dataset.theme = cached.mode === "dark" ? "dark" : "light";
+            var bg = cached.vars["--c-background"];
+            if (bg) document.querySelector('meta[name="theme-color"]').setAttribute("content", "rgb(" + bg.split(" ").join(",") + ")");
+            return;
+          }
           var saved = localStorage.getItem("cityink-theme");
           var theme =
             saved === "light" || saved === "dark"
@@ -34,11 +47,9 @@
               : window.matchMedia("(prefers-color-scheme: dark)").matches
                 ? "dark"
                 : "light";
-          document.documentElement.dataset.theme = theme;
+          root.dataset.theme = theme;
           if (theme === "dark") {
-            document
-              .querySelector('meta[name="theme-color"]')
-              .setAttribute("content", "#14100E");
+            document.querySelector('meta[name="theme-color"]').setAttribute("content", "#14100E");
           }
         } catch (e) {
           document.documentElement.dataset.theme = "light";

@@ -12,6 +12,13 @@ import {
   customType,
 } from "drizzle-orm/mysql-core";
 
+/**
+ * A person who signs in. The table came with the original template and was
+ * never used; accounts extend it rather than living beside it.
+ *
+ * `open_id` is kept for what it was (an identity from an outside provider)
+ * and filled with a random id for email sign-ups, so the unique key holds.
+ */
 export const users = mysqlTable("users", {
   id: int("id").primaryKey().autoincrement(),
   openId: varchar("open_id", { length: 191 }).notNull().unique(),
@@ -21,9 +28,94 @@ export const users = mysqlTable("users", {
   role: varchar("role", { length: 32 }).default("user"),
   lastSignedIn: timestamp("last_signed_in"),
   createdAt: timestamp("created_at").defaultNow(),
+  // scrypt, "salt:hash" in hex. Never the password.
+  passwordHash: varchar("password_hash", { length: 255 }),
+  avatarAssetId: varchar("avatar_asset_id", { length: 64 }),
+  // The studio the dashboard is showing. Remembered on the account, not the
+  // device, so switching on the phone is switched on the laptop too.
+  currentStudioId: int("current_studio_id"),
+  // Where setup got to, so leaving halfway resumes rather than restarts.
+  onboardingStep: varchar("onboarding_step", { length: 32 }),
+  onboardingCompletedAt: timestamp("onboarding_completed_at"),
 });
 
 export type InsertUser = typeof users.$inferInsert;
+
+/**
+ * A signed-in browser. The cookie carries a random token; only its SHA-256
+ * is stored, so a copy of this table signs nobody in.
+ */
+export const sessions = mysqlTable(
+  "sessions",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    userId: int("user_id").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    lastSeenAt: timestamp("last_seen_at").defaultNow(),
+    expiresAt: timestamp("expires_at").notNull(),
+    userAgent: varchar("user_agent", { length: 255 }),
+  },
+  (t) => ({ userIdx: index("sessions_user_idx").on(t.userId) })
+);
+
+/**
+ * A studio — one location of a business. A person can own several (City Ink
+ * Geelong, City Ink Melbourne…), and each carries its own name, branding and
+ * look. The Meta connection, inbox and agent belong to the studio recorded as
+ * `data_studio_id` in app_settings — see studios.ts.
+ */
+export const studios = mysqlTable("studios", {
+  id: int("id").primaryKey().autoincrement(),
+  name: varchar("name", { length: 255 }).notNull(),
+  location: varchar("location", { length: 255 }),
+  address: varchar("address", { length: 255 }),
+  phone: varchar("phone", { length: 64 }),
+  email: varchar("email", { length: 255 }),
+  instagram: varchar("instagram", { length: 255 }),
+  website: varchar("website", { length: 255 }),
+  tagline: varchar("tagline", { length: 255 }),
+  logoAssetId: varchar("logo_asset_id", { length: 64 }),
+  coverAssetId: varchar("cover_asset_id", { length: 64 }),
+  theme: varchar("theme", { length: 32 }),
+  // "light" / "dark" / null for "the theme's own default".
+  mode: varchar("mode", { length: 8 }),
+  accent: varchar("accent", { length: 16 }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
+});
+
+export const studioMembers = mysqlTable(
+  "studio_members",
+  {
+    id: int("id").primaryKey().autoincrement(),
+    studioId: int("studio_id").notNull(),
+    userId: int("user_id").notNull(),
+    // "owner" today. "staff" is the room left for inviting a team later.
+    role: varchar("role", { length: 16 }).notNull().default("owner"),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (t) => ({
+    memberIdx: uniqueIndex("studio_member_idx").on(t.studioId, t.userId),
+    userIdx: index("studio_member_user_idx").on(t.userId),
+  })
+);
+
+/**
+ * Logos, banners and profile pictures. Same storage as every other image in
+ * the app (bytes in MySQL, shrunk by images.ts) but a table of its own,
+ * because who may see it is different: branding is shown on the owner's
+ * pages and is not a customer's reference photo.
+ */
+export const brandAssets = mysqlTable("brand_assets", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  userId: int("user_id").notNull(),
+  kind: varchar("kind", { length: 16 }).notNull(),
+  contentType: varchar("content_type", { length: 128 }).notNull(),
+  bytes: customType<{ data: Buffer; driverData: Buffer }>({
+    dataType: () => "mediumblob",
+  })("bytes").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
 
 /**
  * One row per customer thread.

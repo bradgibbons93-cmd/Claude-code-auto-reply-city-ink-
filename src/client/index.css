@@ -14,6 +14,9 @@
    * accent because a panel felt flat.
    */
   :root {
+    --font-display: "Bodoni Moda", Didot, Georgia, serif;
+    --font-sans: Montserrat, system-ui, sans-serif;
+
     /* Silver gray, exactly, as the page. Cards sit a few percent lighter so
        they lift off it without needing a heavier border. */
     --c-background: 233 233 234; /* #E9E9EA */
@@ -393,5 +396,17 @@
   .reveal {
     opacity: 1;
     transform: none;
+  }
+}
+
+/* Motion is a nicety. Anyone who has asked their device for less gets none. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
