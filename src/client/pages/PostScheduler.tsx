@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSession } from "@/lib/session";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 export default function PostScheduler() {
+  const { studio } = useSession();
   const [isOpen, setIsOpen] = useState(false);
   const [content, setContent] = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
@@ -106,7 +108,7 @@ export default function PostScheduler() {
             Posts
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Queued up for the City Ink Page. Published on the minute.
+            Queued up for {studio?.name ?? "your"} Page. Published on the minute.
           </p>
         </div>
 

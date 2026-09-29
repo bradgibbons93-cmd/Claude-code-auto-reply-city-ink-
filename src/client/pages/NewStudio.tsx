@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useLocation } from "wouter";
+import { useEffect, useState } from "react";
+import { useLocation, useSearch } from "wouter";
 import { toast } from "sonner";
 import { ArrowLeft, ArrowRight, Loader2, Store } from "lucide-react";
 import { trpc } from "@/lib/trpc";
@@ -20,7 +20,12 @@ export default function NewStudio() {
   const { user, studio, refresh } = useSession();
   const utils = trpc.useUtils();
   const [, navigate] = useLocation();
-  const [created, setCreated] = useState<number | null>(null);
+  // Step two lives in the address, not in state: creating the studio switches
+  // to it, and the workspace redraws for the newly open studio — which wiped
+  // a step held in state and dropped you back on an empty form.
+  const search = new URLSearchParams(useSearch());
+  const brandId = Number(search.get("brand")) || null;
+  const created = brandId && studio?.id === brandId ? brandId : null;
   const [form, setForm] = useState({ name: "", location: "", phone: "", address: "", instagram: "" });
   const [look, setLook] = useState<Look>({ theme: studio?.theme ?? "noir", mode: studio?.mode ?? null, accent: studio?.accent ?? null });
 
@@ -29,6 +34,9 @@ export default function NewStudio() {
   const setAppearance = trpc.studios.setAppearance.useMutation();
 
   const current = created ? studio : null;
+  useEffect(() => {
+    if (created && studio) setLook({ theme: studio.theme, mode: studio.mode, accent: studio.accent });
+  }, [created]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submitDetails = async () => {
     try {
@@ -48,7 +56,7 @@ export default function NewStudio() {
       });
       await refresh();
       await utils.invalidate();
-      setCreated(id);
+      navigate(`/studios/new?brand=${id}`, { replace: true });
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (error) {
       toast.error((error as Error).message);
@@ -65,7 +73,7 @@ export default function NewStudio() {
         accent: isHex(look.accent) ? look.accent : null,
       });
       await refresh();
-      toast.success(`${form.name} is ready`);
+      toast.success(`${studio?.name ?? "Your studio"} is ready`);
       navigate("/");
     } catch (error) {
       toast.error((error as Error).message);
@@ -93,7 +101,7 @@ export default function NewStudio() {
 
       <div>
         <p className="text-[0.65rem] uppercase tracking-[0.24em] text-sepia">{created ? "Step 2 of 2" : "Step 1 of 2"}</p>
-        <h1 className="mt-2 font-display text-3xl text-charcoal">{created ? `Brand ${form.name}` : "Add a studio"}</h1>
+        <h1 className="mt-2 font-display text-3xl text-charcoal">{created ? `Brand ${studio?.name}` : "Add a studio"}</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           {created
             ? "Its own logo, banner and look. Switch between studios any time from the top of the menu."
@@ -184,7 +192,7 @@ export default function NewStudio() {
               className="inline-flex min-h-[46px] items-center gap-2 rounded-full bg-primary px-6 text-sm font-medium text-primary-foreground shadow-soft transition hover:-translate-y-0.5 disabled:opacity-50"
             >
               {setAppearance.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Open {form.name}
+              Open {studio?.name}
               <ArrowRight className="h-4 w-4" />
             </button>
           </div>

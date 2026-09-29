@@ -13,10 +13,10 @@ self.addEventListener("push", (event) => {
   try {
     data = event.data ? event.data.json() : {};
   } catch {
-    data = { title: "City Ink", body: event.data ? event.data.text() : "" };
+    data = { title: "Runnit", body: event.data ? event.data.text() : "" };
   }
 
-  const title = data.title || "City Ink";
+  const title = data.title || "Runnit";
   event.waitUntil(
     self.registration.showNotification(title, {
       body: data.body || "",

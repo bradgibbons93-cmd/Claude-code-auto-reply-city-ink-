@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useLocation } from "wouter";
 import { toast } from "sonner";
 import {
   ArrowLeft,
@@ -43,9 +42,6 @@ function errorText(error: unknown) {
 
 export default function Onboarding() {
   const { me, user, studio, refresh } = useSession();
-  const utils = trpc.useUtils();
-  const [, navigate] = useLocation();
-
   const saved = (user?.onboardingStep as Step) ?? "welcome";
   const [step, setStepState] = useState<Step>(STEPS.includes(saved) ? saved : "welcome");
   const [direction, setDirection] = useState<1 | -1>(1);
@@ -659,7 +655,6 @@ function Done({
   look: Look;
   refresh: () => Promise<unknown>;
 }) {
-  const [, navigate] = useLocation();
   const complete = trpc.onboarding.complete.useMutation();
   const [entering, setEntering] = useState(false);
   const bits = useMemo(() => Array.from({ length: 18 }, (_, i) => i), []);
@@ -668,8 +663,8 @@ function Done({
     setEntering(true);
     try {
       await complete.mutateAsync();
+      // Once the session says setup is finished, App opens the dashboard.
       await refresh();
-      navigate("/", { replace: true });
     } catch (error) {
       setEntering(false);
       toast.error(errorText(error));

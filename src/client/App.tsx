@@ -219,7 +219,10 @@ export default function App() {
   }
 
   if (location === "/login" || location === "/signup" || location === "/welcome") {
-    return <Redirect to="/" replace />;
+    // Straight on to wherever they were headed before being asked to log in.
+    const next = new URLSearchParams(window.location.search).get("next");
+    const safe = next && next.startsWith("/") && !next.startsWith("//") && !/^\/(login|signup|welcome)/.test(next);
+    return <Redirect to={safe ? next : "/"} replace />;
   }
 
   return <Workspace />;
@@ -267,6 +270,11 @@ function Workspace() {
   };
 
   useEffect(() => setMenuOpen(false), [location]);
+  // A new page starts at the top. Without this you arrived wherever the last
+  // page had been scrolled to — halfway down a checklist, under the header.
+  useEffect(() => {
+    if (!window.location.hash) window.scrollTo({ top: 0 });
+  }, [location]);
 
   return (
     <div className="min-h-screen text-foreground">

@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { t, studioProcedure } from "./trpc.js";
 import { accountRouter, onboardingRouter, studiosRouter } from "./accountRouter.js";
+import { studioIdentity } from "./studios.js";
 import { z } from "zod";
 import {
   getRecentConversations,
@@ -480,7 +481,7 @@ export const appRouter = t.router({
     test: studioProcedure.mutation(async () => {
       const devices = await countSubscriptions();
       const { sent, dropped } = await sendPush({
-        title: "City Ink — test",
+        title: `${(await studioIdentity()).name} — test`,
         body: "Notifications are working. This is what a new enquiry will look like.",
         url: "/messages",
         tag: "test",

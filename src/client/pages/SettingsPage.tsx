@@ -463,8 +463,6 @@ function InboxTab() {
 /* ------------------------------------------------------------------ */
 
 function AccountTab() {
-  const utils = trpc.useUtils();
-  const [, navigate] = useLocation();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const change = trpc.account.changePassword.useMutation({

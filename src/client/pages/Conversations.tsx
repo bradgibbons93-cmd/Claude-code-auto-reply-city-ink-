@@ -11,7 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { awaitsStudio, cn, isPaused, previewLine, shortAgo } from "@/lib/utils";
 import { Avatar } from "@/components/Avatar";
-import { StampBadge } from "@/components/Logo";
+import { useSession } from "@/lib/session";
+import { StudioMark } from "@/components/StudioSwitcher";
 import {
   AlertTriangle,
   Send,
@@ -605,6 +606,7 @@ function SectionHeading({
 const REPLIED_PAGE = 40;
 
 export default function Conversations() {
+  const { studio } = useSession();
   // ?thread=… so a search result, a notification, or a link from the
   // dashboard opens the right conversation — and survives a refresh, which
   // a selection held only in React state never did.
@@ -828,7 +830,9 @@ export default function Conversations() {
         ) : !conversations.length ? (
           <Card className="mt-4">
             <CardContent className="pt-6">
-              <StampBadge className="mx-auto mb-4 h-24 w-24 text-sepia opacity-70" />
+              <div className="mb-4 flex justify-center">
+                <StudioMark studio={studio} size={72} />
+              </div>
               <p className="text-sm text-muted-foreground">
                 No messages yet. Connect the Page in Settings, then send your studio a test
                 message.

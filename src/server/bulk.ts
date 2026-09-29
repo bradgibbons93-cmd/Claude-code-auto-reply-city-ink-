@@ -1,4 +1,5 @@
 import { and, gte, lte, ne } from "drizzle-orm";
+import { studioIdentity } from "./studios.js";
 import { getDb } from "./db.js";
 import { scheduledPosts } from "../drizzle/schema.js";
 import { generateCaption } from "./agent.js";
@@ -53,13 +54,16 @@ export interface PlannedPost {
   uploadId?: string;
 }
 
-/** Fallbacks, in order, so a photo can never end up with an empty caption. */
-const FALLBACK_CAPTIONS = [
-  "Fresh out of the studio. City Ink, Geelong.",
-  "New work off the table today.",
-  "Healed and settled. City Ink, Geelong.",
-  "Another one finished this week.",
-];
+/** Fallbacks, in order, so a photo can never end up with an empty caption.
+ *  Signed off with the studio's own name and town, never one written in. */
+function fallbackCaptions(sign: string) {
+  return [
+    `Fresh out of the studio. ${sign}.`,
+    "New work off the table today.",
+    `Healed and settled. ${sign}.`,
+    "Another one finished this week.",
+  ];
+}
 
 export class BulkRejected extends Error {}
 
@@ -196,7 +200,9 @@ async function captionFor(
 
   if (typed) return { caption: typed, aiGenerated: false };
   if (item.note?.trim()) return { caption: item.note.trim(), aiGenerated: false };
-  return { caption: FALLBACK_CAPTIONS[index % FALLBACK_CAPTIONS.length], aiGenerated: false };
+  const me = await studioIdentity();
+  const captions = fallbackCaptions([me.name, me.city].filter(Boolean).join(", "));
+  return { caption: captions[index % captions.length], aiGenerated: false };
 }
 
 /**

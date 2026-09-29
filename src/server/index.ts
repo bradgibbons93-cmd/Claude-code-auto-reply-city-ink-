@@ -19,7 +19,7 @@ import { reportAppIdentity } from "./token.js";
 import { requireStudio, requireStudioOrSignedLink } from "./auth.js";
 import { createContext } from "./trpc.js";
 import { userFromRequest, AccountError } from "./accounts.js";
-import { saveBrandAsset, readBrandAsset, type BrandKind } from "./studios.js";
+import { saveBrandAsset, readBrandAsset, getDataStudioId, getStudio, type BrandKind } from "./studios.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -85,6 +85,26 @@ app.post("/api/brand", express.json({ limit: "16mb" }), async (req, res) => {
     if (error instanceof AccountError) return res.status(error.status).json({ error: error.message });
     console.error("[Brand] Upload failed:", (error as Error).message);
     return res.status(500).json({ error: "Couldn't save that image — try again." });
+  }
+});
+
+/**
+ * The connected studio's name and logo, for the artists' QR upload page —
+ * which is open to anyone on the studio wall, so it has no session to ask.
+ * Only what's already on the studio's own sign: never a customer, a setting
+ * or a number.
+ */
+app.get("/api/studio-brand", async (_req, res) => {
+  try {
+    const id = await getDataStudioId();
+    const studio = id ? await getStudio(id) : undefined;
+    res.setHeader("Cache-Control", "public, max-age=300");
+    return res.json({
+      name: studio?.name ?? null,
+      logoUrl: studio?.logoAssetId ? `/api/brand/${studio.logoAssetId}` : null,
+    });
+  } catch {
+    return res.json({ name: null, logoUrl: null });
   }
 });
 

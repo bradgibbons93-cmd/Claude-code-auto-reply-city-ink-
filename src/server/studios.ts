@@ -85,7 +85,18 @@ async function roleIn(userId: number, studioId: number) {
 export async function ensureStudios(): Promise<void> {
   const db = await getDb();
   const [existing] = await db.select({ n: sql<number>`COUNT(*)` }).from(studios);
-  if (Number(existing?.n ?? 0) > 0) return;
+  if (Number(existing?.n ?? 0) > 0) {
+    // A studio with an inbox and nobody able to claim it is a locked door.
+    // Say so on every boot until it's fixed, in words that say how.
+    const id = await getDataStudioId();
+    if (id && (await memberCount(id)) === 0 && !claimCodes().length) {
+      console.warn(
+        "[Studios] The studio holding this app's inbox has no owner yet, and no code is set to claim it. " +
+          "Set STUDIO_CLAIM_CODE in Railway, then create your account with it."
+      );
+    }
+    return;
+  }
 
   const [threads] = (await db.execute(
     sql`SELECT (SELECT COUNT(*) FROM messenger_conversations) AS threads,
@@ -101,6 +112,11 @@ export async function ensureStudios(): Promise<void> {
   if (created) {
     await setDataStudioId(created.id);
     console.log(`[Studios] "${name}" set up as studio ${created.id} and linked to this app's inbox — waiting for its owner to claim it`);
+    if (!claimCodes().length) {
+      console.warn(
+        "[Studios] No code is set to claim it yet. Set STUDIO_CLAIM_CODE in Railway, then create your account with it."
+      );
+    }
   }
 }
 
@@ -386,16 +402,28 @@ export async function viewerFor(user: UserRow): Promise<Viewer> {
 
 /** The shape the browser gets for "who am I and where am I". */
 export async function describeViewer(viewer: Viewer | null, expired = false) {
+  const waiting = await claimableStudio();
   const access = {
     signupsOpen: signupsOpen(),
     // Where "forgot your password" points until resets are emailed out.
     supportEmail: process.env.SUPPORT_EMAIL?.trim() || null,
     // Closed sign-up still lets the owner in once: with the studio's code.
-    inviteOnly: !signupsOpen() && !!(await claimableStudio()),
+    inviteOnly: !signupsOpen() && !!waiting,
   };
-  if (!viewer) return { user: null, expired, studios: [], currentStudioId: null, claimable: null, ...access };
+  if (!viewer) {
+    return {
+      user: null,
+      expired,
+      studios: [],
+      currentStudioId: null,
+      // The sign-up page says whose account it is making. Only the studio's
+      // name — what is already on its sign — and only while it waits.
+      claimable: access.inviteOnly && waiting ? { name: waiting.name } : null,
+      ...access,
+    };
+  }
   const mine = await membershipsFor(viewer.user.id);
-  const claimable = await claimableStudio();
+  const claimable = waiting;
   const u = viewer.user;
   return {
     user: {
@@ -439,4 +467,63 @@ export async function countUsers() {
   const db = await getDb();
   const [row] = await db.select({ n: sql<number>`COUNT(*)` }).from(users);
   return Number(row?.n ?? 0);
+}
+
+/* ------------------------------------------------------------------ */
+/* Who the agent speaks as                                             */
+/* ------------------------------------------------------------------ */
+
+export interface StudioIdentity {
+  /** "City Ink Tattoo" */
+  name: string;
+  /** "Geelong" — the first part of the location, or "" */
+  city: string;
+  /** "City Ink Tattoo Geelong" / "Northside Ink in Fitzroy" — for sentences */
+  label: string;
+  /** The owner's first name, or "the studio owner" */
+  owner: string;
+}
+
+let identityCache: { at: number; value: StudioIdentity } | null = null;
+
+/**
+ * The studio the agent writes for, and whose voice it writes in.
+ *
+ * The prompts used to say "City Ink Tattoo Geelong" and "Brad" in so many
+ * words — right for one studio, wrong for every other. They come from the
+ * connected studio's record and its owner now, so City Ink still reads as
+ * City Ink and Brad, and any other studio reads as itself. Cached a minute;
+ * it is asked on every draft.
+ */
+export async function studioIdentity(): Promise<StudioIdentity> {
+  if (identityCache && Date.now() - identityCache.at < 60_000) return identityCache.value;
+  let name = "";
+  let location = "";
+  let owner = "";
+  try {
+    const id = await getDataStudioId();
+    const studio = id ? await getStudio(id) : undefined;
+    name = studio?.name?.trim() ?? "";
+    location = studio?.location?.trim() ?? "";
+    if (id) {
+      const db = await getDb();
+      const rows = await db
+        .select({ name: users.name })
+        .from(studioMembers)
+        .innerJoin(users, eq(users.id, studioMembers.userId))
+        .where(and(eq(studioMembers.studioId, id), eq(studioMembers.role, "owner")))
+        .orderBy(asc(studioMembers.id))
+        .limit(1);
+      owner = rows[0]?.name?.trim().split(/\s+/)[0] ?? "";
+    }
+    if (!name) name = (await getFacebookConfig().catch(() => undefined))?.pageName?.trim() ?? "";
+  } catch {
+    /* fall through to the defaults — a draft must never fail over a name */
+  }
+  name ||= "the studio";
+  const city = location.split(",")[0]?.trim() ?? "";
+  const label = city && !name.toLowerCase().includes(city.toLowerCase()) ? `${name} in ${city}` : name;
+  const value = { name, city, label, owner: owner || "the studio owner" };
+  identityCache = { at: Date.now(), value };
+  return value;
 }

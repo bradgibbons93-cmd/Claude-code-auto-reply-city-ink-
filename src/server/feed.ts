@@ -371,7 +371,7 @@ function explain(problems: string[], facts?: TokenFacts): string {
       return (
         `The saved token is a ${facts.type.toLowerCase()} token, not the Page token, so ` +
         "Facebook is looking for your own posts rather than the studio's. In the Graph API " +
-        "Explorer, switch the \"User or Page\" dropdown to City Ink Tattoo Geelong, copy the " +
+        "Explorer, switch the \"User or Page\" dropdown to your studio's Page, copy the " +
         "token that appears, and paste that into the Facebook Page box above."
       );
     }

@@ -512,7 +512,7 @@ export default function Settings() {
             ) : (
               <>
                 No alert contact yet. From the personal Facebook account that should receive
-                bookings, message the City Ink Page:{" "}
+                bookings, message your studio's Page:{" "}
                 <code className="rounded bg-surface px-1">
                   set owner {verifyToken || "<your webhook verify token>"}
                 </code>
@@ -549,12 +549,16 @@ export default function Settings() {
             onChange={(e) => setBookingUrl(e.target.value)}
           />
           <Button
-            onClick={() =>
-              saveTimely.mutate({
-                bookingPageUrl: bookingUrl || "https://bookings.gettimely.com/cityinktattoo/bb/book",
-                calendarIcsUrl: calendarUrl,
-              })
-            }
+            onClick={() => {
+              // It used to fill in City Ink's own Timely link when this was
+              // left empty — right for one studio, wrong for every other.
+              const link = bookingUrl || timely?.bookingPageUrl || "";
+              if (!link) {
+                toast.error("Paste your booking page link first — it's where customers book.");
+                return;
+              }
+              saveTimely.mutate({ bookingPageUrl: link, calendarIcsUrl: calendarUrl });
+            }}
             disabled={saveTimely.isPending}
           >
             {saveTimely.isPending ? "Saving…" : "Save calendar"}

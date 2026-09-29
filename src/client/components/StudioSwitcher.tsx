@@ -167,8 +167,6 @@ export function UserAvatar({ size = 28 }: { size?: number }) {
 /** The person in the corner: their photo, their name, and the way out. */
 export function UserMenu() {
   const { user, studio } = useSession();
-  const utils = trpc.useUtils();
-  const [, navigate] = useLocation();
   const { open, setOpen, box } = usePopover();
   const logout = useSignOut();
 

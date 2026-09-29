@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link, useLocation, useSearch } from "wouter";
+import { Link, useSearch } from "wouter";
 import { ArrowRight, Eye, EyeOff, KeyRound, Loader2, ShieldCheck } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useSession } from "@/lib/session";
@@ -92,18 +92,15 @@ function errorText(error: unknown) {
 export function LoginPage() {
   const { me } = useSession();
   const utils = trpc.useUtils();
-  const [, navigate] = useLocation();
   const search = new URLSearchParams(useSearch());
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [forgot, setForgot] = useState(false);
+  // Nothing to navigate here: once the session says who you are, App sends
+  // you on (to ?next=, your dashboard, or setup). Navigating from here as
+  // well raced that rule and bounced through the wrong page.
   const login = trpc.account.login.useMutation({
-    onSuccess: async (data) => {
-      utils.account.me.setData(undefined, data);
-      await utils.invalidate();
-      const next = search.get("next");
-      navigate(next && next.startsWith("/") && !next.startsWith("//") ? next : "/", { replace: true });
-    },
+    onSuccess: (data) => utils.account.me.setData(undefined, data),
   });
 
   const expired = search.get("expired") === "1" || me?.expired;
@@ -184,17 +181,12 @@ export function LoginPage() {
 export function SignupPage() {
   const { me } = useSession();
   const utils = trpc.useUtils();
-  const [, navigate] = useLocation();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const signup = trpc.account.signup.useMutation({
-    onSuccess: async (data) => {
-      utils.account.me.setData(undefined, data);
-      await utils.invalidate();
-      navigate("/welcome", { replace: true });
-    },
+    onSuccess: (data) => utils.account.me.setData(undefined, data),
   });
 
   const inviteOnly = !!me?.inviteOnly && !me?.signupsOpen;

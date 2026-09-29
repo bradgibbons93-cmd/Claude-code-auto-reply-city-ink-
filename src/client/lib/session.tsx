@@ -1,8 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
-import { applyLook } from "@/lib/themes";
+import { applyLook, clearLook } from "@/lib/themes";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../server/routers";
 
@@ -85,23 +83,20 @@ export function initials(name: string | null | undefined) {
 }
 
 /**
- * Log out cleanly: say "nobody" first, so the workspace unmounts at once, then
- * forget every cached answer. Refetching the dashboard on the way out only
- * produced a burst of "Log in first" errors from a screen nobody could see.
+ * Log out cleanly.
+ *
+ * A full page load onto the log-in screen, not a client-side hop: the hop
+ * raced the session — for a frame the app still believed you were signed in,
+ * its "signed-in people don't need the log-in page" rule sent you home, and
+ * you landed on the marketing page instead of log in. A reload also drops
+ * every cached answer and the studio's colours from this device, which is
+ * what logging out of a shared phone should do.
  */
 export function useSignOut() {
-  const utils = trpc.useUtils();
-  const queryClient = useQueryClient();
-  const [, navigate] = useLocation();
-  const logout = trpc.account.logout.useMutation({
+  return trpc.account.logout.useMutation({
     onSettled: () => {
-      utils.account.me.setData(undefined, (old) =>
-        old ? { ...old, user: null, studios: [], currentStudioId: null, claimable: null, expired: false } : old
-      );
-      queryClient.removeQueries({ predicate: (q) => JSON.stringify(q.queryKey).indexOf('"me"') === -1 });
-      navigate("/login", { replace: true });
-      void utils.account.me.invalidate();
+      clearLook();
+      window.location.replace("/login");
     },
   });
-  return logout;
 }

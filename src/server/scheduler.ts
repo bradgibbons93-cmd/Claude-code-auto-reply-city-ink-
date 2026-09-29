@@ -1,4 +1,5 @@
 import cron from "node-cron";
+import { studioIdentity } from "./studios.js";
 import { getDuePosts, updatePostStatus } from "./db.js";
 import { publishPagePost, importExistingConversations, sweepOlderInstagramThreads } from "./facebook.js";
 import { syncFeed } from "./feed.js";
@@ -141,7 +142,7 @@ export function startScheduler() {
       const facts = await describeToken(config.pageAccessToken, config.appId, config.appSecret);
       if (facts && !facts.valid) {
         await notifyOnce("token", {
-          title: "City Ink — the Facebook token has expired",
+          title: `${(await studioIdentity()).name} — the Facebook token has expired`,
           body: "Nothing is coming in until it's replaced. Settings → Facebook Page.",
           url: "/settings#connections",
           tag: "token",
@@ -150,7 +151,7 @@ export function startScheduler() {
         const daysLeft = (new Date(facts.expiresAt).getTime() - Date.now()) / 86_400_000;
         if (daysLeft < 4) {
           await notifyOnce("token", {
-            title: "City Ink — the Facebook token runs out soon",
+            title: `${(await studioIdentity()).name} — the Facebook token runs out soon`,
             body: `About ${Math.max(0, Math.round(daysLeft))} day(s) left. Replacing it now avoids a silent stop.`,
             url: "/settings#connections",
             tag: "token",
@@ -169,7 +170,7 @@ export function startScheduler() {
         !!rejections?.at && Date.now() - new Date(rejections.at).getTime() < 24 * 3600_000;
       if (recent && (rejections?.count ?? 0) > 5) {
         await notifyOnce("rejections", {
-          title: "City Ink — messages are being turned away",
+          title: `${(await studioIdentity()).name} — messages are being turned away`,
           body: `${rejections?.count} refused. The saved app secret doesn't match the one Meta signs with.`,
           url: "/settings#delivery",
           tag: "rejections",
@@ -272,7 +273,7 @@ export function startScheduler() {
         // page — and a batch scheduled a fortnight out could fail every day
         // for a fortnight before anyone looked.
         await notifyOnce(`post-fail`, {
-          title: "City Ink — a scheduled post didn't go out",
+          title: `${(await studioIdentity()).name} — a scheduled post didn't go out`,
           body: message.slice(0, 160),
           url: "/posts",
           tag: "post-fail",

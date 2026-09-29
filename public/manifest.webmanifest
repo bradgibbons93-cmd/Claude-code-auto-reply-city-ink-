@@ -1,15 +1,30 @@
 {
-  "name": "City Ink — Front of House",
-  "short_name": "City Ink",
-  "description": "The studio's Messenger and Instagram inbox, and the posting board.",
+  "name": "Runnit",
+  "short_name": "Runnit",
+  "description": "Your studio's front desk: Instagram and Messenger in one inbox, replies drafted in your voice, nothing sent without your OK.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#E9E9EA",
-  "theme_color": "#6F5A4B",
+  "background_color": "#07070A",
+  "theme_color": "#07070A",
   "icons": [
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ]
 }

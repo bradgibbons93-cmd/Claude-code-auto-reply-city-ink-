@@ -6,8 +6,13 @@ that were got wrong first and cost real customer messages.
 
 ## What this is
 
-A Messenger and Instagram inbox for one tattoo studio in Geelong, plus a
-posting dashboard. Brad Gibbons owns the studio and is the only user.
+**Runnit** — a Messenger and Instagram front desk for tattoo studios, plus a
+posting dashboard. It began as the private app for City Ink Tattoo in Geelong,
+and City Ink is still the studio whose inbox this deployment runs. Brad
+Gibbons owns it. Since 29 September it has real accounts, a studio per
+location, onboarding and per-studio themes (see "Accounts, studios and the
+login" below) — read that section before touching anything to do with who can
+see what.
 
 **Nothing reaches a customer without Brad approving it.** Every reply is a
 draft that waits in the dashboard. This is the product, not a safety setting —
@@ -1045,15 +1050,90 @@ still comes only from the studio facts. If a provider refuses an image,
 condition of getting a draft. `tests/inboxmeta.mjs` asserts on the request
 body that actually reached the provider.
 
-## The login
+## Accounts, studios and the login
 
-Off unless `DASHBOARD_PASSWORD` is set in Railway. Deliberately dormant while
-Meta reviews the app — the App Review submission states no sign-in is needed,
-and a password box appearing under a reviewer is a rejection. Turn it on once
-approval lands.
+Built 29 September from Brad's "Final product pass" brief: a landing page,
+sign up, onboarding, a dashboard that is *theirs*, settings that control the
+product, several studios per login, and "returning users go straight back into
+their workspace".
+
+**The security model is one rule, and everything else hangs off it.** The
+inbox, drafts, agent, posts and every setting that existed before accounts
+belong to the studio recorded as `data_studio_id` in `app_settings` — the one
+this deployment's Meta connection belongs to. They are readable only by a
+member of that studio, while it is the studio they have open
+(`viewer.canReadData`). In code that is `studioProcedure` in `trpc.ts` (every
+old procedure; the old `publicProcedure` name is gone on purpose) and
+`requireStudio` / `requireStudioOrSignedLink` in `auth.ts` for the Express
+routes. A stranger who signs up gets their own studio and cannot read a single
+City Ink customer, photo or setting, by any screen or by calling the API by
+hand. `tests/accounts.mjs` is mostly a stranger trying — run it after touching
+any of this.
+
+- `accounts.ts` — users (the template's unused `users` table, extended), scrypt
+  passwords, sessions. The cookie `runnit_session` carries a random token; the
+  `sessions` table holds only its SHA-256. 30 days, sliding. Changing the
+  password signs out every other session. Wrong-password lockout is per email
+  (10 / 15 min) and much looser per network address (40), because a whole
+  studio shares one wifi.
+- `studios.ts` — studios, `studio_members` (owner today; "staff" is the room
+  left for a team later), branding images in `brand_assets` (same MySQL-blob
+  storage and `images.ts` shrinking as everything else, but its own table
+  because anyone may see a logo and nobody may see a customer's photo; served
+  open at `/api/brand/:id` under random 160-bit ids), the claim flow, and
+  `studioIdentity()` — the studio name, town and owner's first name the AI
+  prompts, phone alerts and default captions now use instead of "City Ink" and
+  "Brad" written into the code.
+- **City Ink becomes a studio on first boot.** `ensureStudios()` sees an inbox
+  and no studios, makes one from the Page's name with the Coffee & Silver
+  theme, and marks it the data studio — with no owner. The owner links it with
+  the **claim code**: `STUDIO_CLAIM_CODE` (or the old `DASHBOARD_PASSWORD`).
+  With neither set, nobody can claim it and the boot log says so every time.
+  On a brand-new database the first studio anyone creates takes the Meta
+  connection instead.
+- **Public sign-up is OFF unless `PUBLIC_SIGNUP=open`.** City Ink's Meta app
+  was approved as an internal tool for one studio, not sold to others (see Meta
+  App Review) — a public "Create your studio" on this address would make that
+  untrue. Closed, the only way to make an account is with the claim code, which
+  links the studio in the same step, and then the door shuts.
+  `tests/inviteonly.mjs` holds that line. A Runnit deployment with its own Meta
+  app sets `PUBLIC_SIGNUP=open` and gets the landing page at `/`.
+- **Other studios have everything except an inbox.** Their own name, branding,
+  theme, details and settings are real and saved; the data pages show
+  `ConnectState` ("this studio's inbox isn't connected yet") rather than
+  anything pretend. Per-studio Meta connections need a Runnit-owned Meta app and
+  a per-studio `facebook_config` — that is the next piece of work, not this one.
+- **Onboarding** (`/welcome`, `pages/onboarding/`) saves at every step to the
+  real records, and `users.onboarding_step` remembers where it got to, so a
+  refresh or a closed tab resumes. `onboarding_completed_at` ends it for good;
+  nothing ever sends a finished account back through it.
+- **Routing is decided in one place** (`App.tsx`): signed out → landing (open
+  sign-up) or log in; signed in and not set up → `/welcome`; set up →
+  workspace, and `/login` `/signup` `/welcome` bounce to `?next=` or home. Pages
+  must NOT also navigate after logging in or finishing setup — they raced this
+  rule, and for a frame the old session won and sent people to the wrong page.
+  Logging out is a full page load onto `/login` for the same reason.
+
+**Themes** live in `lib/themes.ts`: seven looks, each with a light and dark
+palette, an optional accent, and its own display font. They are just the CSS
+variables `index.css` already defined, so `applyLook()` sets them on `<html>`
+for the whole app and `previewStyle()` sets them on one box — which is how
+every card in the theme picker is the studio's actual dashboard in that look
+(`DashboardPreview`). The look is stored on the studio, so it follows the
+account to every device; `index.html` paints the cached look before React loads
+so a refresh doesn't flash the default. City Ink's is `coffee`, the palette
+below. Runnit's own screens (sign up, log in, onboarding) wear `noir` via
+`RunnitShell`; the landing page (`pages/Landing.tsx`, `components/landing/`)
+paints its own black and gold and ignores the theme entirely.
+
+**`DASHBOARD_PASSWORD` was never set on Railway.** The shared-password door
+this section used to describe was switched off during Meta's review and never
+switched back on, so until accounts ship the live dashboard is readable by
+anyone with the address. Shipping this closes that.
 
 Never guarded: Meta's webhook, `POST /api/uploads` and the `/upload` page (the
-artists reach it by QR code on the studio wall), `/health`.
+artists reach it by QR code on the studio wall; it now shows the studio's name
+and logo from the open `/api/studio-brand`), `/api/brand/:id`, `/health`.
 
 ## Meta App Review
 
@@ -1260,7 +1340,12 @@ violet before, which was a third colour the studio doesn't own.
 
 Everything resolves through CSS variables in `index.css`, so **don't reach for
 a Tailwind palette colour** (`blue-500`, `purple-400`) in a component. Three
-of those had crept in and were the only non-brand colours on the page.
+of those had crept in and were the only non-brand colours on the page. That is
+City Ink's palette — the `coffee` theme. Other studios pick their own in
+Settings → Appearance (`lib/themes.ts`); the variables are the same, so the
+rule is the same. The only fixed colours allowed are the Instagram and
+Messenger badges, which are those apps' own, and Runnit's gold on its own
+screens.
 
 ## Testing
 
@@ -1350,6 +1435,18 @@ stand-in push service has to be a TLS server with a self-signed certificate
 and `NODE_TLS_REJECT_UNAUTHORIZED=0` in the test process only. Against a plain
 `http://` listener it fails with an OpenSSL "packet length too long", which
 reads like a bug in the app and isn't.
+
+**Three suites for accounts, and one of them drives a browser.**
+`accounts.mjs` (66 checks — the security model above), `inviteonly.mjs`
+(City Ink's private mode and the claim code) and `journey.mjs` (29 checks — a
+new customer on a phone from the landing page through sign up, all six
+onboarding steps with real uploads, the dashboard, log out and back in, a
+refresh mid-setup, a file that isn't an image, a second studio and switching
+back, then a laptop and a tablet). All three start their own server on their
+own database; `journey.mjs` makes its own test images with sharp. Playwright's
+`getByLabel("Password")` also matches the "Show password" button — use
+`/^Password/`. On a phone the desktop sidebar is still in the DOM, hidden —
+select with `aside:visible`.
 
 **Run the database and the suites on UTC, as Railway does.** This machine's
 clock is Brisbane time. Node's timestamps and MySQL's `NOW()` then disagree by

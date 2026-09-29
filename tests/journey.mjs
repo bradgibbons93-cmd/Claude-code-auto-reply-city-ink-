@@ -7,16 +7,59 @@
 // uploads, and then the edges he listed: a bad password, a refresh halfway
 // through setup, an upload that isn't an image, a second studio.
 //
-// Needs a dashboard already running in open sign-up mode, e.g.
-//   PUBLIC_SIGNUP=open NODE_ENV=production PORT=4100 node dist/server/index.js
-// Override with BASE=… . Screenshots go to SHOTS (default: /tmp/journey).
+// Starts its own server (open sign-up, fresh database) and makes its own test
+// images, so `run-all.sh` can run it like any other suite. Point BASE at a
+// running dashboard to skip that. Screenshots go to SHOTS (default /tmp/journey).
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawn } from "node:child_process";
 
+process.env.TZ = "UTC";
 const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
-const BASE = process.env.BASE || "http://localhost:4100";
 const SHOTS = process.env.SHOTS || "/tmp/journey";
-const FIXTURES = process.env.FIXTURES;
 fs.mkdirSync(SHOTS, { recursive: true });
+
+let BASE = process.env.BASE;
+let server;
+if (!BASE) {
+  const ADMIN = process.env.DATABASE_URL || "mysql://ci:ci@127.0.0.1:3306/cityink";
+  const mysql = (await import(`${ROOT}/node_modules/mysql2/promise.js`)).default;
+  const admin = await mysql.createConnection(ADMIN);
+  await admin.query("DROP DATABASE IF EXISTS runnit_journey");
+  await admin.query("CREATE DATABASE runnit_journey");
+  await admin.end();
+  const port = 4900 + Math.floor(Math.random() * 90);
+  BASE = `http://localhost:${port}`;
+  server = spawn("node", ["dist/server/index.js"], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      TZ: "UTC",
+      NODE_ENV: "production",
+      PORT: String(port),
+      PUBLIC_SIGNUP: "open",
+      DATABASE_URL: ADMIN.replace(/\/[^/]*$/, "/runnit_journey"),
+      FACEBOOK_GRAPH_URL: "http://127.0.0.1:1",
+      LLM_API_KEY: "",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let log = "";
+  server.stdout.on("data", (d) => (log += d));
+  server.stderr.on("data", (d) => (log += d));
+  for (let i = 0; i < 80 && !/Schema ready/.test(log); i++) await new Promise((r) => setTimeout(r, 250));
+}
+
+// Test images, made fresh: a transparent PNG logo, a wide banner, a portrait.
+const FIXTURES = process.env.FIXTURES || fs.mkdtempSync(path.join(os.tmpdir(), "journey-"));
+if (!process.env.FIXTURES) {
+  const sharp = (await import("sharp")).default;
+  const svg = (w, h, body) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">${body}</svg>`);
+  await sharp(svg(600, 600, `<circle cx="300" cy="300" r="250" fill="none" stroke="#e25a46" stroke-width="26"/><path d="M300 120 L470 470 L130 470 Z" fill="none" stroke="#e25a46" stroke-width="26"/>`)).png().toFile(`${FIXTURES}/e2e_logo.png`);
+  await sharp(svg(2400, 900, `<defs><radialGradient id="g"><stop offset="0" stop-color="#c88a5a"/><stop offset="1" stop-color="#1e1816"/></radialGradient></defs><rect width="2400" height="900" fill="url(#g)"/>`)).jpeg().toFile(`${FIXTURES}/e2e_cover.jpg`);
+  await sharp(svg(900, 900, `<rect width="900" height="900" fill="#465a6e"/><circle cx="450" cy="350" r="170" fill="#deb896"/><circle cx="450" cy="900" r="300" fill="#282832"/>`)).jpeg().toFile(`${FIXTURES}/e2e_avatar.jpg`);
+}
 
 const { chromium } = await import(`${ROOT}/node_modules/playwright/index.mjs`);
 const executablePath = fs.existsSync("/opt/pw-browsers/chromium-1194/chrome-linux/chrome")
@@ -186,7 +229,7 @@ try {
 
   await page.getByRole("button", { name: /open menu/i }).click();
   await page.waitForTimeout(400);
-  await page.locator('aside button[aria-haspopup="menu"]').first().click();
+  await page.locator('aside:visible button[aria-haspopup="menu"]').first().click();
   await page.getByRole("menuitemradio", { name: /^Northside Ink Geelong|^Northside Ink\s/ }).first().click();
   await page.waitForTimeout(1500);
   const back = await page.locator("body").innerText();
@@ -232,6 +275,7 @@ try {
   console.log(`FAIL  the journey broke — ${error.message}`);
 } finally {
   await browser.close();
+  server?.kill();
 }
 
 const real = errors.filter((e) => !/favicon|manifest/.test(e));

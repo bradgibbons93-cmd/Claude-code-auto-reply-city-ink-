@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSession } from "@/lib/session";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -61,6 +62,8 @@ const PRACTICE_PROMPTS = [
 ];
 
 export default function Training() {
+  const { studio } = useSession();
+  const { data: fbPage } = trpc.config.facebook.useQuery();
   const utils = trpc.useUtils();
   const { data: knowledge } = trpc.knowledge.list.useQuery();
   const { data: exampleCount } = trpc.history.count.useQuery();
@@ -163,7 +166,8 @@ export default function Training() {
       for (const file of Array.from(files)) {
         let pairs: ExchangePair[] = [];
         try {
-          pairs = parseMessengerExport(JSON.parse(await file.text()), "City Ink");
+          // The studio's own messages are the ones sent as its Page.
+          pairs = parseMessengerExport(JSON.parse(await file.text()), fbPage?.pageName || studio?.name || "");
         } catch {
           unreadable++;
           continue;
