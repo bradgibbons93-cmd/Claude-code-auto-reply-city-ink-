@@ -410,3 +410,68 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Home screen                                                          */
+/* ------------------------------------------------------------------ */
+
+/* The 3D pieces float. Slow and small — alive, not busy. */
+@keyframes home-bob {
+  0%, 100% { transform: translateY(0) rotate(-3deg); }
+  50% { transform: translateY(-8px) rotate(3deg); }
+}
+@keyframes home-glow {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.95; }
+}
+/* A tattoo machine hums. Half a pixel is enough to read as running. */
+@keyframes home-buzz {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(0.6px, -0.6px); }
+  50% { transform: translate(-0.6px, 0.4px); }
+  75% { transform: translate(0.4px, 0.6px); }
+}
+/* The day inks itself in up to now, once, when the page opens. */
+@keyframes home-ink-fill {
+  from { width: 0; }
+  to { width: calc(var(--now) * 100%); }
+}
+@keyframes home-ink-ride {
+  from { left: 0; }
+  to { left: calc(var(--now) * 100%); }
+}
+/* The top reply leans right and back, once — "this swipes". */
+@keyframes home-peek {
+  0%, 55%, 100% { transform: translateX(0) rotate(0); }
+  70% { transform: translateX(22px) rotate(1.2deg); }
+  85% { transform: translateX(-4px) rotate(-0.2deg); }
+}
+@keyframes home-nudge {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(5px); }
+}
+
+.home-bob { animation: home-bob 4.4s ease-in-out infinite; }
+.home-bob-slow { animation: home-bob 5.6s ease-in-out infinite reverse; }
+.home-glow { animation: home-glow 3.2s ease-in-out infinite; }
+.home-buzz { animation: home-buzz 0.14s linear infinite; }
+.home-ink-fill { animation: home-ink-fill 1.8s cubic-bezier(0.45, 0.05, 0.3, 1) both; }
+.home-ink-ride { animation: home-ink-ride 1.8s cubic-bezier(0.45, 0.05, 0.3, 1) both; }
+.home-peek { animation: home-peek 1.6s ease-in-out 0.9s 1 both; }
+.home-nudge { animation: home-nudge 1.4s ease-in-out infinite; }
+
+/* Tattoo flash drawn in the studio's own accent: the picture is only the
+   shape, the colour comes from the theme. */
+.home-flash {
+  background-color: rgb(var(--c-accent-strong) / 0.2);
+  -webkit-mask-image: url("/home/flash.webp");
+  mask-image: url("/home/flash.webp");
+  -webkit-mask-size: 420px auto;
+  mask-size: 420px auto;
+  -webkit-mask-repeat: repeat;
+  mask-repeat: repeat;
+}
+.home-flash-fade {
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 25%, transparent 85%);
+  mask-image: linear-gradient(180deg, #000 0%, #000 25%, transparent 85%);
+}

@@ -1135,6 +1135,52 @@ Never guarded: Meta's webhook, `POST /api/uploads` and the `/upload` page (the
 artists reach it by QR code on the studio wall; it now shows the studio's name
 and logo from the open `/api/studio-brand`), `/api/brand/:id`, `/health`.
 
+## The Home screen
+
+Built 29 September from the design Brad picked on the canvas ("Build it").
+`pages/Home.tsx` replaced the old stats-and-lists dashboard. His brief, in
+order: **auto replies first, then scheduling, then posting**; simple, animated,
+a hint of tattoo. Phones also got a bottom menu (Home, Messages, Bookings,
+Posts, More) in `App.tsx`; the desktop sidebar is unchanged.
+
+- **The reply deck (`components/home/ReplyDeck.tsx`) is an approval screen.**
+  Swipe right = Approve & send, through the same `pendingReplies.approve` as
+  the inbox. Swipe left, or a tap, opens the conversation. Because a swipe can
+  be an accident, **nothing goes to Meta for five seconds**: the card leaves,
+  a toast offers Undo, and only then does the approve call run.
+  `components/home/sendQueue.ts` holds that window at module level so leaving
+  the page doesn't silently cancel a send the studio saw go. Don't shorten it
+  to zero and don't add an auto-advance — the canvas mock-up auto-swiped as an
+  animation; in the app that would be sending replies nobody approved.
+- **Some drafts can't be sent blind.** Something personal (`isSensitive`), a
+  draft the AI never finished, one Meta already refused (`sendError`), or a
+  message over a fortnight old: the button reads "Open chat" and a right swipe
+  opens the thread instead. Same rules the inbox card warns about in words.
+- **The "AI replies live" pill is AgentStatusCard's honesty, kept.** Unhealthy,
+  it turns red and the provider's own sentence appears across the top. The old
+  card is gone; its rule isn't.
+- People waiting with no draft (failed draft, taken over, imported) can't be
+  on the deck, so the page counts them under it rather than lose them.
+- **Today's timeline reads `calendar.today`**, which returns minutes past
+  midnight on the studio's clock (`STUDIO_TIMEZONE`), so the browser never does
+  timezone maths. The tattoo machine sits at "now" and only buzzes while
+  someone is in the chair.
+- **The 3D icons and the flash sheet in `public/home/` were generated with
+  Higgsfield (gpt_image_2_5, transparent PNG → WebP), on Brad's credits.** Don't
+  regenerate them casually. The flash sheet is used as a CSS mask
+  (`.home-flash`), so it draws in whatever accent the studio's theme has.
+- **Black & Gold Ink** (`ink` in `lib/themes.ts`, and in `THEMES` in
+  `server/studios.ts`) is the look the Home was drawn in: Oswald over
+  Instrument Sans, no serif (Brad asked for the Bodoni headings to go). The
+  Home is built on the theme variables, so every other look works too.
+- `DashboardPreview` (theme picker, onboarding) draws the Home screen in
+  miniature. Change it with the Home, or "every card is your actual
+  dashboard" stops being true.
+- `tests/home.mjs` drives it on a phone-sized browser: swipe → Undo offered →
+  nothing sent for five seconds → exactly one send with the draft's words;
+  Undo → nothing sent; left swipe → the thread; a personal message → opens the
+  chat, sends nothing; tiles, timeline, bottom menu, laptop layout.
+
 ## Meta App Review
 
 **What is actually broken: Instagram replies, and nothing else.** Messenger

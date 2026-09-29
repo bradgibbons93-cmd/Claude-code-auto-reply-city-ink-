@@ -15,7 +15,7 @@
 import type { CSSProperties } from "react";
 
 export type Mode = "light" | "dark";
-export type ThemeId = "coffee" | "noir" | "silver" | "crimson" | "blush" | "sage" | "midnight";
+export type ThemeId = "ink" | "coffee" | "noir" | "silver" | "crimson" | "blush" | "sage" | "midnight";
 
 type RGB = [number, number, number];
 
@@ -61,8 +61,53 @@ const MONTSERRAT = `Montserrat, system-ui, sans-serif`;
 const INTER = `"Inter Tight", system-ui, sans-serif`;
 const FRAUNCES = `Fraunces, Georgia, serif`;
 const SYNE = `Syne, "Inter Tight", system-ui, sans-serif`;
+// Tall poster capitals over a plain, modern body. No serif anywhere: Brad
+// asked for the Bodoni headings to go, and this is the look he picked.
+const OSWALD = `Oswald, "Arial Narrow", system-ui, sans-serif`;
+const INSTRUMENT = `"Instrument Sans", "Inter Tight", system-ui, sans-serif`;
 
 export const THEMES: Theme[] = [
+  {
+    id: "ink",
+    name: "Black & Gold Ink",
+    description: "Black, warm gold and tall poster type. The one the new home screen was drawn in.",
+    defaultMode: "dark",
+    display: OSWALD,
+    sans: INSTRUMENT,
+    accents: ["#D9AE5F", "#C08A5B", "#E8D5A8", "#B76E79", "#8FA3B8"],
+    dark: {
+      background: hex("#0C0A08"),
+      surface: hex("#13100D"),
+      foreground: hex("#F6F0E6"),
+      card: hex("#16120E"),
+      input: hex("#080706"),
+      elevated: hex("#1C1712"),
+      border: hex("#2E2720"),
+      muted: hex("#B3A898"),
+      accent: hex("#D9AE5F"),
+      destructive: hex("#EF7B6E"),
+      success: hex("#79C28F"),
+      banner: hex("#16120E"),
+      bannerDeep: hex("#070605"),
+      bannerFg: hex("#F6F0E6"),
+    },
+    light: {
+      background: hex("#F4EFE6"),
+      surface: hex("#FAF6EF"),
+      foreground: hex("#16120E"),
+      card: hex("#FFFCF6"),
+      input: hex("#FFFFFF"),
+      elevated: hex("#FFFFFF"),
+      border: hex("#E2D8C6"),
+      muted: hex("#6F665A"),
+      accent: hex("#8E6420"),
+      destructive: hex("#A8463B"),
+      success: hex("#3E7A52"),
+      banner: hex("#16120E"),
+      bannerDeep: hex("#070605"),
+      bannerFg: hex("#F6F0E6"),
+    },
+  },
   {
     id: "noir",
     name: "Noir & Gold",

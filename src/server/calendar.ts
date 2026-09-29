@@ -428,6 +428,62 @@ export interface UpcomingBooking {
   label: string;
 }
 
+export interface TodayBooking {
+  title: string;
+  start: Date;
+  end: Date;
+  /** Minutes past midnight on the studio's wall clock, clipped to today. */
+  startMin: number;
+  endMin: number;
+}
+
+export interface StudioToday {
+  /** Whether a calendar link is saved at all — "nothing today" and "no calendar" read differently. */
+  connected: boolean;
+  /** The studio's wall clock when this was read, in minutes past midnight. */
+  nowMin: number;
+  bookings: TodayBooking[];
+  /** The feed couldn't be read this time. */
+  failed?: boolean;
+}
+
+/**
+ * Today in the chair, on the studio's own clock: the appointments already
+ * done as well as the ones still to come, which the upcoming list (future
+ * only) can't give. The home screen's timeline draws straight from the
+ * minute counts, so the browser never has to know which timezone Geelong is
+ * in — the same trap `offsetMs` exists for.
+ */
+export async function getTodayBookings(): Promise<StudioToday> {
+  const now = new Date();
+  const nowMin = studioMinutesOfDay(now);
+  const config = await getTimelyConfig().catch(() => undefined);
+  if (!config?.calendarIcsUrl) return { connected: false, nowMin, bookings: [] };
+
+  const { year, month, day } = studioDateParts(now);
+  const from = studioTime(year, month, day, 0, 0);
+  const to = studioTime(year, month, day + 1, 0, 0);
+
+  try {
+    const blocks = await fetchBusyBlocks(config.calendarIcsUrl, from, to);
+    const bookings = blocks
+      .filter((b) => b.end > from && b.start < to)
+      .sort((a, b) => a.start.getTime() - b.start.getTime())
+      .slice(0, 12)
+      .map((b) => ({
+        title: b.title || "Appointment",
+        start: b.start,
+        end: b.end,
+        startMin: b.start <= from ? 0 : studioMinutesOfDay(b.start),
+        endMin: b.end >= to ? 24 * 60 : studioMinutesOfDay(b.end),
+      }));
+    return { connected: true, nowMin, bookings };
+  } catch (error) {
+    console.error("[Calendar] Couldn't read today's bookings:", (error as Error).message);
+    return { connected: true, nowMin, bookings: [], failed: true };
+  }
+}
+
 /**
  * The next few appointments already in the calendar. Read-only, same feed as
  * availability — this is what fills the Upcoming Bookings panel rather than

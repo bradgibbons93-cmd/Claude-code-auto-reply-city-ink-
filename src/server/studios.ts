@@ -242,7 +242,7 @@ export async function updateStudio(userId: number, studioId: number, fields: Stu
   return getStudio(studioId);
 }
 
-export const THEMES = ["coffee", "noir", "silver", "crimson", "blush", "sage", "midnight"] as const;
+export const THEMES = ["ink", "coffee", "noir", "silver", "crimson", "blush", "sage", "midnight"] as const;
 const HEX = /^#[0-9a-f]{6}$/i;
 
 export async function setAppearance(

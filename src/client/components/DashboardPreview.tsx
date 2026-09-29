@@ -3,13 +3,15 @@ import {
   Bell,
   CalendarCheck,
   ChevronDown,
+  House,
   Image as ImageIcon,
   LayoutGrid,
+  Menu,
   MessageSquare,
+  PenLine,
   Search,
   Send,
   Settings,
-  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { previewStyle, type Look } from "@/lib/themes";
@@ -23,12 +25,6 @@ export interface PreviewIdentity {
   userName: string;
   avatarUrl?: string | null;
 }
-
-const PEOPLE = [
-  { name: "Chloe H.", line: "Chloe sent 2 photos.", time: "4m", ig: true },
-  { name: "Mason R.", line: "How much for a half sleeve?", time: "22m", ig: true },
-  { name: "Ava L.", line: "Any spots free Saturday?", time: "1h", ig: false },
-];
 
 function greeting() {
   const hour = new Date().getHours();
@@ -56,15 +52,15 @@ function StudioMark({ id, size = 36 }: { id: PreviewIdentity; size?: number }) {
     <img
       src={id.logoUrl}
       alt=""
-      className="shrink-0 rounded-xl bg-card object-contain p-1 shadow-soft"
+      className="shrink-0 rounded-full border border-sepia/60 bg-card object-contain p-1"
       style={{ width: size, height: size }}
     />
   ) : (
     <span
-      className="flex shrink-0 items-center justify-center rounded-xl bg-primary font-display text-primary-foreground shadow-soft"
-      style={{ width: size, height: size, fontSize: size * 0.42 }}
+      className="flex shrink-0 items-center justify-center rounded-full border border-sepia/60 bg-card font-display uppercase text-sepia"
+      style={{ width: size, height: size, fontSize: size * 0.4 }}
     >
-      {initials(id.studioName).slice(0, 1)}
+      {initials(id.studioName)}
     </span>
   );
 }
@@ -82,77 +78,110 @@ function Person({ id, size = 30 }: { id: PreviewIdentity; size?: number }) {
   );
 }
 
-function Banner({ id, compact }: { id: PreviewIdentity; compact?: boolean }) {
+/* The same pieces as the real Home screen (pages/Home.tsx), drawn still. */
+
+function Backdrop({ id }: { id: PreviewIdentity }) {
   return (
-    <div className="relative overflow-hidden rounded-2xl bg-[rgb(var(--c-banner))] text-[rgb(var(--c-banner-fg))] shadow-lift">
+    <div className="home-flash-fade pointer-events-none absolute inset-x-0 top-0 h-[420px] overflow-hidden">
       {id.coverUrl && (
-        <img src={id.coverUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-55" />
+        <>
+          <img src={id.coverUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-45" />
+          <div className="absolute inset-0 bg-background/55" />
+        </>
       )}
-      <div className="absolute inset-0 bg-gradient-to-r from-[rgb(var(--c-banner-deep))] via-[rgb(var(--c-banner-deep)/0.75)] to-transparent" />
-      <div className={cn("relative", compact ? "p-4" : "p-6")}>
-        <p className="text-[0.55rem] uppercase tracking-[0.32em] text-[rgb(var(--c-banner-accent))]">
-          {id.studioName}
-          {id.location ? ` · ${id.location}` : ""}
-        </p>
-        <p className={cn("mt-2 font-display leading-tight", compact ? "text-[1.55rem]" : "text-[2rem]")}>
+      <div className="home-flash relative h-full w-full" />
+    </div>
+  );
+}
+
+function HomeHeader({ id }: { id: PreviewIdentity }) {
+  return (
+    <div className="relative flex items-center gap-2.5">
+      <StudioMark id={id} size={38} />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[0.85rem] font-semibold text-charcoal">{id.studioName}</p>
+        <p className="truncate text-[0.62rem] text-muted-foreground">
           {greeting()}, {firstName(id.userName) || "there"}
         </p>
-        <p className="mt-1.5 text-[0.72rem] opacity-80">3 replies are written and waiting on your OK.</p>
-        <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[rgb(var(--c-banner-accent))] px-3.5 py-1.5 text-[0.68rem] font-medium text-[rgb(var(--c-banner-deep))]">
-          Review the drafts
+      </div>
+      <span className="flex items-center gap-1.5 rounded-full border border-sepia/45 bg-card/80 px-2.5 py-1.5 text-[0.58rem] font-semibold text-charcoal">
+        <span className="h-1.5 w-1.5 rounded-full bg-primary" /> AI replies live
+      </span>
+    </div>
+  );
+}
+
+function ReplyHero() {
+  return (
+    <div className="relative rounded-[24px] border border-sepia/25 bg-card/85 p-3.5 shadow-lift">
+      <span className="absolute -top-6 right-0 h-28 w-28 rounded-full bg-[radial-gradient(circle,rgb(var(--c-accent-strong)/0.45),transparent_66%)]" />
+      <img src="/home/reply.webp" alt="" className="absolute -top-4 right-1 h-[84px] w-[80px]" />
+      <p className="text-[0.52rem] font-semibold uppercase tracking-[0.24em] text-sepia">AI replies · 12 DMs today</p>
+      <p className="mt-1 max-w-[72%] font-display text-[1.9rem] font-medium uppercase leading-[0.95] text-charcoal">3 ready to send</p>
+      <p className="mt-1 text-[0.6rem] text-muted-foreground">Swipe right to send · left to edit</p>
+      <div className="relative mt-3 h-[150px]">
+        <div className="absolute inset-x-0 top-[16px] h-[134px] scale-[0.9] rounded-[18px] border border-border bg-elevated opacity-45" />
+        <div className="absolute inset-x-0 top-[8px] h-[134px] scale-[0.95] rounded-[18px] border border-border bg-elevated opacity-80" />
+        <div className="absolute inset-x-0 top-0 flex h-[134px] flex-col gap-1.5 rounded-[18px] border border-sepia/35 bg-elevated px-3 py-2.5 shadow-soft">
+          <div className="flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-beige/40 text-[0.5rem] text-charcoal">CH</span>
+            <span>
+              <span className="block text-[0.68rem] font-semibold text-charcoal">Chloe H.</span>
+              <span className="block text-[0.5rem] text-muted-foreground">4 minutes ago</span>
+            </span>
+          </div>
+          <p className="truncate text-[0.6rem] text-muted-foreground">“how much for a small fine line rose?”</p>
+          <p className="flex items-center gap-1.5 text-[0.46rem] font-semibold uppercase tracking-[0.22em] text-sepia">
+            <span className="h-1 w-1 rotate-45 bg-sepia" /> Runnit's reply <span className="h-px flex-1 bg-sepia/35" />
+          </p>
+          <p className="text-[0.66rem] leading-snug text-charcoal">
+            Hey Chloe! A small fine line rose is one of our faves. Send a pic of the spot and I'll get you a quote.
+          </p>
+        </div>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="flex h-8 w-8 items-center justify-center rounded-full border border-border text-charcoal">
+          <PenLine className="h-3.5 w-3.5" />
+        </span>
+        <span className="text-[0.55rem] text-muted-foreground">1 of 3</span>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-[0.62rem] font-semibold text-primary-foreground">
+          <Send className="h-3 w-3" /> Send
         </span>
       </div>
     </div>
   );
 }
 
-function InboxRows() {
+function TodayPieces() {
   return (
-    <div className="divide-y divide-border">
-      {PEOPLE.map((p) => (
-        <div key={p.name} className="flex items-center gap-2.5 py-2">
-          <span className="relative">
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-beige text-[0.6rem] text-charcoal">
-              {initials(p.name)}
-            </span>
-            <span
-              className={cn(
-                "absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card",
-                p.ig ? "bg-gradient-to-tr from-[#f58529] via-[#dd2a7b] to-[#8134af]" : "bg-[#0a7cff]"
-              )}
-            />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[0.72rem] font-semibold text-charcoal">{p.name}</span>
-            <span className="block truncate text-[0.65rem] text-muted-foreground">
-              {p.line} · {p.time}
-            </span>
-          </span>
-          <span className="rounded-full bg-sepia/15 px-1.5 py-0.5 text-[0.5rem] uppercase tracking-wider text-sepia">
-            Draft
-          </span>
-          <span className="h-2 w-2 rounded-full bg-destructive" />
+    <div className="space-y-2.5">
+      <p className="text-[0.72rem] font-semibold text-charcoal">Today at the studio</p>
+      <div className="grid grid-cols-2 gap-2.5">
+        {[
+          ["Bookings", "3 today", "Next 2:30pm · Mason", "/home/bookings.webp", "-right-1 -top-3 h-[70px] w-[64px]"],
+          ["Posts", "2 queued", "Next Wed 6:00pm", "/home/posts.webp", "-right-2 -top-1 h-[58px] w-[68px]"],
+        ].map(([label, big, small, image, place]) => (
+          <div key={label} className="relative h-[98px] rounded-[18px] border border-sepia/20 bg-card/85 p-2.5 shadow-soft">
+            <img src={image} alt="" className={cn("absolute", place)} />
+            <p className="text-[0.46rem] font-semibold uppercase tracking-[0.2em] text-sepia">{label}</p>
+            <p className="absolute bottom-6 left-2.5 font-display text-[1.25rem] font-medium uppercase leading-none text-charcoal">{big}</p>
+            <p className="absolute bottom-2.5 left-2.5 text-[0.52rem] text-muted-foreground">{small}</p>
+          </div>
+        ))}
+      </div>
+      <div className="rounded-[18px] border border-sepia/20 bg-card/85 px-3 pb-2 pt-2.5 shadow-soft">
+        <p className="flex justify-between text-[0.6rem]">
+          <b className="font-semibold text-charcoal">In the chair today</b>
+          <span className="text-sepia">Now · Ava</span>
+        </p>
+        <div className="relative mt-5 h-6">
+          <span className="absolute inset-x-0 top-[9px] h-[2px] rounded-full bg-border" />
+          <span className="absolute left-0 top-[8px] h-1 w-[55%] rounded-full bg-primary" />
+          <span className="absolute left-[12%] top-[5px] h-2.5 w-[18%] rounded-full bg-primary/45" />
+          <span className="absolute left-[45%] top-[5px] h-2.5 w-[18%] rounded-full bg-primary" />
+          <span className="absolute left-[74%] top-[5px] h-2.5 w-[10%] rounded-full border border-primary bg-card" />
+          <img src="/home/machine.webp" alt="" className="absolute -top-[26px] left-[55%] -ml-[30px] h-[38px] w-[33px]" />
         </div>
-      ))}
-    </div>
-  );
-}
-
-function DraftCard() {
-  return (
-    <div className="rounded-xl border border-border bg-card p-3 shadow-soft">
-      <p className="flex items-center gap-1 text-[0.52rem] uppercase tracking-[0.18em] text-sepia">
-        <Sparkles className="h-2.5 w-2.5" /> Draft reply
-      </p>
-      <p className="mt-1.5 text-[0.68rem] leading-snug text-charcoal">
-        Hey Chloe 😊 thanks for the photos! A small fine-line piece like that is about $200 – $250. Want a time this week?
-      </p>
-      <div className="mt-2 flex items-center gap-1.5">
-        <span className="rounded-full border border-sepia bg-sepia/10 px-2 py-0.5 text-[0.52rem] text-sepia">Recommended</span>
-        <span className="rounded-full border border-border px-2 py-0.5 text-[0.52rem] text-muted-foreground">Short</span>
-        <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-[0.58rem] text-primary-foreground">
-          <Send className="h-2.5 w-2.5" /> Approve & send
-        </span>
       </div>
     </div>
   );
@@ -160,42 +189,45 @@ function DraftCard() {
 
 function PhoneDesign({ id }: { id: PreviewIdentity }) {
   return (
-    <div className="flex h-[760px] w-[390px] flex-col gap-3 bg-background p-4" style={{ backgroundImage: "var(--page-wash)" }}>
-      <div className="flex items-center gap-2.5">
-        <StudioMark id={id} size={34} />
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-display text-[0.95rem] text-charcoal">{id.studioName}</p>
-          {id.location && <p className="truncate text-[0.6rem] text-muted-foreground">{id.location}</p>}
-        </div>
-        <span className="flex h-8 w-8 items-center justify-center rounded-full border border-border text-charcoal">
-          <Bell className="h-3.5 w-3.5" />
-        </span>
-        <Person id={id} size={32} />
+    <div className="relative flex h-[760px] w-[390px] flex-col gap-4 overflow-hidden bg-background p-4" style={{ backgroundImage: "var(--page-wash)" }}>
+      <Backdrop id={id} />
+      <HomeHeader id={id} />
+      <div className="relative">
+        <ReplyHero />
       </div>
-      <Banner id={id} compact />
-      <div className="grid grid-cols-2 gap-2.5">
+      <div className="relative">
+        <TodayPieces />
+      </div>
+      <div className="absolute inset-x-3 bottom-3 grid grid-cols-5 gap-1 rounded-[22px] border border-border bg-[rgb(var(--glass-bg)/var(--glass-alpha))] p-1 shadow-lift">
         {[
-          ["Messages today", "12"],
-          ["Drafts waiting", "3"],
-        ].map(([label, value]) => (
-          <div key={label} className="rounded-xl border border-border bg-card p-3 shadow-soft">
-            <p className="font-display text-2xl text-charcoal">{value}</p>
-            <p className="mt-1 text-[0.52rem] uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
-          </div>
-        ))}
+          [House, "Home"],
+          [MessageSquare, "Messages"],
+          [CalendarCheck, "Bookings"],
+          [ImageIcon, "Posts"],
+          [Menu, "More"],
+        ].map(([Icon, label], i) => {
+          const I = Icon as typeof House;
+          return (
+            <span
+              key={label as string}
+              className={cn(
+                "flex h-10 flex-col items-center justify-center gap-0.5 rounded-[18px] text-[0.5rem]",
+                i === 0 ? "bg-primary text-primary-foreground" : "text-muted-foreground"
+              )}
+            >
+              <I className="h-3.5 w-3.5" />
+              {label as string}
+            </span>
+          );
+        })}
       </div>
-      <div className="rounded-xl border border-border bg-card px-3 pt-2.5 shadow-soft">
-        <p className="font-display text-[0.9rem] text-charcoal">Needs a reply</p>
-        <InboxRows />
-      </div>
-      <DraftCard />
     </div>
   );
 }
 
 function DesktopDesign({ id }: { id: PreviewIdentity }) {
   const nav: [typeof LayoutGrid, string, string?][] = [
-    [LayoutGrid, "Dashboard"],
+    [LayoutGrid, "Home"],
     [MessageSquare, "Messages", "3"],
     [CalendarCheck, "Bookings"],
     [ImageIcon, "Content"],
@@ -233,8 +265,8 @@ function DesktopDesign({ id }: { id: PreviewIdentity }) {
           Powered by Runnit
         </p>
       </aside>
-      <main className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center gap-2 border-b border-border px-5 py-2.5">
+      <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="relative z-10 flex items-center gap-2 border-b border-border px-5 py-2.5">
           <span className="flex flex-1 items-center gap-1.5 rounded-lg border border-border bg-input px-2.5 py-1.5 text-[0.62rem] text-muted-foreground">
             <Search className="h-3 w-3" /> Search messages…
           </span>
@@ -246,28 +278,14 @@ function DesktopDesign({ id }: { id: PreviewIdentity }) {
             <span className="text-[0.62rem] text-charcoal">{firstName(id.userName) || "You"}</span>
           </span>
         </div>
-        <div className="grid flex-1 grid-cols-[1.35fr_1fr] gap-3 p-5">
-          <div className="flex flex-col gap-3">
-            <Banner id={id} />
-            <div className="grid grid-cols-3 gap-2.5">
-              {[
-                ["Messages today", "12"],
-                ["Drafts waiting", "3"],
-                ["New bookings", "2"],
-              ].map(([label, value]) => (
-                <div key={label} className="rounded-xl border border-border bg-card p-3 shadow-soft">
-                  <p className="font-display text-2xl text-charcoal">{value}</p>
-                  <p className="mt-1 text-[0.5rem] uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
-                </div>
-              ))}
-            </div>
+        <div className="relative flex-1 p-5">
+          <Backdrop id={id} />
+          <div className="relative">
+            <HomeHeader id={id} />
           </div>
-          <div className="flex flex-col gap-3">
-            <div className="rounded-xl border border-border bg-card px-3 pt-2.5 shadow-soft">
-              <p className="font-display text-[0.9rem] text-charcoal">Needs a reply</p>
-              <InboxRows />
-            </div>
-            <DraftCard />
+          <div className="relative mt-4 grid grid-cols-[1.1fr_1fr] gap-4">
+            <ReplyHero />
+            <TodayPieces />
           </div>
         </div>
       </main>
@@ -276,8 +294,11 @@ function DesktopDesign({ id }: { id: PreviewIdentity }) {
 }
 
 /**
- * A miniature of the real dashboard in a given look, with the studio's own
+ * A miniature of the real Home screen in a given look, with the studio's own
  * name, logo, banner and the owner's photo in it. Scales to fit its box.
+ * Built from the same pieces and pictures as pages/Home.tsx — if the Home
+ * screen changes, change this with it, or "every card is your actual
+ * dashboard" stops being true.
  */
 export function DashboardPreview({
   look,

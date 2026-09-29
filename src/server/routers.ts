@@ -49,7 +49,7 @@ import {
   practiceReply,
   suggestPosts,
 } from "./agent.js";
-import { getUpcomingBookings, findFreeSlots } from "./calendar.js";
+import { getUpcomingBookings, getTodayBookings, findFreeSlots } from "./calendar.js";
 import {
   getLastProfileError,
   explainProfileFailure,
@@ -131,6 +131,8 @@ export const appRouter = t.router({
 
   calendar: t.router({
     upcoming: studioProcedure.query(() => getUpcomingBookings()),
+    // Today on the studio's clock, done and to come — the home screen's timeline.
+    today: studioProcedure.query(() => getTodayBookings()),
     freeSlots: studioProcedure.query(() => findFreeSlots({ limit: 5 })),
   }),
 

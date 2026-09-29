@@ -17,6 +17,7 @@ import {
   Bell,
   Images,
   Rss,
+  House,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -27,7 +28,7 @@ import { InkDefs } from "@/components/Logo";
 import { StudioSwitcher, UserMenu } from "@/components/StudioSwitcher";
 import { ConnectState, StudioHome } from "@/components/ConnectState";
 import InboxSearch from "@/components/InboxSearch";
-import Dashboard from "./pages/Dashboard";
+import Home from "./pages/Home";
 import Conversations from "./pages/Conversations";
 import Bookings from "./pages/Bookings";
 import CheckIns from "./pages/CheckIns";
@@ -45,7 +46,7 @@ import StudioGallery from "./pages/StudioGallery";
 import Feed from "./pages/Feed";
 
 const NAV = [
-  { href: "/", label: "Dashboard", icon: LayoutGrid, badge: false },
+  { href: "/", label: "Home", icon: LayoutGrid, badge: false },
   { href: "/messages", label: "Messages", icon: MessageSquare, badge: true },
   { href: "/bookings", label: "Bookings", icon: CalendarCheck, badge: false },
   { href: "/checkins", label: "Check-ins", icon: CheckCircle2, badge: false },
@@ -122,6 +123,64 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
+/**
+ * The thumb menu on a phone: home, the three things the studio does every
+ * day, and everything else behind More. Brad liked the demo with the menu at
+ * the bottom, and a hamburger in the top corner is the furthest point on the
+ * screen from a thumb.
+ */
+const TABS = [
+  { href: "/", label: "Home", icon: House },
+  { href: "/messages", label: "Messages", icon: MessageSquare },
+  { href: "/bookings", label: "Bookings", icon: CalendarCheck },
+  { href: "/posts", label: "Posts", icon: ImageIcon },
+];
+
+function BottomNav({ pending, menuOpen, onMore }: { pending: number; menuOpen: boolean; onMore: () => void }) {
+  const [location] = useLocation();
+  return (
+    <nav
+      aria-label="Main"
+      className="glass fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-30 mx-auto grid max-w-md grid-cols-5 gap-1 rounded-[28px] border p-1.5 shadow-lift lg:hidden"
+    >
+      {TABS.map(({ href, label, icon: Icon }) => {
+        const active = !menuOpen && (href === "/" ? location === "/" : location.startsWith(href));
+        return (
+          <Link
+            key={href}
+            href={href}
+            aria-current={active ? "page" : undefined}
+            className={cn(
+              "relative flex h-[52px] flex-col items-center justify-center gap-0.5 rounded-[22px] text-[0.66rem] font-medium transition-colors duration-300",
+              active ? "bg-primary text-primary-foreground shadow-glow" : "text-muted-foreground hover:text-charcoal"
+            )}
+          >
+            <Icon className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
+            {label}
+            {href === "/messages" && pending > 0 && (
+              <span className="absolute right-2 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[0.58rem] font-semibold text-primary-foreground ring-2 ring-background">
+                {pending}
+              </span>
+            )}
+          </Link>
+        );
+      })}
+      <button
+        type="button"
+        onClick={onMore}
+        aria-expanded={menuOpen}
+        className={cn(
+          "flex h-[52px] flex-col items-center justify-center gap-0.5 rounded-[22px] text-[0.66rem] font-medium transition-colors duration-300",
+          menuOpen ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-charcoal"
+        )}
+      >
+        <Menu className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
+        More
+      </button>
+    </nav>
+  );
+}
+
 function StatusBar() {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -133,7 +192,9 @@ function StatusBar() {
     // Bottom-right rather than centred: sitting in the middle of the page it
     // covered whatever card happened to be under it, which on the dashboard
     // was the top of a scheduled post.
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 flex justify-end pb-4 pr-3 sm:pr-6">
+    // Desktop only: on a phone the bottom menu sits here, and the Home
+    // screen already says whether the agent is live.
+    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 hidden justify-end pb-4 pr-3 sm:pr-6 lg:flex">
       {/* Compact on a phone. At full width this is 250px of a 390px screen
           and it sat straight across a customer's name on the draft board —
           the one thing on that card you need to read. The dot is the signal;
@@ -351,9 +412,9 @@ function Workspace() {
           <UserMenu />
         </header>
 
-        <main key={studio?.id} className="mx-auto max-w-[1500px] animate-fade-up px-4 pb-24 pt-6 md:px-6">
+        <main key={studio?.id} className="mx-auto max-w-[1500px] animate-fade-up px-4 pb-32 pt-6 md:px-6 lg:pb-24">
           <Switch>
-            <Route path="/">{connected ? <Dashboard /> : <StudioHome />}</Route>
+            <Route path="/">{connected ? <Home /> : <StudioHome />}</Route>
             {DATA_ROUTES.map(([path, Page]) => (
               <Route key={path} path={path}>
                 {connected ? <Page /> : <ConnectState what={NAV.find((n) => n.href === path)?.label} />}
@@ -374,6 +435,7 @@ function Workspace() {
       </div>
 
       {connected && <StatusBar />}
+      <BottomNav pending={pending?.length ?? 0} menuOpen={menuOpen} onMore={() => setMenuOpen((open) => !open)} />
     </div>
   );
 }

@@ -19,7 +19,9 @@ function Root() {
       <QueryClientProvider client={queryClient}>
         {/* Follows the page rather than being pinned dark — on the light
             palette a black toast was the only black rectangle on screen. */}
-        <Toaster theme="system" position="bottom-right" richColors />
+        {/* Lifted clear of the phone's bottom menu (and the status bar on a
+            laptop) — the Undo on a swiped reply has to be reachable. */}
+        <Toaster theme="system" position="bottom-right" richColors offset={{ bottom: 92, right: 24 }} mobileOffset={{ bottom: 92 }} />
         <SessionProvider>
           <App />
         </SessionProvider>
