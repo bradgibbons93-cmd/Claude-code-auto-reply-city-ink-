@@ -1176,6 +1176,23 @@ Posts, More) in `App.tsx`; the desktop sidebar is unchanged.
 - `DashboardPreview` (theme picker, onboarding) draws the Home screen in
   miniature. Change it with the Home, or "every card is your actual
   dashboard" stops being true.
+- **The classic dashboard is still in the app, on purpose.** Brad, before it
+  went live: "make it easy to undo back to the version it is now". The studio
+  record has `home_layout` ("classic" or null for the new Home); "Prefer the old
+  dashboard? Switch back" under the Home, "Try the new Home" on top of the
+  classic one, and Settings → Appearance → Home screen all flip it, saved on
+  the studio so every device agrees. Classic also brings back the app as it
+  was around it (no bottom menu, the Live pill on phones). Don't delete
+  `pages/Dashboard.tsx` while that switch exists.
+- **The test drive** (`npm run build:demo` → `dist-demo/`) is the real app on
+  pretend data, for trying screens before they go live — it was published as
+  an artifact for Brad to use on his phone. `src/client/demo/mock.ts` replaces
+  the network (there is none: nothing can reach Meta or the inbox);
+  `fixtures.json` is recorded from the real server by
+  `scripts/demo-fixtures.mjs` with invented customers, and every timestamp is
+  moved to "now" when the page opens. `vite.demo.config.ts` makes the
+  site-root picture paths relative and turns log-out into "start over".
+  Re-run the fixtures script after changing what a screen asks the server for.
 - `tests/home.mjs` drives it on a phone-sized browser: swipe → Undo offered →
   nothing sent for five seconds → exactly one send with the draft's words;
   Undo → nothing sent; left swipe → the thread; a personal message → opens the

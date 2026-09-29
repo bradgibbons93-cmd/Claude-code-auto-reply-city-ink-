@@ -23,6 +23,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ImageDrop } from "@/components/ImageDrop";
 import { DashboardPreview } from "@/components/DashboardPreview";
 import { LookControls, ThemeCards } from "@/components/ThemePicker";
+import { HomeLayoutPicker } from "@/components/home/HomeLayoutSwitch";
 import { StudioMark } from "@/components/StudioSwitcher";
 import { ConnectState } from "@/components/ConnectState";
 import InboxSettings from "./Settings";
@@ -304,6 +305,10 @@ function AppearanceTab() {
 
   return (
     <Section title="Appearance" description={`${studio.name}'s look. Each studio keeps its own.`}>
+      <div className="space-y-2">
+        <p className="text-sm font-semibold text-charcoal">Home screen</p>
+        <HomeLayoutPicker />
+      </div>
       <div className="grid gap-8 xl:grid-cols-[1fr_300px]">
         <ThemeCards look={look} identity={identity} onChange={setLook} />
         <div className="space-y-6">

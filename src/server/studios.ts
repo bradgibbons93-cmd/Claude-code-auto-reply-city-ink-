@@ -248,7 +248,7 @@ const HEX = /^#[0-9a-f]{6}$/i;
 export async function setAppearance(
   userId: number,
   studioId: number,
-  look: { theme?: string; mode?: "light" | "dark" | null; accent?: string | null }
+  look: { theme?: string; mode?: "light" | "dark" | null; accent?: string | null; homeLayout?: "new" | "classic" }
 ) {
   await requireOwner(userId, studioId);
   const set: Partial<StudioRow> = {};
@@ -261,6 +261,7 @@ export async function setAppearance(
     if (look.accent !== null && !HEX.test(look.accent)) throw new AccountError("Pick an accent colour from the list.");
     set.accent = look.accent;
   }
+  if (look.homeLayout !== undefined) set.homeLayout = look.homeLayout === "classic" ? "classic" : null;
   if (!Object.keys(set).length) return getStudio(studioId);
   const db = await getDb();
   await db.update(studios).set(set).where(eq(studios.id, studioId));
@@ -453,6 +454,7 @@ export async function describeViewer(viewer: Viewer | null, expired = false) {
       theme: studio.theme ?? "noir",
       mode: (studio.mode as "light" | "dark" | null) ?? null,
       accent: studio.accent ?? null,
+      homeLayout: studio.homeLayout === "classic" ? ("classic" as const) : ("new" as const),
       role,
       connected: studio.id === viewer.dataStudioId,
     })),

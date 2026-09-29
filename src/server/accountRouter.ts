@@ -227,6 +227,7 @@ export const studiosRouter = t.router({
         theme: z.enum(THEMES).optional(),
         mode: z.enum(["light", "dark"]).nullable().optional(),
         accent: z.string().max(16).nullable().optional(),
+        homeLayout: z.enum(["new", "classic"]).optional(),
       })
     )
     .mutation(({ ctx, input }) =>

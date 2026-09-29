@@ -80,6 +80,10 @@ export const studios = mysqlTable("studios", {
   // "light" / "dark" / null for "the theme's own default".
   mode: varchar("mode", { length: 8 }),
   accent: varchar("accent", { length: 16 }),
+  // Which home screen: null / "new" is the swipe deck (pages/Home.tsx),
+  // "classic" the dashboard from before it (pages/Dashboard.tsx). A switch the
+  // owner can flip back themselves, because Brad asked for an easy undo.
+  homeLayout: varchar("home_layout", { length: 16 }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });

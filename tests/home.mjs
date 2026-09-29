@@ -329,6 +329,23 @@ try {
   check("an empty deck says all caught up", true);
   await page.screenshot({ path: `${SHOTS}/04-phone-caught-up.png` });
 
+  // The way back: one tap to the classic dashboard, one tap to return.
+  await sql.query("UPDATE pending_replies SET status = 'pending' WHERE conversation_id = 'josh'");
+  await page.goto(BASE, { waitUntil: "load" });
+  await page.getByText(/ready to send/i).waitFor({ timeout: 15000 });
+  await page.getByRole("button", { name: /Prefer the old dashboard\? Switch back/ }).click();
+  await page.getByText("Try the new Home — swipe to send replies").waitFor({ timeout: 8000 });
+  check("one tap goes back to the classic dashboard", /Waiting for your OK/.test(await main()), (await main()).slice(0, 200));
+  check("saved on the studio, for every device", (await sql.query("SELECT home_layout FROM studios"))[0][0].home_layout === "classic");
+  check("and the app is as it was — no bottom menu", !(await page.locator('nav[aria-label="Main"]').isVisible()));
+  await page.screenshot({ path: `${SHOTS}/07-phone-classic.png` });
+  await page.reload({ waitUntil: "load" });
+  await page.getByText("Try the new Home — swipe to send replies").waitFor({ timeout: 15000 });
+  check("it stays classic after a refresh", true);
+  await page.getByText("Try the new Home — swipe to send replies").click();
+  await page.getByText(/ready to send/i).waitFor({ timeout: 8000 });
+  check("and one tap brings the new Home back", (await sql.query("SELECT home_layout FROM studios"))[0][0].home_layout === null);
+
   // A laptop: two columns, no bottom menu.
   await sql.query("UPDATE pending_replies SET status = 'pending' WHERE conversation_id IN ('josh', 'priya')");
   const laptop = await browser.newContext({ viewport: { width: 1440, height: 900 } });

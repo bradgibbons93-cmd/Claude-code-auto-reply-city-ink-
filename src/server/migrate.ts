@@ -259,6 +259,8 @@ const STATEMENTS = [
  * because MySQL's `ADD COLUMN IF NOT EXISTS` support is version-dependent.
  */
 const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
+  // The classic/new home screen switch (see studios.homeLayout in schema.ts).
+  { table: "studios", column: "home_layout", ddl: "VARCHAR(16) NULL" },
   { table: "messenger_conversations", column: "booking_name", ddl: "VARCHAR(255)" },
   { table: "messenger_conversations", column: "booking_phone", ddl: "VARCHAR(64)" },
   { table: "messenger_conversations", column: "booking_dates", ddl: "VARCHAR(255)" },

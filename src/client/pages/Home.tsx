@@ -5,6 +5,7 @@ import { useSession, firstName, initials } from "@/lib/session";
 import { isUnanswered } from "@/lib/utils";
 import ReplyDeck from "@/components/home/ReplyDeck";
 import { ChairTimeline, TodayTiles } from "@/components/home/StudioToday";
+import { BackToClassic } from "@/components/home/HomeLayoutSwitch";
 
 function greeting() {
   const hour = new Date().getHours();
@@ -136,6 +137,9 @@ export default function Home() {
             <TodayTiles />
             <ChairTimeline />
           </div>
+        </div>
+        <div className="mt-6">
+          <BackToClassic />
         </div>
       </div>
     </div>

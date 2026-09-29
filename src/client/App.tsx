@@ -29,6 +29,7 @@ import { StudioSwitcher, UserMenu } from "@/components/StudioSwitcher";
 import { ConnectState, StudioHome } from "@/components/ConnectState";
 import InboxSearch from "@/components/InboxSearch";
 import Home from "./pages/Home";
+import Dashboard from "./pages/Dashboard";
 import Conversations from "./pages/Conversations";
 import Bookings from "./pages/Bookings";
 import CheckIns from "./pages/CheckIns";
@@ -181,7 +182,7 @@ function BottomNav({ pending, menuOpen, onMore }: { pending: number; menuOpen: b
   );
 }
 
-function StatusBar() {
+function StatusBar({ everywhere = false }: { everywhere?: boolean }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -194,7 +195,7 @@ function StatusBar() {
     // was the top of a scheduled post.
     // Desktop only: on a phone the bottom menu sits here, and the Home
     // screen already says whether the agent is live.
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 hidden justify-end pb-4 pr-3 sm:pr-6 lg:flex">
+    <div className={cn("pointer-events-none fixed inset-x-0 bottom-0 z-20 justify-end pb-4 pr-3 sm:pr-6", everywhere ? "flex" : "hidden lg:flex")}>
       {/* Compact on a phone. At full width this is 250px of a 390px screen
           and it sat straight across a customer's name on the draft board —
           the one thing on that card you need to read. The dot is the signal;
@@ -313,6 +314,9 @@ function Workspace() {
   const [location] = useLocation();
   const { studio, connected, refresh } = useSession();
   const mode = resolveMode({ theme: studio?.theme, mode: studio?.mode });
+  // The classic dashboard, if the studio switched back to it — and with it
+  // the app as it was: no bottom menu, the Live pill on phones.
+  const classic = studio?.homeLayout === "classic";
 
   const { data: pending } = trpc.pendingReplies.list.useQuery(undefined, {
     refetchInterval: 10000,
@@ -412,9 +416,9 @@ function Workspace() {
           <UserMenu />
         </header>
 
-        <main key={studio?.id} className="mx-auto max-w-[1500px] animate-fade-up px-4 pb-32 pt-6 md:px-6 lg:pb-24">
+        <main key={studio?.id} className={cn("mx-auto max-w-[1500px] animate-fade-up px-4 pt-6 md:px-6", classic ? "pb-24" : "pb-32 lg:pb-24")}>
           <Switch>
-            <Route path="/">{connected ? <Home /> : <StudioHome />}</Route>
+            <Route path="/">{connected ? classic ? <Dashboard /> : <Home /> : <StudioHome />}</Route>
             {DATA_ROUTES.map(([path, Page]) => (
               <Route key={path} path={path}>
                 {connected ? <Page /> : <ConnectState what={NAV.find((n) => n.href === path)?.label} />}
@@ -434,8 +438,10 @@ function Workspace() {
         </main>
       </div>
 
-      {connected && <StatusBar />}
-      <BottomNav pending={pending?.length ?? 0} menuOpen={menuOpen} onMore={() => setMenuOpen((open) => !open)} />
+      {connected && <StatusBar everywhere={classic} />}
+      {!classic && (
+        <BottomNav pending={pending?.length ?? 0} menuOpen={menuOpen} onMore={() => setMenuOpen((open) => !open)} />
+      )}
     </div>
   );
 }
