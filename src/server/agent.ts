@@ -65,7 +65,42 @@ interface AgentDecision {
   // out of THIS message. Missing/unclear fields come back empty, and the
   // caller merges them onto what earlier messages already gave.
   extracted?: { name?: string; phone?: string; dates?: string };
+  // What a price in the reply rests on. Brad, 2 October, under a draft that
+  // quoted "$250-300" for a flat drawing the customer had never sized or
+  // placed, in a thread where he'd only asked about next weekend: "make sure
+  // we always ask for size and area, unless they send a photo of it already
+  // drawn on or edited onto their body and you can estimate". The model says
+  // what it went off; `unsupportedQuote` holds it to that.
+  quote?: { gives_price?: boolean; size?: string | null; placement?: string | null };
 }
+
+/** A tattoo price in a draft: a range ("$250-300", "$200 to $250") or a
+ * figure hedged as an estimate ("around $300", "looking at about $250").
+ * A flat "$50 deposit" or "our minimum is $150" is a studio fact, not a
+ * quote for their piece, and doesn't match. */
+const PRICE_RANGE = /\$\s?\d[\d,]*(?:\.\d+)?\s*(?:-|–|—|to)\s*\$?\s?\d/i;
+const HEDGED_PRICE = /\b(?:about|around|roughly|approx\w*|looking at|somewhere|ballpark|sit\w*(?: nicely)? (?:at|around))\b[^.?!\n]{0,30}\$\s?\d/i;
+export function quotesAPrice(text: string): boolean {
+  return PRICE_RANGE.test(text) || HEDGED_PRICE.test(text);
+}
+
+const isKnown = (v?: string | null) =>
+  !!v && !/^\s*(null|unknown|none|n\/a|not (known|given|said|sure)|\?+)?\s*$/i.test(v);
+
+/** True when a draft prices the customer's tattoo without knowing BOTH how
+ * big it is and where it's going. Exported for the tests. */
+export function unsupportedQuote(d: Pick<AgentDecision, "reply" | "alternatives" | "quote">): boolean {
+  const texts = [d.reply ?? "", ...(d.alternatives ?? []).map((a) => a?.text ?? "")];
+  const priced = !!d.quote?.gives_price || texts.some(quotesAPrice);
+  if (!priced) return false;
+  return !(isKnown(d.quote?.size) && isKnown(d.quote?.placement));
+}
+
+/** The draft written when the model keeps pricing a piece nobody has sized.
+ * Plain on purpose: it asks the two things the price needs, and the studio
+ * reads it before it goes. */
+export const ASK_SIZE_AND_PLACEMENT =
+  "Love this 😊 roughly what size were you thinking, and where on the body? Then I can give you a price 👌";
 
 interface BookingState {
   name: string | null;
@@ -126,6 +161,13 @@ USE WHAT YOU KNOW ABOUT TATTOOING. You are not a lookup table — you're meant t
 WHAT IS NOT YOURS TO DECIDE — this is the hard line:
 Any NUMBER or COMMITMENT specific to this studio comes only from the studio facts below. Prices, the minimum, the deposit, the hourly rate, opening hours, an artist's availability, a date, a policy. If a figure is in the facts, use it plainly and confidently — "our minimum is $150" — don't hedge it. If it ISN'T there, do not estimate it, do not give a range, do not reason your way to one from what tattoos usually cost. Explain the thinking instead and say the team will confirm the figure. A wrong price is a promise the studio has to honour or break.
 
+NO PRICE UNTIL YOU KNOW SIZE AND PLACEMENT — ${me.owner}'s rule, and it beats everything else about pricing:
+- Never give a price for their tattoo, not even a range or an "around $X", until you know BOTH roughly how big it is AND where on the body it's going.
+- You know them only if (a) the customer has said them in this chat, in their own words, or (b) they've sent a photo of the design ON THEIR OWN BODY: drawn on, stencilled, or edited/mocked up onto a photo of them, so you can see the size and the spot.
+- A flat drawing, a sketch on paper, a screenshot, a design from the internet or AI, or a tattoo on someone else does NOT tell you their size or placement. Don't guess them from it.
+- If either is missing, ask for it instead of pricing: roughly what size (cm is fine) and where on the body, and say you'll give them a price once you know. Real tone: "Love this 😊 roughly what size were you thinking and where on the body? Then I can give you a price 👌"
+- Don't bring a price up unasked. If they're asking about a time, a change to the design or anything else, answer that. You can still ask for size and placement so the price is ready when they want it.
+
 NEVER:
 - Give medical advice. Anything that sounds infected or isn't healing → tell them to see a doctor.
 - Promise an appointment time that isn't listed as free below.
@@ -168,7 +210,10 @@ AFTERCARE — if our last message asked how their tattoo was healing:
 
 THE BOOKING FLOW — work out which step you're at and do that step:
 1. First enquiry / "get a quote" with NO photo yet → ask for a reference photo, rough size, and where on the body. Real example: "Please send over any ideas and/ or reference photos along with a rough size and area you would like for the tattoo."
-2. Photo received → thank them and give a BALLPARK RANGE of about $100 wide for the size you can see in it (see READING THEIR PHOTOS), e.g. "Hey ${"${name}"} 😊 thanks for sending this through! You would be looking at about $200 - $250, would that suit you?" Don't hold the price back to ask for measurements. Only quote from the price guidance above — if there's none, say the team will confirm a price shortly.
+2. Photo received → thank them, then:
+   - The design is ON THEIR BODY (drawn on, stencilled, or edited onto a photo of them), or they've already told you the size AND the spot → give a BALLPARK RANGE of about $100 wide for what you can see (see READING THEIR PHOTOS), e.g. "Hey ${"${name}"} 😊 thanks for sending this through! You would be looking at about $200 - $250, would that suit you?" Don't hold that price back to ask for measurements.
+   - Anything else (a flat drawing, a screenshot, a design from online, a tattoo on someone else) → NO price yet. Say something real about the design, then ask roughly what size and where on the body, and that you'll give them a price once you know.
+   Only quote from the price guidance above — if there's none, say the team will confirm a price shortly.
 3. They push back on price or give a lower budget → don't just say no. Ask what their budget is, stay warm about it, and only offer a cheaper option if one is actually listed in the studio facts above. If nothing cheaper is listed, do NOT invent an artist, an apprentice, a discount, or a payment plan — say you'll check with the team and come back to them. Real tone: "Okay cool no worries at all 😊 if you have a set budget how much your wanting to spend feel free to let us know and we will see what we can do 👌"
 4. Happy with the price → offer times. ${
     availability
@@ -209,9 +254,9 @@ Ask only for what's still missing, one or two things at a time, and never re-ask
 ${hasPhoto ? "- They just sent a photo — acknowledge you've got it before anything else." : ""}
 
 READING THEIR PHOTOS — when the customer has sent reference photos, you can SEE them: they're attached to their latest message. Read them the way a tattooist would:
-- Work out the rough size and placement yourself. A design drawn or stencilled on skin, a similar tattoo on someone, or a shot of the spot on their body tells you the size well enough — a small wrist piece a few cm across, a fine line running down the forearm, something palm-sized. Say what you're going off in a few words, the way ${me.owner} would ("these look like a small wrist piece and a longer fine-line piece down the forearm").
-- Then give the ballpark straight away for that size, from the studio's price facts and the corrections above. Do NOT ask them for exact centimetres — a rough read of the photo is exactly what a quote at this stage is.
-- Only ask about size or placement when the photos genuinely can't tell you — a flat design or screenshot with nothing to scale it against and no spot mentioned. Even then, give the range for the size it most likely is and ask them to confirm, rather than asking with no number at all.
+- First decide what the photo IS. Only a design on THEIR OWN BODY (drawn on, stencilled, or edited/mocked up onto a photo of them) shows you their size and placement.
+- If it is on their body: work out the rough size and placement yourself (a small wrist piece a few cm across, a fine line running down the forearm, something palm-sized). Say what you're going off in a few words, the way ${me.owner} would ("these look like a small wrist piece and a longer fine-line piece down the forearm"). Then give the ballpark straight away for that size, from the studio's price facts and the corrections above. Do NOT ask them for exact centimetres — a rough read of the photo is exactly what a quote at this stage is.
+- If it isn't (a flat design, a drawing on paper, a screenshot, something off the internet or AI, a tattoo on someone else): comment on the design like a tattooist, and ask roughly what size and where on the body, unless they've already told you both in words. NO price, not even a guessed range.
 - If a photo isn't a tattoo idea at all (a receipt, a screenshot of a chat, a selfie), don't price it.
 - The hard line still holds: the SIZE is your read of the photo; every DOLLAR figure comes only from the studio facts.
 
@@ -226,19 +271,47 @@ If intent is "booking", pull out anything the LATEST message gives you toward na
 
 GIVE TWO ALTERNATIVES as well as your main reply — the studio picks one and sends it, so make them genuinely different choices rather than the same message reworded. Different angles on the same enquiry: one shorter and more casual, one that explains the craft reasoning, one that pushes toward booking. Label each in two or three words so it can be told apart at a glance ("Short and casual", "Explains the work", "Pushes to book"). Every alternative obeys the same rules as the main reply — same facts, same prices, same hard line on numbers.
 
-Reply with JSON only, no prose, no code fence:
-{"reply": "your message to the customer", "alternatives": [{"label": "Short and casual", "text": "..."}, {"label": "Pushes to book", "text": "..."}], "intent": "booking", "sensitive": false, "extracted": {"name": "...", "phone": "...", "dates": "..."}}`;
+"quote" says what any price you give rests on: "gives_price" is true if the reply or an alternative prices THEIR tattoo (a deposit or the studio minimum on its own doesn't count). "size" and "placement" are what you know and where from — their words ("about 10cm, they said") or the photo on their body ("palm-sized, drawn on her forearm") — or null if you don't know. If either is null, gives_price must be false.
 
-  const result = await invokeLLMJson<AgentDecision>(
-    [{ role: "system", content: system }, ...history],
-    {
-      // Only ever seen when the model didn't answer. The caller flags the
-      // draft so this can't be mistaken for the agent's own judgement.
-      reply: "Thanks for getting in touch — one of the team will come back to you shortly.",
-      intent: "other",
-    }
+Reply with JSON only, no prose, no code fence:
+{"reply": "your message to the customer", "alternatives": [{"label": "Short and casual", "text": "..."}, {"label": "Pushes to book", "text": "..."}], "intent": "booking", "sensitive": false, "extracted": {"name": "...", "phone": "...", "dates": "..."}, "quote": {"gives_price": false, "size": null, "placement": null}}`;
+
+  const fallback: AgentDecision = {
+    // Only ever seen when the model didn't answer. The caller flags the
+    // draft so this can't be mistaken for the agent's own judgement.
+    reply: "Thanks for getting in touch — one of the team will come back to you shortly.",
+    intent: "other",
+  };
+  const result = await invokeLLMJson<AgentDecision>([{ role: "system", content: system }, ...history], fallback);
+  if (!result.ok || !unsupportedQuote(result.data)) return { ...result.data, ok: result.ok };
+
+  // It priced a piece without knowing how big it is or where it's going.
+  // Ask once more, saying exactly what was wrong.
+  console.warn("[agent] Draft priced a tattoo without size and placement — asking again without a price");
+  const again = await invokeLLMJson<AgentDecision>(
+    [
+      {
+        role: "system",
+        content: `${system}
+
+YOUR LAST DRAFT BROKE THE PRICE RULE. It gave a price, but you don't know both the size and where on the body it's going. Write it again with NO price anywhere, in the reply or the alternatives. Answer what they actually asked, and ask roughly what size and where on the body.`,
+      },
+      ...history,
+    ],
+    fallback
   );
-  return { ...result.data, ok: result.ok };
+  if (again.ok && !unsupportedQuote(again.data)) return { ...again.data, ok: true };
+
+  // Still pricing it. Don't put a guessed number in front of the studio:
+  // keep what it said about anything else out, and ask the two questions.
+  const first = again.ok ? again.data : result.data;
+  return {
+    ...first,
+    reply: ASK_SIZE_AND_PLACEMENT,
+    alternatives: (first.alternatives ?? []).filter((a) => a?.text && !quotesAPrice(a.text)),
+    quote: { gives_price: false, size: null, placement: null },
+    ok: true,
+  };
 }
 
 /** Pings the studio owner's own Messenger thread so they can enter it into Timely. */

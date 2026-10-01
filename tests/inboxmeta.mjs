@@ -42,6 +42,9 @@ await new Promise((r) => graph.listen(4433, r));
 // A stand-in model that remembers what it was sent.
 let bodies = [];
 let refuseImages = false;
+// "flat": the model prices a flat drawing nobody has sized (as on 2 October);
+// it complies when told off. "stubborn": it never stops pricing it.
+let pricing = "photo-on-body";
 const model = http.createServer((req, res) => {
   let raw = "";
   req.on("data", (c) => (raw += c));
@@ -57,12 +60,33 @@ const model = http.createServer((req, res) => {
         error: { type: "invalid_request_error", message: "messages.3.content.0.image.source: Could not process image" },
       }));
     }
+    const toldOff = (body.system ?? "").includes("YOUR LAST DRAFT BROKE THE PRICE RULE");
+    let answer = {
+      reply: "Hey 😊 thanks for sending these! A small wrist piece and a fine line down the forearm, you'd be looking at about $250 - $350 for both",
+      alternatives: [{ label: "Short and casual", text: "About $250 - $350 for both 😊" }],
+      intent: "pricing", sensitive: false,
+      quote: { gives_price: true, size: "small wrist piece and a longer fine line, from the photos on her arm", placement: "wrist and forearm" },
+    };
+    if (pricing !== "photo-on-body" && (!toldOff || pricing === "stubborn")) {
+      answer = {
+        reply: "Hey Nathan this looks awesome 😊 I'm thinking this'd sit nicely around $250-300 depending on the size and placement. Saturday the 3rd at 10:30am is free if that suits",
+        alternatives: [
+          { label: "Short and casual", text: "Love this one Nathan 😊 roughly $250-300. Sat the 3rd at 10:30am is free?" },
+          { label: "Pushes to book", text: "Saturday the 3rd at 10:30am is free, want me to lock it in? 😊" },
+        ],
+        intent: "booking", sensitive: false,
+        quote: { gives_price: true, size: null, placement: null },
+      };
+    } else if (pricing !== "photo-on-body") {
+      answer = {
+        reply: "Love this Nathan 😊 next weekend works, Saturday the 3rd at 10:30am is free. Roughly what size were you thinking and where on the body? Then I can give you a price 👌",
+        alternatives: [{ label: "Short and casual", text: "Sat the 3rd at 10:30am is free 😊 what size and where on the body?" }],
+        intent: "booking", sensitive: false,
+        quote: { gives_price: false, size: null, placement: null },
+      };
+    }
     res.end(JSON.stringify({
-      content: [{ type: "text", text: JSON.stringify({
-        reply: "Hey 😊 thanks for sending these! A small wrist piece and a fine line down the forearm, you'd be looking at about $250 - $350 for both",
-        alternatives: [{ label: "Short and casual", text: "About $250 - $350 for both 😊" }],
-        intent: "pricing", sensitive: false,
-      }) }],
+      content: [{ type: "text", text: JSON.stringify(answer) }],
       stop_reason: "end_turn",
     }));
   });
@@ -199,6 +223,57 @@ check("it asks once with the photos, then again without", retried.length === 2
   && !JSON.stringify(retried[1].messages).includes('"type":"image"'), String(retried.length));
 const ninaAgain = (await db.getPendingReplies()).find((d) => d.conversationId === "nina");
 check("and the customer still gets a draft", !!ninaAgain && !ninaAgain.llmFailed, JSON.stringify(ninaAgain)?.slice(0, 160));
+
+/* ---------- 5. no price for a piece nobody has sized or placed ---------- */
+// Brad, 2 October, with Nathan's thread open: a flat drawing of two rings
+// round a ghost, "No love heart on the top though", then "I was thinking
+// next weekend if you're free" — and a draft quoting $250-300. "make sure we
+// always ask for size and area, unless they send a photo of it already drawn
+// on or edited onto their body and you can estimate".
+refuseImages = false;
+pricing = "flat";
+await sql.query(
+  "INSERT INTO message_attachments (id, conversation_id, message_id, content_type, bytes) VALUES (?,?,?,?,?)",
+  ["ghostrings", "nathan", "t1", "image/jpeg", TINY_JPEG]
+);
+await thread("nathan", "Nathan Test", "instagram", [
+  { id: "t1", who: "customer", text: "(sent a photo)", h: 0.3, photos: ["/api/attachments/ghostrings"] },
+  { id: "t2", who: "customer", text: "Thinking something like this. Two rings intertwined around a ghost", h: 0.29 },
+  { id: "t3", who: "customer", text: "No love heart on the top though", h: 0.28 },
+  { id: "t4", who: "customer", text: "I was thinking next weekend if you're free", h: 0.05 },
+]);
+bodies = [];
+await agent.draftForUnanswered(5, 60);
+const forNathan = bodies.filter((b) => JSON.stringify(b.messages).includes("next weekend if you"));
+check("the model is told the rule", /NO PRICE UNTIL YOU KNOW SIZE AND PLACEMENT/.test(forNathan[0]?.system ?? "")
+  && /flat drawing/.test(forNathan[0]?.system ?? ""));
+check("a price with no size or placement is sent back once", forNathan.length === 2
+  && /YOUR LAST DRAFT BROKE THE PRICE RULE/.test(forNathan[1]?.system ?? ""), String(forNathan.length));
+const nathan = (await db.getPendingReplies()).find((d) => d.conversationId === "nathan");
+check("the draft that lands has no price in it", !!nathan && !/\$\s?\d/.test(nathan.draftText), nathan?.draftText);
+check("and asks what size and where", /size/i.test(nathan?.draftText ?? "") && /where on the body/i.test(nathan?.draftText ?? ""));
+check("and still answers what he asked", /Saturday/.test(nathan?.draftText ?? ""));
+check("no alternative sneaks a price in", !JSON.stringify(nathan?.alternatives ?? []).match(/\$\s?\d/), JSON.stringify(nathan?.alternatives));
+
+/* ---------- 6. a model that keeps pricing it never gets a number to the board ---------- */
+await sql.query("DELETE FROM pending_replies WHERE conversation_id = 'nathan'");
+pricing = "stubborn";
+bodies = [];
+await agent.draftForUnanswered(5, 60);
+const stubborn = (await db.getPendingReplies()).find((d) => d.conversationId === "nathan");
+check("it asks the two questions instead", stubborn?.draftText === agent.ASK_SIZE_AND_PLACEMENT, stubborn?.draftText);
+check("keeping only the alternatives with no price", JSON.stringify(stubborn?.alternatives ?? []).includes("lock it in")
+  && !JSON.stringify(stubborn?.alternatives ?? []).match(/\$\s?\d/), JSON.stringify(stubborn?.alternatives));
+
+/* ---------- 7. the price check itself ---------- */
+check("a range is a price", agent.quotesAPrice("around $250-300 depending") && agent.quotesAPrice("$200 to $250"));
+check("a hedged figure is a price", agent.quotesAPrice("you'd be looking at about $250") && agent.quotesAPrice("roughly $300 for both"));
+check("a deposit or the minimum is not", !agent.quotesAPrice("We do just need a $50 deposit, which would leave just $50 on the day")
+  && !agent.quotesAPrice("our minimum is $150"));
+check("priced with size and spot known is fine", !agent.unsupportedQuote({ reply: "about $200 - $250",
+  quote: { gives_price: true, size: "palm-sized, drawn on her forearm", placement: "forearm" } }));
+check("priced with the spot missing is not", agent.unsupportedQuote({ reply: "about $200 - $250",
+  quote: { gives_price: true, size: "about 10cm", placement: null } }));
 
 await sql.end();
 graph.close();
