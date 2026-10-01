@@ -249,6 +249,19 @@ const STATEMENTS = [
     created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY follow_ups_conversation_kind (conversation_id, kind)
   )`,
+
+  // One row per "we'll check with Mim" that went out, so she is emailed once
+  // per promise and Settings can show what was sent and what wasn't.
+  `CREATE TABLE IF NOT EXISTS check_alerts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    alert_key VARCHAR(64) NOT NULL,
+    conversation_id VARCHAR(191) NOT NULL,
+    message_text TEXT,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    detail TEXT,
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY check_alerts_key (alert_key)
+  )`,
 ];
 
 /**

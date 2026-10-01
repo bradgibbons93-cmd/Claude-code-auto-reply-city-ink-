@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { CheckCircle2, XCircle, Sparkles } from "lucide-react";
 import KnowledgeList from "@/components/KnowledgeList";
+import CheckWithCard from "@/components/CheckWithCard";
 import { toast } from "sonner";
 
 export default function Settings() {
@@ -489,6 +490,8 @@ export default function Settings() {
       </Card>
 
       <PhoneNotifications />
+
+      <CheckWithCard />
 
       <Card className="border-border">
         <CardHeader>

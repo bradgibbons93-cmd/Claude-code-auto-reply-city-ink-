@@ -107,3 +107,24 @@ export function previewLine(c: {
   if (!text) return ours ? "You sent an attachment." : `${first} sent an attachment.`;
   return ours ? `You: ${text}` : text;
 }
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Does this reply tell the customer we'll check with `name` (Mim)? The same
+ * test as `mentionsCheckWith` in `server/checkWith.ts` — keep the two in step.
+ * The server decides whether she's emailed; this only says so on the card
+ * before Approve is pressed.
+ */
+export function mentionsCheckWith(text: string, name: string | null | undefined): boolean {
+  if (!text || !name || name.length < 2) return false;
+  const n = `${escapeRe(name)}(?:'s)?\\b`;
+  const patterns = [
+    `\\b(?:check|checking|double[- ]check|confirm|confirming|touch base|chat|talk|speak|see)\\s+(?:(?:it|this|that|these|those|in|the price|the time|the date|quickly|first)\\s+)?(?:with|to|by|past)\\s+${n}`,
+    `\\brun(?:ning)?\\s+(?:it|this|that|these)\\s+(?:by|past)\\s+${n}`,
+    `\\b(?:ask|asking|il ask|i'll ask)\\s+${n}`,
+    `\\b${escapeRe(name)}(?:'ll|\\s+will|\\s+can|\\s+should)\\s+(?:confirm|check|get back|let (?:you|us) know|come back|have a look|take a look|look)`,
+    `\\bsee what\\s+${escapeRe(name)}\\s+(?:says|thinks)`,
+  ];
+  return patterns.some((p) => new RegExp(p, "i").test(text));
+}

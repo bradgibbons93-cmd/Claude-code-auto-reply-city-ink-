@@ -4,6 +4,14 @@ import { accountRouter, onboardingRouter, studiosRouter } from "./accountRouter.
 import { studioIdentity } from "./studios.js";
 import { z } from "zod";
 import {
+  getCheckWith,
+  saveCheckWith,
+  sendTest as sendCheckWithTest,
+  sendNow as sendToChecker,
+  recentChecks,
+  relayScript,
+} from "./checkWith.js";
+import {
   getRecentConversations,
   searchInbox,
   getConversationMessages,
@@ -740,6 +748,40 @@ export const appRouter = t.router({
         await setSetting("google_review_url", input.url.trim());
         return { url: input.url.trim() };
       }),
+
+    /**
+     * Who the studio checks with (Mim), where her email goes, and the
+     * connection that sends it. The script comes down with its key in it —
+     * this is the studio's own member reading their own settings, and the
+     * key only lets someone send mail through Brad's own script.
+     */
+    checkWith: studioProcedure.query(async () => {
+      const cfg = await getCheckWith();
+      return {
+        name: cfg.name,
+        email: cfg.email,
+        relayUrl: cfg.relayUrl,
+        ready: !!(cfg.name && cfg.email && cfg.relayUrl),
+        script: relayScript(cfg.secret),
+        recent: await recentChecks(5),
+      };
+    }),
+    saveCheckWith: studioProcedure
+      .input(
+        z.object({
+          name: z.string().trim().max(40),
+          email: z.string().trim().email().or(z.literal("")),
+          relayUrl: z.string().trim().url().or(z.literal("")),
+        })
+      )
+      .mutation(async ({ input }) => {
+        await saveCheckWith(input);
+        return { ok: true };
+      }),
+    testCheckWith: studioProcedure.mutation(() => sendCheckWithTest()),
+    sendToChecker: studioProcedure
+      .input(z.object({ conversationId: z.string().min(1) }))
+      .mutation(({ input }) => sendToChecker(input.conversationId)),
   }),
 });
 

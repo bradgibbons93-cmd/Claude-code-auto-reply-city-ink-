@@ -46,6 +46,7 @@ import {
 import { cacheAttachments, readAttachment } from "./attachments.js";
 import { studioIdentity } from "./studios.js";
 import { notify, notifyOnce, clearAlert, getNotifySettings } from "./push.js";
+import { getCheckWith, fixNameSpelling, askToCheck } from "./checkWith.js";
 
 const HANDOFF_HOURS = Number(process.env.HANDOFF_PAUSE_HOURS || 12);
 
@@ -135,6 +136,13 @@ async function decide(
 ): Promise<AgentDecision & { ok: boolean }> {
   // Whose studio, whose voice — from the studio's own record, not the code.
   const me = await studioIdentity();
+  // Who the studio checks with when the answer isn't the agent's to give —
+  // Mim, at City Ink. Brad: "If anything is written that we will check with
+  // Mim (please fix spelling in the app)". Named, so the customer hears a
+  // person rather than "the team", and so the promise reaches her: a sent
+  // reply that says it emails her a picture of the conversation.
+  const checker = (await getCheckWith().catch(() => undefined))?.name ?? "";
+  const checkWith = checker ? `check with ${checker}` : "check with the team";
   const missing = [
     !known.name && "their full name",
     !known.phone && "a phone number",
@@ -159,7 +167,7 @@ So: warm, casual, short. First name if you know it. An emoji here and there (�
 USE WHAT YOU KNOW ABOUT TATTOOING. You are not a lookup table — you're meant to sound like a tattooist who knows the craft. Reason freely about the actual work: that ear and finger pieces are fiddly because the skin is thin and they fade faster; that fine detail at small scale needs more time than the size suggests; that two small pieces in one sitting share a single setup; that heavy black takes longer than line work; roughly how long a piece like the one in the photo takes to sit. Say those things in your own words, the way ${me.owner} would. That craft knowledge is yours to use and it's what makes a reply worth reading.
 
 WHAT IS NOT YOURS TO DECIDE — this is the hard line:
-Any NUMBER or COMMITMENT specific to this studio comes only from the studio facts below. Prices, the minimum, the deposit, the hourly rate, opening hours, an artist's availability, a date, a policy. If a figure is in the facts, use it plainly and confidently — "our minimum is $150" — don't hedge it. If it ISN'T there, do not estimate it, do not give a range, do not reason your way to one from what tattoos usually cost. Explain the thinking instead and say the team will confirm the figure. A wrong price is a promise the studio has to honour or break.
+Any NUMBER or COMMITMENT specific to this studio comes only from the studio facts below. Prices, the minimum, the deposit, the hourly rate, opening hours, an artist's availability, a date, a policy. If a figure is in the facts, use it plainly and confidently — "our minimum is $150" — don't hedge it. If it ISN'T there, do not estimate it, do not give a range, do not reason your way to one from what tattoos usually cost. Explain the thinking instead and say you'll ${checkWith} and get back to them with the figure. A wrong price is a promise the studio has to honour or break.
 
 NO PRICE UNTIL YOU KNOW SIZE AND PLACEMENT — ${me.owner}'s rule, and it beats everything else about pricing:
 - Never give a price for their tattoo, not even a range or an "around $X", until you know BOTH roughly how big it is AND where on the body it's going.
@@ -213,8 +221,8 @@ THE BOOKING FLOW — work out which step you're at and do that step:
 2. Photo received → thank them, then:
    - The design is ON THEIR BODY (drawn on, stencilled, or edited onto a photo of them), or they've already told you the size AND the spot → give a BALLPARK RANGE of about $100 wide for what you can see (see READING THEIR PHOTOS), e.g. "Hey ${"${name}"} 😊 thanks for sending this through! You would be looking at about $200 - $250, would that suit you?" Don't hold that price back to ask for measurements.
    - Anything else (a flat drawing, a screenshot, a design from online, a tattoo on someone else) → NO price yet. Say something real about the design, then ask roughly what size and where on the body, and that you'll give them a price once you know.
-   Only quote from the price guidance above — if there's none, say the team will confirm a price shortly.
-3. They push back on price or give a lower budget → don't just say no. Ask what their budget is, stay warm about it, and only offer a cheaper option if one is actually listed in the studio facts above. If nothing cheaper is listed, do NOT invent an artist, an apprentice, a discount, or a payment plan — say you'll check with the team and come back to them. Real tone: "Okay cool no worries at all 😊 if you have a set budget how much your wanting to spend feel free to let us know and we will see what we can do 👌"
+   Only quote from the price guidance above — if there's none, say you'll ${checkWith} and get back to them with a price.
+3. They push back on price or give a lower budget → don't just say no. Ask what their budget is, stay warm about it, and only offer a cheaper option if one is actually listed in the studio facts above. If nothing cheaper is listed, do NOT invent an artist, an apprentice, a discount, or a payment plan — say you'll ${checkWith} and come back to them. Real tone: "Okay cool no worries at all 😊 if you have a set budget how much your wanting to spend feel free to let us know and we will see what we can do 👌"
 4. Happy with the price → offer times. ${
     availability
       ? `WHAT'S ACTUALLY FREE IN THE CALENDAR, by how long the sitting needs:
@@ -225,7 +233,7 @@ Work out how long THIS piece needs before you offer anything, then offer only fr
 - Anything large, detailed, heavily shaded, a sleeve, a back or chest piece, or anything the customer wants split across sessions → half day or full day. Those are long sittings, not an hour and a half.
 - If they've said "a few sessions", "split it up", or named a big piece, that is NOT a short sitting.
 
-NEVER offer a time from the short row for a long sitting. A gap between two other appointments is not a free day — the longer rows already account for that, which is exactly why they're separate. If the row you need says nothing is free, say you'll check with the team and come back to them rather than offering a time from a shorter row.
+NEVER offer a time from the short row for a long sitting. A gap between two other appointments is not a free day — the longer rows already account for that, which is exactly why they're separate. If the row you need says nothing is free, say you'll ${checkWith} and come back to them rather than offering a time from a shorter row.
 
 Real example: "Mim can do this at 3pm 🙂 would you like to confirm the booking?"`
       : `You cannot see the calendar right now, so do NOT name a time. Say you'll check and come straight back — real example: "Il get back to you in the next 5 minutes 🙂"`
@@ -233,7 +241,13 @@ Real example: "Mim can do this at 3pm 🙂 would you like to confirm the booking
 5. Time agreed → deposit. Real example: "We do just need a $50 deposit, which would leave just $50 on the day. Let me know whenever your ready and il send over the details"
 6. Deposit paid → confirm the booking with the address and what to expect on the day.
 
-RETURNING CUSTOMERS: if the history shows they've booked or paid a deposit with you before, open warmly and thank them for coming back.
+${
+    checker
+      ? `CHECKING WITH ${checker.toUpperCase()}: ${checker} is the artist the studio checks things with. Whenever you can't answer something yourself — a price or budget that isn't in the facts, a date or time that isn't free, a design question only the artist can answer, a cover-up or rework that needs a proper look — say you'll check with ${checker} and get back to them. Use the name, not "the team", and spell it exactly "${checker}" with a capital letter, however the customer wrote it. Real tone: "No worries at all 😊 I'll check with ${checker} and get back to you!" Only say it when you genuinely need to — anything the facts answer, answer.
+
+`
+      : ""
+  }RETURNING CUSTOMERS: if the history shows they've booked or paid a deposit with you before, open warmly and thank them for coming back.
 
 SOMEONE WHO IS ALREADY TATTOOED IS NOT AN ENQUIRY. On Instagram the studio tags people in stories of their finished work, and they reply to that story. So a short, warm message with no question in it — "I love it!", "Thank you!!", "It looks unreal", a row of hearts, a reply to a story — almost always means the tattoo is already done and they are saying thanks. It is NOT someone asking to be booked.
 
@@ -544,19 +558,26 @@ async function composeDraft(
     reviewUrl
   );
 
+  // Her name the way she spells it, in every version. Customers write "mim"
+  // and the model copies what it reads.
+  const checker = (await getCheckWith().catch(() => undefined))?.name ?? "";
+  const spell = (text: string) => (checker ? fixNameSpelling(text, checker) : text);
+
   return {
     // A failed call must not look like a considered reply — and the old
     // placeholder ("check LLM_API_KEY in Railway") was both sendable to a
     // customer and meaningless to the person reading it. Leave the box empty
     // and let the card say why; the flag is what the dashboard reads.
-    reply: decision.ok ? decision.reply : "",
+    reply: decision.ok ? spell(decision.reply) : "",
     intent: decision.intent,
     extracted: decision.extracted,
     sensitive: !!decision.sensitive,
     llmFailed: !decision.ok,
     // Only offer choices when the model actually answered. A fallback line
     // dressed up as three options would look like three considered replies.
-    alternatives: decision.ok ? decision.alternatives ?? [] : [],
+    alternatives: decision.ok
+      ? (decision.alternatives ?? []).map((a) => ({ ...a, text: spell(a.text) }))
+      : [],
   };
 }
 
@@ -1083,6 +1104,11 @@ export async function approveDraft(id: number, editedText?: string): Promise<voi
   await clearSendError(id).catch(() => undefined);
   await recordMessage(resolved.conversationId, `draft_${id}_sent`, "bot", resolved.text, resolved.text);
 
+  // It's reached the customer now, so if it promised we'd check with Mim, she
+  // hears about it. Not awaited: the send has succeeded, and nothing about an
+  // email may make it look as though it hadn't.
+  void askToCheck(resolved.conversationId, resolved.text, "approved");
+
   // Edits made while testing against your own account aren't real feedback,
   // and corrections outweigh everything else the agent reads — so a throwaway
   // test rewrite must not become house style.
@@ -1153,6 +1179,12 @@ export async function handleEcho(
   // the studio set by hand is not overridden that way.
   const until = await pauseBot(recipientId, HANDOFF_HOURS, "handoff");
   console.log(`[Agent] Human replied to ${recipientId} — paused until ${until.toISOString()}`);
+
+  // Typed by hand in Instagram or Messenger — Brad copies drafts across all
+  // day — and it counts exactly as much as the Approve button: if it says
+  // we'll check with Mim, she gets the email. Once per message, so the
+  // Instagram echo of a reply the app itself sent doesn't email her twice.
+  if (text) void askToCheck(recipientId, text, "typed");
 }
 
 /**

@@ -18,6 +18,7 @@ import { reportPushReadiness } from "./push.js";
 import { reportAppIdentity } from "./token.js";
 import { requireStudio, requireStudioOrSignedLink } from "./auth.js";
 import { createContext } from "./trpc.js";
+import { snapshotConversation, snapshotSample, getCheckWith } from "./checkWith.js";
 import { userFromRequest, AccountError } from "./accounts.js";
 import { saveBrandAsset, readBrandAsset, getDataStudioId, getStudio, type BrandKind } from "./studios.js";
 
@@ -210,6 +211,34 @@ app.get("/api/upload-qr.png", requireStudio, async (req, res) => {
     return res.end(png);
   } catch (error) {
     console.error("[Uploads] QR failed:", (error as Error).message);
+    return res.sendStatus(500);
+  }
+});
+
+/**
+ * A conversation as a picture — what Mim gets in her email. The sample is the
+ * preview in Settings; a real thread is what "Send to Mim" shares from a phone
+ * when email isn't connected. Customer messages and photos, so studio only.
+ */
+app.get("/api/snapshot/sample.png", requireStudio, async (_req, res) => {
+  try {
+    const png = await snapshotSample((await getCheckWith()).name);
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "private, no-store");
+    return res.end(png);
+  } catch (error) {
+    console.error("[CheckWith] Sample picture failed:", (error as Error).message);
+    return res.sendStatus(500);
+  }
+});
+app.get("/api/snapshot/:conversationId.png", requireStudio, async (req, res) => {
+  try {
+    const png = await snapshotConversation(String(req.params.conversationId));
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "private, no-store");
+    return res.end(png);
+  } catch (error) {
+    console.error("[CheckWith] Conversation picture failed:", (error as Error).message);
     return res.sendStatus(500);
   }
 });
