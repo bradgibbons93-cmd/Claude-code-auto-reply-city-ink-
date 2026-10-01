@@ -610,13 +610,36 @@ export async function invokeLLMJson<T>(
       console.warn(`[LLM] Ran out of room at ${budget} tokens — asking again with ${budget * 2}`);
       raw = await invokeLLM(messages, { temperature: 0.3, maxTokens: budget * 2 });
     }
-    const cleaned = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
-    const start = cleaned.indexOf("{");
+    let cleaned = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
+    let start = cleaned.indexOf("{");
     if (start === -1) {
-      const message = "Model replied without JSON.";
-      lastError = { message, at: new Date().toISOString() };
-      console.error(`[LLM] ${message} Raw: ${raw.slice(0, 200)}`);
-      return { data: fallback, ok: false, error: message };
+      // It answered the customer in plain words instead of the JSON the
+      // instructions ask for. Live, 1 October: one customer's enquiry did this
+      // six polls running and sat on the board with an empty box each time,
+      // while the words it wrote were a perfectly good draft. Asking once
+      // more, showing it what it said, is enough — it is a format slip, not
+      // a refusal. Still no JSON after that is a real failure.
+      console.warn(`[LLM] Model replied without JSON — asking once more. Raw: ${raw.slice(0, 200)}`);
+      const again = await invokeLLM(
+        [
+          ...messages,
+          { role: "assistant", content: raw },
+          {
+            role: "user",
+            content:
+              "That needs to be the JSON object described in your instructions, not plain text. Send it again as JSON only, starting with {, with your reply inside it.",
+          },
+        ],
+        { temperature: 0.3, maxTokens: budget }
+      );
+      cleaned = again.replace(/```json/gi, "").replace(/```/g, "").trim();
+      start = cleaned.indexOf("{");
+      if (start === -1) {
+        const message = "Model replied without JSON.";
+        lastError = { message, at: new Date().toISOString() };
+        console.error(`[LLM] ${message} Raw: ${again.slice(0, 200)}`);
+        return { data: fallback, ok: false, error: message };
+      }
     }
     const end = cleaned.lastIndexOf("}");
     const body = cleaned.slice(start, end > start ? end + 1 : undefined);

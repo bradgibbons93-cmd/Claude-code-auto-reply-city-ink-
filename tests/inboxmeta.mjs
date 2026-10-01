@@ -61,6 +61,15 @@ const model = http.createServer((req, res) => {
       }));
     }
     const toldOff = (body.system ?? "").includes("YOUR LAST DRAFT BROKE THE PRICE RULE");
+    if (pricing === "prose") {
+      // Answers the customer in plain words the first time, as it did live on
+      // 1 October, and in JSON once it's shown what it said.
+      const nudged = JSON.stringify(body.messages ?? []).includes("needs to be the JSON object");
+      const text = nudged
+        ? JSON.stringify({ reply: "Love this Lilly 😊 roughly what size were you thinking, and is it the outer forearm? Then I can give you a price 👌", intent: "pricing", sensitive: false, quote: { gives_price: false, size: null, placement: null } })
+        : "Hey Lilly 😊 got it, this one running along the forearm with all the flowers and butterflies would be lovely";
+      return res.end(JSON.stringify({ content: [{ type: "text", text }], stop_reason: "end_turn" }));
+    }
     let answer = {
       reply: "Hey 😊 thanks for sending these! A small wrist piece and a fine line down the forearm, you'd be looking at about $250 - $350 for both",
       alternatives: [{ label: "Short and casual", text: "About $250 - $350 for both 😊" }],
@@ -274,6 +283,18 @@ check("priced with size and spot known is fine", !agent.unsupportedQuote({ reply
   quote: { gives_price: true, size: "palm-sized, drawn on her forearm", placement: "forearm" } }));
 check("priced with the spot missing is not", agent.unsupportedQuote({ reply: "about $200 - $250",
   quote: { gives_price: true, size: "about 10cm", placement: null } }));
+
+/* ---------- 8. plain words instead of JSON get one more ask, not an empty card ---------- */
+pricing = "prose";
+await thread("lilly", "Lilly Test", "instagram", [
+  { id: "lilly1", who: "customer", text: "Hey! Could I get a quote on this piece please?", h: 0.04 },
+]);
+bodies = [];
+await agent.draftForUnanswered(5, 60);
+const forLilly = bodies.filter((b) => JSON.stringify(b.messages).includes("quote on this piece"));
+check("a reply in plain words is asked for again, once", forLilly.length === 2, String(forLilly.length));
+const lilly = (await db.getPendingReplies()).find((d) => d.conversationId === "lilly");
+check("and the draft lands instead of an empty card", !!lilly && !lilly.llmFailed && /Lilly/.test(lilly.draftText), JSON.stringify(lilly)?.slice(0, 160));
 
 await sql.end();
 graph.close();

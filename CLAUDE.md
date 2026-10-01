@@ -1072,6 +1072,14 @@ if the model does it again the card gets `ASK_SIZE_AND_PLACEMENT` and only
 the alternatives with no price. A guessed number never reaches the board.
 `inboxmeta.mjs` reproduces Nathan's thread and a model that won't stop.
 
+**A reply in plain words gets one more ask, not an empty card.** Live, 1
+October, 5:44–5:59pm: one customer's enquiry came back as plain prose six
+polls running — `[LLM] Model replied without JSON. Raw: Hey Lilly 😊 got it,
+this one running along the forearm...` — a perfectly good draft, binned
+because it wasn't wrapped in JSON, and the customer sat on the board with an
+empty box. `invokeLLMJson` now shows the model what it wrote and asks once
+for the JSON; only a second miss is a failure. `inboxmeta.mjs` section 8.
+
 **"We'll check with Mim" emails Mim a picture of the conversation.** Brad,
 29 September: *"If anything is written that we will check with Mim (please
 fix spelling in the app) then take a screenshot and send Mim an email
