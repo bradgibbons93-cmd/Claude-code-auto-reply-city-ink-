@@ -16,6 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import { previewStyle, type Look } from "@/lib/themes";
 import { firstName, initials } from "@/lib/session";
+import { Art } from "@/components/home/Art";
 
 export interface PreviewIdentity {
   studioName: string;
@@ -115,7 +116,7 @@ function ReplyHero() {
   return (
     <div className="relative rounded-[24px] border border-sepia/25 bg-card/85 p-3.5 shadow-lift">
       <span className="absolute -top-6 right-0 h-28 w-28 rounded-full bg-[radial-gradient(circle,rgb(var(--c-accent-strong)/0.45),transparent_66%)]" />
-      <img src="/home/reply.webp" alt="" className="absolute -top-4 right-1 h-[84px] w-[80px]" />
+      <Art src="/home/reply.webp" className="absolute -top-4 right-1 h-[84px] w-[80px]" />
       <p className="text-[0.52rem] font-semibold uppercase tracking-[0.24em] text-sepia">AI replies · 12 DMs today</p>
       <p className="mt-1 max-w-[72%] font-display text-[1.9rem] font-medium uppercase leading-[0.95] text-charcoal">3 ready to send</p>
       <p className="mt-1 text-[0.6rem] text-muted-foreground">Swipe right to send · left to edit</p>
@@ -162,7 +163,7 @@ function TodayPieces() {
           ["Posts", "2 queued", "Next Wed 6:00pm", "/home/posts.webp", "-right-2 -top-1 h-[58px] w-[68px]"],
         ].map(([label, big, small, image, place]) => (
           <div key={label} className="relative h-[98px] rounded-[18px] border border-sepia/20 bg-card/85 p-2.5 shadow-soft">
-            <img src={image} alt="" className={cn("absolute", place)} />
+            <Art src={image} className={cn("absolute", place)} />
             <p className="text-[0.46rem] font-semibold uppercase tracking-[0.2em] text-sepia">{label}</p>
             <p className="absolute bottom-6 left-2.5 font-display text-[1.25rem] font-medium uppercase leading-none text-charcoal">{big}</p>
             <p className="absolute bottom-2.5 left-2.5 text-[0.52rem] text-muted-foreground">{small}</p>
@@ -180,7 +181,7 @@ function TodayPieces() {
           <span className="absolute left-[12%] top-[5px] h-2.5 w-[18%] rounded-full bg-primary/45" />
           <span className="absolute left-[45%] top-[5px] h-2.5 w-[18%] rounded-full bg-primary" />
           <span className="absolute left-[74%] top-[5px] h-2.5 w-[10%] rounded-full border border-primary bg-card" />
-          <img src="/home/machine.webp" alt="" className="absolute -top-[26px] left-[55%] -ml-[30px] h-[38px] w-[33px]" />
+          <Art src="/home/machine.webp" className="absolute -top-[26px] left-[55%] -ml-[30px] h-[38px] w-[33px]" />
         </div>
       </div>
     </div>

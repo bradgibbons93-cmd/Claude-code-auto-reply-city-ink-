@@ -189,6 +189,7 @@ function mutate(path: string, input: Json): Json {
         if (input.mode !== undefined) s.mode = input.mode;
         if (input.accent !== undefined) s.accent = input.accent;
         if (input.homeLayout !== undefined) s.homeLayout = input.homeLayout;
+        if (input.art !== undefined) s.art = input.art;
       }
       return null;
     }

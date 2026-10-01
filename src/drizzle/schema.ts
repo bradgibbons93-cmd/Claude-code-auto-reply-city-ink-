@@ -84,6 +84,12 @@ export const studios = mysqlTable("studios", {
   // "classic" the dashboard from before it (pages/Dashboard.tsx). A switch the
   // owner can flip back themselves, because Brad asked for an easy undo.
   homeLayout: varchar("home_layout", { length: 16 }),
+  // The 3D illustrations on the Home (the rose bubble, the tattoo machine,
+  // the calendar and camera). null / "theme" tints them to the theme's colour,
+  // "gold" shows them as drawn, "mono" in black and white, "off" hides them.
+  // Brad, 2 October: "they should change colour along with the colour of the
+  // theme or just black or white", and an option to remove them.
+  art: varchar("art", { length: 16 }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });

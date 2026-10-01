@@ -475,3 +475,41 @@
   -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 25%, transparent 85%);
   mask-image: linear-gradient(180deg, #000 0%, #000 25%, transparent 85%);
 }
+
+/* ---- The Home's 3D illustrations (components/home/Art.tsx) -------------
+   Brad, 2 October: "they should change colour along with the colour of the
+   theme or just black or white", and an option to remove them. <html
+   data-art> carries the studio's choice. The default, "theme", turns the
+   picture grey and lays the theme's accent over it in "color" blend, masked
+   to the picture's own shape — the shading stays, the gold becomes the
+   theme's colour. Outside any layer so the order below decides ties. */
+@layer components {
+  .rn-art { position: relative; display: block; isolation: isolate; }
+  .rn-art > img { display: block; width: 100%; height: 100%; object-fit: contain; transition: filter 0.3s ease; }
+  .rn-art::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: rgb(var(--c-accent-strong));
+    mix-blend-mode: color;
+    -webkit-mask: var(--art) center / contain no-repeat;
+    mask: var(--art) center / contain no-repeat;
+    transition: opacity 0.3s ease;
+  }
+}
+.rn-art > img { filter: grayscale(1) contrast(1.1); }
+.rn-art::after { opacity: 1; }
+[data-art="gold"] .rn-art > img { filter: none; }
+[data-art="gold"] .rn-art::after { opacity: 0; }
+[data-art="mono"] .rn-art > img { filter: grayscale(1) contrast(1.15); }
+[data-art="mono"] .rn-art::after { opacity: 0; }
+[data-art="off"] .rn-art,
+[data-art="off"] .home-flash { display: none !important; }
+/* The picker in Settings shows each style whatever the studio has chosen. */
+.rn-art[data-art-self="theme"] > img { filter: grayscale(1) contrast(1.1); }
+.rn-art[data-art-self="theme"]::after { opacity: 1; }
+.rn-art[data-art-self="gold"] > img { filter: none; }
+.rn-art[data-art-self="gold"]::after { opacity: 0; }
+.rn-art[data-art-self="mono"] > img { filter: grayscale(1) contrast(1.15); }
+.rn-art[data-art-self="mono"]::after { opacity: 0; }

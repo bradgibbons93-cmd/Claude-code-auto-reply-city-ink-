@@ -27,6 +27,7 @@ import { HomeLayoutPicker } from "@/components/home/HomeLayoutSwitch";
 import { StudioMark } from "@/components/StudioSwitcher";
 import { ConnectState } from "@/components/ConnectState";
 import InboxSettings from "./Settings";
+import { ArtPicker } from "@/components/home/Art";
 
 /**
  * Everything onboarding collected, and everything the studio runs on, in one
@@ -308,6 +309,11 @@ function AppearanceTab() {
       <div className="space-y-2">
         <p className="text-sm font-semibold text-charcoal">Home screen</p>
         <HomeLayoutPicker />
+      </div>
+      <div className="space-y-2">
+        <p className="text-sm font-semibold text-charcoal">Illustrations</p>
+        <p className="text-xs text-muted-foreground">The 3D pictures on the Home: the rose, the tattoo machine, the calendar and the camera.</p>
+        <ArtPicker />
       </div>
       <div className="grid gap-8 xl:grid-cols-[1fr_300px]">
         <ThemeCards look={look} identity={identity} onChange={setLook} />

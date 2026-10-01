@@ -4,6 +4,7 @@ import { format } from "date-fns";
 import { ArrowRight, CalendarPlus } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
+import { Art } from "./Art";
 
 /** "2:30pm" from minutes past midnight on the studio's clock. */
 function clock(minutes: number) {
@@ -63,11 +64,7 @@ function Tile({
         aria-hidden="true"
         className="home-glow pointer-events-none absolute -right-2 -top-3 h-28 w-28 rounded-full bg-[radial-gradient(circle,rgb(var(--c-accent-strong)/0.32),transparent_66%)]"
       />
-      <img
-        src={image}
-        alt=""
-        className={cn("pointer-events-none absolute drop-shadow-[0_10px_14px_rgb(0_0_0/0.5)]", imageClass)}
-      />
+      <Art src={image} className={cn("absolute drop-shadow-[0_10px_14px_rgb(0_0_0/0.5)]", imageClass)} />
       <span className="block text-[0.64rem] font-semibold uppercase tracking-[0.2em] text-sepia">{label}</span>
       <span className="absolute inset-x-3.5 bottom-3">
         <span className="block font-display text-[1.75rem] font-medium uppercase leading-none">{big}</span>
@@ -210,9 +207,8 @@ export function ChairTimeline() {
             !settled && "home-ink-ride"
           )}
         >
-          <img
+          <Art
             src="/home/machine.webp"
-            alt=""
             className={cn("h-[52px] w-[45px] drop-shadow-[0_4px_6px_rgb(0_0_0/0.6)]", today.current && "home-buzz")}
           />
         </span>

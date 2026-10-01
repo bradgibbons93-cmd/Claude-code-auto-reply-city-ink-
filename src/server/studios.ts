@@ -243,12 +243,20 @@ export async function updateStudio(userId: number, studioId: number, fields: Stu
 }
 
 export const THEMES = ["ink", "coffee", "noir", "silver", "crimson", "blush", "sage", "midnight"] as const;
+/** How the Home's 3D illustrations are drawn. "theme" (the default) tints them. */
+export const ART_MODES = ["theme", "gold", "mono", "off"] as const;
 const HEX = /^#[0-9a-f]{6}$/i;
 
 export async function setAppearance(
   userId: number,
   studioId: number,
-  look: { theme?: string; mode?: "light" | "dark" | null; accent?: string | null; homeLayout?: "new" | "classic" }
+  look: {
+    theme?: string;
+    mode?: "light" | "dark" | null;
+    accent?: string | null;
+    homeLayout?: "new" | "classic";
+    art?: (typeof ART_MODES)[number];
+  }
 ) {
   await requireOwner(userId, studioId);
   const set: Partial<StudioRow> = {};
@@ -262,6 +270,10 @@ export async function setAppearance(
     set.accent = look.accent;
   }
   if (look.homeLayout !== undefined) set.homeLayout = look.homeLayout === "classic" ? "classic" : null;
+  if (look.art !== undefined) {
+    if (!(ART_MODES as readonly string[]).includes(look.art)) throw new AccountError("Pick one of the illustration styles.");
+    set.art = look.art === "theme" ? null : look.art;
+  }
   if (!Object.keys(set).length) return getStudio(studioId);
   const db = await getDb();
   await db.update(studios).set(set).where(eq(studios.id, studioId));
@@ -455,6 +467,9 @@ export async function describeViewer(viewer: Viewer | null, expired = false) {
       mode: (studio.mode as "light" | "dark" | null) ?? null,
       accent: studio.accent ?? null,
       homeLayout: studio.homeLayout === "classic" ? ("classic" as const) : ("new" as const),
+      art: (ART_MODES as readonly string[]).includes(studio.art ?? "")
+        ? (studio.art as (typeof ART_MODES)[number])
+        : ("theme" as const),
       role,
       connected: studio.id === viewer.dataStudioId,
     })),

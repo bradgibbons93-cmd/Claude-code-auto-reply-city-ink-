@@ -34,7 +34,7 @@ import {
   setAvatar,
   setStudioImage,
   switchStudio,
-  THEMES,
+  THEMES, ART_MODES,
   updateStudio,
   viewerFor,
 } from "./studios.js";
@@ -228,6 +228,7 @@ export const studiosRouter = t.router({
         mode: z.enum(["light", "dark"]).nullable().optional(),
         accent: z.string().max(16).nullable().optional(),
         homeLayout: z.enum(["new", "classic"]).optional(),
+        art: z.enum(ART_MODES).optional(),
       })
     )
     .mutation(({ ctx, input }) =>

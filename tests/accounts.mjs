@@ -210,6 +210,17 @@ try {
   check("another one can", (await brad.mutate("studios.remove", { id: second.data.id })).status === 200);
   check("a bad accent is refused", (await brad.mutate("studios.setAppearance", { id: cityInkId, accent: "red; background:url(x)" })).status === 400);
 
+  /* ---------- the Home's illustrations ---------- */
+  // Brad, 2 October: tint them with the theme, black and white, or hide them.
+  const artOf = async () => (await brad.query("account.me")).data.studios.find((s) => s.id === cityInkId)?.art;
+  check("illustrations follow the theme until told otherwise", (await artOf()) === "theme", String(await artOf()));
+  for (const mode of ["gold", "mono", "off", "theme"]) {
+    await brad.mutate("studios.setAppearance", { id: cityInkId, art: mode });
+    check(`illustrations can be set to ${mode}`, (await artOf()) === mode, String(await artOf()));
+  }
+  check("an unknown style is refused", (await brad.mutate("studios.setAppearance", { id: cityInkId, art: "neon" })).status === 400);
+  check("and a stranger can't change it", (await stranger.mutate("studios.setAppearance", { id: cityInkId, art: "off" })).status === 403);
+
   /* ---------- images ---------- */
   const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVR4nGP8z8DwnwEIGBmgAAYAIDgCAUMRSTsAAAAASUVORK5CYII=",

@@ -9,6 +9,7 @@ import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/Avatar";
 import { queueSend, cancelSend, useQueuedSends } from "./sendQueue";
+import { Art } from "./Art";
 
 type Draft = inferRouterOutputs<AppRouter>["pendingReplies"]["list"][number];
 type Thread = inferRouterOutputs<AppRouter>["conversations"]["list"][number];
@@ -182,12 +183,9 @@ export default function ReplyDeck({ messagesToday }: { messagesToday?: number | 
         aria-hidden="true"
         className="home-glow pointer-events-none absolute -top-8 right-0 h-40 w-40 rounded-full bg-[radial-gradient(circle,rgb(var(--c-accent-strong)/0.45),transparent_66%)]"
       />
-      <img
+      <Art
         src="/home/reply.webp"
-        alt=""
-        width={104}
-        height={108}
-        className="home-bob pointer-events-none absolute -top-5 right-1 h-[108px] w-[104px] drop-shadow-[0_12px_18px_rgb(0_0_0/0.55)] sm:right-3"
+        className="home-bob absolute -top-5 right-1 h-[108px] w-[104px] drop-shadow-[0_12px_18px_rgb(0_0_0/0.55)] sm:right-3"
       />
 
       <p className="text-[0.68rem] font-semibold uppercase tracking-[0.24em] text-sepia">

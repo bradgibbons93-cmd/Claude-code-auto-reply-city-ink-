@@ -3,6 +3,7 @@ import { trpc } from "@/lib/trpc";
 import { applyLook, clearLook } from "@/lib/themes";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../server/routers";
+import { applyArt } from "@/lib/art";
 
 type Me = inferRouterOutputs<AppRouter>["account"]["me"];
 export type SessionUser = NonNullable<Me["user"]>;
@@ -41,7 +42,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!me?.user || !studio) return;
     applyLook({ theme: studio.theme, mode: studio.mode, accent: studio.accent });
-  }, [me?.user, studio?.theme, studio?.mode, studio?.accent, studio]);
+    applyArt(studio.art);
+  }, [me?.user, studio?.theme, studio?.mode, studio?.accent, studio?.art, studio]);
 
   const value = useMemo<Session>(
     () => ({

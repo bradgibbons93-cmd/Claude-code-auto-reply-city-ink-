@@ -1050,6 +1050,28 @@ still comes only from the studio facts. If a provider refuses an image,
 condition of getting a draft. `tests/inboxmeta.mjs` asserts on the request
 body that actually reached the provider.
 
+**No price until we know the size AND where on the body.** Brad, 2 October,
+with Nathan's thread on screen: a flat drawing of two rings round a ghost,
+"No love heart on the top though", then "I was thinking next weekend if
+you're free" — and the draft quoted "$250-300". Nobody had said how big or
+where, and he hadn't asked what it cost. *"make sure we always ask for size
+and area, unless they send a photo of it already drawn on or edited onto
+their body and you can estimate"*.
+
+The entry above is still right for its case — two photos of the design ON
+her arm show the size, so quote. What was wrong was the line telling the
+model to guess a range even from a flat design. Now: size and placement must
+both be known, from the customer's words or a photo of the design on their
+own body; a flat drawing, screenshot, internet/AI design or someone else's
+tattoo doesn't count; and no price is brought up unasked. The model returns
+`quote: {gives_price, size, placement}`, and `unsupportedQuote()` checks it
+against the text itself (`quotesAPrice()` — a range or a hedged "around $X";
+a flat "$50 deposit" or "our minimum is $150" is a studio fact, not a quote).
+A draft that prices an unsized piece is sent back once with the reason, and
+if the model does it again the card gets `ASK_SIZE_AND_PLACEMENT` and only
+the alternatives with no price. A guessed number never reaches the board.
+`inboxmeta.mjs` reproduces Nathan's thread and a model that won't stop.
+
 ## Accounts, studios and the login
 
 Built 29 September from Brad's "Final product pass" brief: a landing page,
@@ -1169,6 +1191,18 @@ Posts, More) in `App.tsx`; the desktop sidebar is unchanged.
   Higgsfield (gpt_image_2_5, transparent PNG → WebP), on Brad's credits.** Don't
   regenerate them casually. The flash sheet is used as a CSS mask
   (`.home-flash`), so it draws in whatever accent the studio's theme has.
+- **How the 3D illustrations are drawn is the studio's choice** (`studios.art`,
+  Settings → Appearance → Illustrations). Brad, 2 October: *"I want an option
+  to remove the little png black images we added. Or even better, they should
+  change colour along with the colour of the theme or just black or white."*
+  `theme` (the default) greys the picture and lays the theme's
+  `--c-accent-strong` over it in `color` blend, masked to the picture's own
+  shape, so the shading survives; `gold` is as drawn; `mono` black and white;
+  `off` hides them and the flash sheet. Every one of them goes through
+  `components/home/Art.tsx` — a bare `<img src="/home/…">` will ignore the
+  setting. The mask URL is made absolute on purpose: a `url()` inside a custom
+  property resolves against the stylesheet that uses it, so the test drive's
+  relative paths masked the tint with nothing.
 - **Black & Gold Ink** (`ink` in `lib/themes.ts`, and in `THEMES` in
   `server/studios.ts`) is the look the Home was drawn in: Oswald over
   Instrument Sans, no serif (Brad asked for the Bodoni headings to go). The
