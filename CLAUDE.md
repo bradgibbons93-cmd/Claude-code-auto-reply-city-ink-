@@ -347,6 +347,40 @@ still invisible. `findFreeDays()` is the other half: every day with something
 open across the whole horizon, as one line in the prompt, so a customer naming
 a date gets a real answer instead of "not showing".
 
+**A date the customer NAMES is looked up on its own, up to six months out.**
+Brad, 2 October, with Shae's card: *"Any availability for Saturday 12th
+December please?"* and the draft *"December is a bit further out than what
+we've got loaded in the books right now, so I'll check with Mim"*. Nothing
+was wrong with the books — the two-month list ended in early December, so the
+12th had never been looked at. *"it needs to look a couple months into the
+calendar if requested by the customer"*.
+
+Widening the everyday list was the wrong lever: it is every open day in the
+window, it already pushed one thread's call into a timeout when it grew, and
+March would still fall off the end. `datesNamedIn()` reads dates and months
+out of the customer's last five messages (Australian order: 12/12 is the 12th
+of December; always the next one coming), `namedDatesForPrompt()` looks each
+up for every sitting length, and the prompt gets a section headed THE DATES
+THIS CUSTOMER ASKED ABOUT with one plain line per date ("booked out", "short
+sitting from 1pm, half day from 1pm, no full day", "closed on Sundays",
+"more than six months out, so it hasn't been checked"). The prompt says never
+to call a date "too far out" or "not loaded yet".
+
+The reader is conservative on purpose — a missed date costs nothing (the
+agent says it'll check, as before), an invented one puts a real day's
+availability in front of someone who never asked. No "2.5" (a size), no
+lower-case "may" (a verb), no month after "Hi" ("Hi June" is a person), no
+"the 2nd one" (counting), and a bare "8/10" only counts if it reads like a
+booking ("could I do 12/12", "is 19/12 free?") — "8/10 for sure" is a rating.
+A span is only blanked out once it actually read as a date; blanking every
+regex hit first ate "the 19th free" as a failed day-and-month and lost it.
+
+The feed is now read once a minute, not five times a draft (`readFeed`):
+three sitting lengths, the free-days list and the named dates each fetched
+and parsed the whole Google Calendar. `tests/calendardates.mjs` (34 checks)
+drives Shae's message through `draftForUnanswered` against a stand-in
+calendar and model and reads the prompt that was actually sent.
+
 **A price the studio corrected is remembered thirty deep; tone is remembered
 five.** Brad, on a calf cover-up the agent quoted at $350 - $450: *"that quote
 was a little low, the agent had it in for $350 - $450 but I adjusted to $550 -

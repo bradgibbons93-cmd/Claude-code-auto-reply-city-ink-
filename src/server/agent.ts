@@ -235,6 +235,8 @@ Work out how long THIS piece needs before you offer anything, then offer only fr
 
 NEVER offer a time from the short row for a long sitting. A gap between two other appointments is not a free day — the longer rows already account for that, which is exactly why they're separate. If the row you need says nothing is free, say you'll ${checkWith} and come back to them rather than offering a time from a shorter row.
 
+A date the customer names is answered from the calendar: if it's in THE DATES THIS CUSTOMER ASKED ABOUT, say plainly whether it's free for the sitting they need. Never tell a customer a date is "too far out", "further out than the books" or "not loaded yet" — the calendar is checked six months ahead. If a date they named isn't in any list above, say you'll check that exact date and come back to them.
+
 Real example: "Mim can do this at 3pm 🙂 would you like to confirm the booking?"`
       : `You cannot see the calendar right now, so do NOT name a time. Say you'll check and come straight back — real example: "Il get back to you in the next 5 minutes 🙂"`
   }
@@ -484,8 +486,15 @@ async function composeDraft(
   known: BookingState
 ): Promise<ComposedDraft> {
   const rule = await matchRule(text);
+  const turns = await getRecentTurns(senderId, 10);
   // Read once per message so both branches below see the same free slots.
-  const availability = await availabilityForPrompt().catch(() => "");
+  // Their own recent words go with it, so a date they NAME ("Saturday 12th
+  // December") is looked up even when it's past the everyday two-month list.
+  const theySaid = [
+    ...turns.filter((t) => t.senderType === "customer").slice(-5).map((t) => t.content ?? ""),
+    text,
+  ].filter(Boolean);
+  const availability = await availabilityForPrompt(theySaid).catch(() => "");
   // How the studio answered messages like this before, plus anything Brad
   // has rewritten recently. Both fail soft — a lookup problem must not stop
   // a customer getting a reply.
@@ -494,7 +503,6 @@ async function composeDraft(
   const priceCorrections = await getPriceCorrections().catch(() => []);
   const reviewUrl = await getSetting("google_review_url").catch(() => undefined);
 
-  const turns = await getRecentTurns(senderId, 10);
   const history: ChatMessage[] = turns.map((t) => ({
     role: t.senderType === "customer" ? "user" : "assistant",
     content: t.content,
@@ -1201,7 +1209,10 @@ export async function practiceReply(
 ): Promise<{ reply: string; sensitive: boolean; ok: boolean }> {
   const knowledge = await getStudioKnowledge().catch(() => []);
   const studioFacts = knowledge.map((k) => `Q: ${k.question}\nA: ${k.answer}`).join("\n\n");
-  const availability = await availabilityForPrompt().catch(() => "");
+  const availability = await availabilityForPrompt([
+    ...priorTurns.filter((t) => t.role === "user").map((t) => t.content),
+    message,
+  ]).catch(() => "");
   const examples = await findSimilarExchanges(message).catch(() => []);
   const corrections = await getRecentDraftEdits().catch(() => []);
   const priceCorrections = await getPriceCorrections().catch(() => []);
