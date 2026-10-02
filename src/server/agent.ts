@@ -1230,7 +1230,16 @@ export async function practiceReply(
   };
 }
 
-export async function generateCaption(prompt: string): Promise<string> {
+/**
+ * A post caption. `images` lets the model actually look at the piece — the
+ * auto-post from the artists' upload link passes the photo, so the caption
+ * can say "fine line swallow" instead of a line that could sit under
+ * anything. Without them it writes from the words alone, as it always has.
+ */
+export async function generateCaption(
+  prompt: string,
+  opts: { images?: ChatImage[] } = {}
+): Promise<string> {
   const knowledge = await getStudioKnowledge().catch(() => []);
   const facts = knowledge.map((k) => `${k.question}: ${k.answer}`).join("\n");
 
@@ -1251,7 +1260,7 @@ ${facts || "(none configured)"}
 
 Reply with JSON only: {"caption": "..."}`,
       },
-      { role: "user", content: prompt },
+      { role: "user", content: prompt, images: opts.images?.length ? opts.images : undefined },
     ],
     { caption: "" }
   );

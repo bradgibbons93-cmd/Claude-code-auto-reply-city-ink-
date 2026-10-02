@@ -1121,6 +1121,67 @@ checking."* Mim is the artist. `checkWith.ts` holds all of it:
 
 `mimcheck.mjs` (49) and `mimbrowser.mjs` (15, phone-sized browser) prove it.
 
+## Artist photos into posts
+
+Brad, 2 October: *"when an artist uploads a photo into that upload section,
+I want that to trigger and send to Claude or Canva to a template I have set
+up ... adds the tattoo studio logo over their images and retouches the
+colour. If it could then put it into the scheduler with a simple caption
+same as all our other posts, that would be amazing."* All of it is
+`server/autopost.ts`.
+
+- **Not Canva.** Filling a Canva template from outside Canva (Connect's
+  autofill) is Enterprise-only, and the server has no Canva session anyway.
+  His template ("finished tattoo template", or near it) wasn't in the Canva
+  account connected to Claude either. The template's whole job — logo in a
+  corner, a touch more colour — is done with sharp in `brandPhoto()`. The
+  corner, size, touch-up and posting time are chosen in Gallery → "Photos
+  into posts", against a live preview of the studio's latest photo
+  (`/api/post-look/preview`). The logo is the studio's own, from Settings.
+- **A post nobody approved cannot go out.** It is inserted as status
+  `review`, and only `scheduled` is ever published (`getDuePosts`). Posts →
+  "Waiting for your OK": edit the caption or time, Approve, Copy caption,
+  Save photo, Remove. Don't use `draft` for this — the publisher uses
+  `draft` as its in-flight claim. Railway's table predates `review`, so
+  `ensureEnums()` in migrate.ts MODIFYs the column; ADD COLUMN can't, and a
+  missing enum value would fail every insert there while passing locally.
+- **One post per photo, ever.** The upload route starts it (not awaited),
+  a five-minute sweep catches what it missed, and both go through `claim()`
+  — one conditional UPDATE on `artist_uploads.auto_post_state`. A re-sent
+  photo is the same row (content-addressed) and is already `done`. A claim
+  stuck in `working` for ten minutes (a crash mid-run) is taken again.
+  Removing a post hands the photo back to the gallery as unused but leaves
+  it `done`, so it is never made into a post again by itself.
+- **The back catalogue is never swept.** `auto_post.since` is set the first
+  time the feature runs and again whenever it's switched back on; the sweep
+  only looks at uploads after it.
+- **The caption model SEES the photo** and is shown the studio's own recent
+  scheduled/published captions as the style ("same as all our other
+  posts") — never a `review` one, or it would end up copying itself. It
+  credits the artist by name and must not name or describe the client. If
+  the model is down it falls back to the bulk scheduler's stock lines plus
+  "Tattooed by X." A post with no logo (none set, or one that won't decode)
+  still gets made.
+- **Its own phone alert**, `onPost`, on by default — the drafts alert is
+  off by default and the upload page is anonymous and silent, so nothing
+  else would ever say a post is waiting.
+- **Facebook posting still needs `pages_manage_posts` from Meta.** Until
+  then an approved post will fail at its time like any other; Save photo and
+  Copy caption are on the card for posting by hand (Instagram too).
+
+**Bulk-scheduled posts were landing at 9pm.** `planDates` used
+`setHours()`, which is the server's clock, and Railway is UTC with no `TZ`
+set — so "11:00" was 11am in London, and a start date picked early on a
+Geelong morning was filed under the day before. Days and times are now on
+the studio's clock (`studioTime` / `studioDateParts` from calendar.ts), and
+`dayKey()` is the studio's calendar date. `autopost.mjs` pins 11am Geelong
+to 01:00 UTC, across the daylight-saving change.
+
+`tests/autopost.mjs` (63 checks) drives it end to end against the real
+server. Trap found writing it: sharp's `stats()` reads the WHOLE image
+whatever `extract()` says, so measuring a patch in one pipeline averaged in
+the logo and looked like a colour shift. Cut the patch to a buffer first.
+
 ## Accounts, studios and the login
 
 Built 29 September from Brad's "Final product pass" brief: a landing page,

@@ -1,4 +1,5 @@
 import cron from "node-cron";
+import { sweepAutoPosts } from "./autopost.js";
 import { studioIdentity } from "./studios.js";
 import { getDuePosts, updatePostStatus } from "./db.js";
 import { publishPagePost, importExistingConversations, sweepOlderInstagramThreads } from "./facebook.js";
@@ -21,6 +22,20 @@ export function startScheduler() {
   // has finished it is one settings read every five minutes.
   cron.schedule("2-59/5 * * * *", () => {
     void sweepOlderInstagramThreads();
+  });
+
+  // Artists' photos the upload route didn't turn into posts — a deploy
+  // mid-upload, a crash half-way. The route is the fast path; this is the
+  // floor, the same shape as the inbox poll under the webhook.
+  cron.schedule("4-59/5 * * * *", async () => {
+    try {
+      const run = await sweepAutoPosts();
+      if (run.made || run.failed) {
+        console.log(`[AutoPost] Sweep: ${run.made} made, ${run.failed} failed`);
+      }
+    } catch (error) {
+      console.error("[AutoPost] Sweep failed:", (error as Error).message);
+    }
   });
 
   // A subscription can lapse mid-life, not just across a restart — an outage

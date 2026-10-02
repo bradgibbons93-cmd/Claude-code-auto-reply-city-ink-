@@ -93,7 +93,7 @@ export function studioTimezone(): string {
 }
 
 /** The UTC instant matching a wall-clock time in the studio's timezone. */
-function studioTime(
+export function studioTime(
   year: number,
   month: number,
   day: number,
@@ -107,7 +107,7 @@ function studioTime(
 }
 
 /** Calendar date parts as they read on the studio's wall clock. */
-function studioDateParts(at: Date): { year: number; month: number; day: number; weekday: number } {
+export function studioDateParts(at: Date): { year: number; month: number; day: number; weekday: number } {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: TIMEZONE,
     year: "numeric",

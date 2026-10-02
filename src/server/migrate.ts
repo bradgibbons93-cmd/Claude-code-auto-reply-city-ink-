@@ -117,7 +117,7 @@ const STATEMENTS = [
     content TEXT NOT NULL,
     image_url VARCHAR(1024),
     scheduled_at TIMESTAMP NOT NULL,
-    status ENUM('draft','scheduled','published','failed') NOT NULL DEFAULT 'scheduled',
+    status ENUM('draft','scheduled','published','failed','review') NOT NULL DEFAULT 'scheduled',
     ai_generated BOOLEAN DEFAULT FALSE,
     facebook_post_id VARCHAR(191),
     last_error TEXT,
@@ -307,6 +307,11 @@ const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
     column: "platform",
     ddl: "ENUM('facebook','instagram') DEFAULT 'facebook'",
   },
+  // The auto-post from the artists' upload link (autopost.ts).
+  { table: "artist_uploads", column: "auto_post_state", ddl: "VARCHAR(16) NULL" },
+  { table: "artist_uploads", column: "auto_post_at", ddl: "TIMESTAMP NULL" },
+  { table: "artist_uploads", column: "auto_post_error", ddl: "VARCHAR(255) NULL" },
+  { table: "scheduled_posts", column: "upload_id", ddl: "VARCHAR(64) NULL" },
   // Accounts, on the template's users table.
   { table: "users", column: "password_hash", ddl: "VARCHAR(255)" },
   { table: "users", column: "avatar_asset_id", ddl: "VARCHAR(64)" },
@@ -349,6 +354,38 @@ async function ensureIndexes(): Promise<void> {
     if (Number(rows[0]?.cnt) === 0) {
       await db.execute(sql.raw(`ALTER TABLE ${table} ADD ${unique ? "UNIQUE " : ""}INDEX ${name} ${ddl}`));
       console.log(`[DB] Added index ${table}.${name}`);
+    }
+  }
+}
+
+/*
+ * ENUM values that were added after the table existed. ADD COLUMN can't do
+ * this, and CREATE TABLE IF NOT EXISTS never touches a table that is already
+ * there — so Railway's scheduled_posts would refuse 'review' for ever and
+ * every auto-post would fail on insert while every local test passed.
+ */
+const ENUMS: Array<{ table: string; column: string; value: string; ddl: string }> = [
+  {
+    table: "scheduled_posts",
+    column: "status",
+    value: "review",
+    ddl: "ENUM('draft','scheduled','published','failed','review') NOT NULL DEFAULT 'scheduled'",
+  },
+];
+
+async function ensureEnums(): Promise<void> {
+  const db = await getDb();
+  for (const { table, column, value, ddl } of ENUMS) {
+    const [rows] = (await db.execute(
+      sql.raw(
+        `SELECT COLUMN_TYPE AS type FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = '${table}' AND column_name = '${column}'`
+      )
+    )) as unknown as [Array<{ type: string }>];
+    const type = String(rows[0]?.type ?? "");
+    if (type && !type.includes(`'${value}'`)) {
+      await db.execute(sql.raw(`ALTER TABLE ${table} MODIFY COLUMN ${column} ${ddl}`));
+      console.log(`[DB] ${table}.${column} now takes '${value}'`);
     }
   }
 }
@@ -518,6 +555,7 @@ export async function ensureTables(): Promise<void> {
     await db.execute(sql.raw(statement));
   }
   await ensureColumns();
+  await ensureEnums();
   await ensureIndexes();
   await liftStaleHandoffPauses();
   await repairFailedDrafts();

@@ -41,6 +41,11 @@ const EVENTS = [
     hint: "Off by default — it lands right behind the message that caused it.",
   },
   {
+    key: "onPost" as const,
+    label: "A post is waiting for your OK",
+    hint: "An artist sent a photo and it's been made into a post with your logo on.",
+  },
+  {
     key: "onProblem" as const,
     label: "Something needs looking at",
     hint: "A token about to expire, or messages being turned away.",

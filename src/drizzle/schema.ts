@@ -261,6 +261,13 @@ export const artistUploads = mysqlTable(
     // Set when the studio has taken this one for a post, so the grid can
     // show what's already been used without deleting anything.
     usedAt: timestamp("used_at"),
+    // The auto-post (autopost.ts): null = not looked at yet, "working" while
+    // the logo and caption are being made, "done" once it's in Posts,
+    // "failed" with the reason beside it. Claimed atomically so a resend of
+    // the same photo, or the safety sweep, can never make a second post.
+    autoPostState: varchar("auto_post_state", { length: 16 }),
+    autoPostAt: timestamp("auto_post_at"),
+    autoPostError: varchar("auto_post_error", { length: 255 }),
     createdAt: timestamp("created_at").defaultNow(),
   },
   (t) => ({
@@ -308,13 +315,20 @@ export const scheduledPosts = mysqlTable("scheduled_posts", {
   content: text("content").notNull(),
   imageUrl: varchar("image_url", { length: 1024 }),
   scheduledAt: timestamp("scheduled_at").notNull(),
-  status: mysqlEnum("status", ["draft", "scheduled", "published", "failed"])
+  // "review" = made by the auto-post from an artist's upload and waiting for
+  // the studio's OK. Only "scheduled" is ever published (getDuePosts), so a
+  // post nobody approved cannot go out. "draft" is NOT that state — the
+  // publisher uses it as its in-flight claim.
+  status: mysqlEnum("status", ["draft", "scheduled", "published", "failed", "review"])
     .default("scheduled")
     .notNull(),
   aiGenerated: boolean("ai_generated").default(false),
   facebookPostId: varchar("facebook_post_id", { length: 191 }),
   lastError: text("last_error"),
   publishedAt: timestamp("published_at"),
+  // The artist upload this post was made from, so removing it can hand the
+  // photo back to the gallery as unused.
+  uploadId: varchar("upload_id", { length: 64 }),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

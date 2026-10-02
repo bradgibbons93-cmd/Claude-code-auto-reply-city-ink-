@@ -27,6 +27,8 @@ const DOT: Record<string, string> = {
   scheduled: "bg-sepia",
   draft: "bg-muted-foreground",
   failed: "bg-destructive",
+  // Made from an artist's upload, waiting for the studio's OK.
+  review: "bg-sepia/40",
 };
 
 /**

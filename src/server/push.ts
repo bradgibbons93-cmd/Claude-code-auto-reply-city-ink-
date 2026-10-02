@@ -34,6 +34,12 @@ export interface NotifySettings {
   onDraft: boolean;
   /** Something the studio should look at: a token expiring, deliveries being refused. */
   onProblem: boolean;
+  /**
+   * An artist's photo has been made into a post and is waiting for the OK
+   * (autopost.ts). On by default: unlike a draft reply, nothing else buzzes
+   * for it — the upload page is anonymous and silent.
+   */
+  onPost: boolean;
   /** "22:00" — no message notifications from here… */
   quietFrom: string;
   /** …until here. Bookings and problems still come through. */
@@ -47,6 +53,7 @@ export const DEFAULT_SETTINGS: NotifySettings = {
   onBooking: true,
   onDraft: false,
   onProblem: true,
+  onPost: true,
   quietFrom: "22:00",
   quietTo: "07:00",
   throttleMinutes: 10,
@@ -359,7 +366,7 @@ export async function clearAlert(key: string): Promise<void> {
  * switches, so a caller never has to know about quiet hours or preferences.
  */
 export async function notify(
-  kind: "message" | "booking" | "draft" | "problem",
+  kind: "message" | "booking" | "draft" | "problem" | "post",
   message: PushMessage
 ): Promise<{ sent: number; skipped?: string }> {
   const settings = await getNotifySettings().catch(() => DEFAULT_SETTINGS);
@@ -371,7 +378,9 @@ export async function notify(
         ? settings.onBooking
         : kind === "draft"
           ? settings.onDraft
-          : settings.onProblem;
+          : kind === "post"
+            ? settings.onPost
+            : settings.onProblem;
   if (!wanted) {
     // Every one of these was silent. A phone that doesn't buzz looks identical
     // whether the switch is off, the hour is wrong, or no device was ever
@@ -427,6 +436,7 @@ export async function reportPushReadiness(): Promise<void> {
       settings.onBooking && "bookings",
       settings.onDraft && "drafts",
       settings.onProblem && "problems",
+      settings.onPost && "posts to approve",
     ].filter(Boolean).join(", ") || "nothing";
     console.log(`[Push] ${devices} device(s) registered — on for: ${on} (${clock})`);
   } catch (error) {

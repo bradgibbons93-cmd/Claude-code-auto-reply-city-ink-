@@ -10,6 +10,15 @@ import { ensureTables } from "./migrate.js";
 import { getFacebookConfig, getTimelyConfig } from "./db.js";
 import { backfillCustomerNames, ensureMessengerSubscription } from "./facebook.js";
 import { readAttachment, saveImageBytes, UnsupportedImage } from "./attachments.js";
+import {
+  autoPostUploads,
+  previewLook,
+  DEFAULT_LOOK,
+  LOGO_CORNERS,
+  LOGO_SIZES,
+  RETOUCHES,
+  type PostLook,
+} from "./autopost.js";
 import { saveArtistUpload, readArtistUpload, UploadRejected } from "./uploads.js";
 import { syncFeed, countFeed } from "./feed.js";
 import QRCode from "qrcode";
@@ -164,6 +173,15 @@ app.post("/api/uploads", express.json({ limit: "24mb" }), async (req, res) => {
     }
 
     console.log(`[Uploads] ${saved.length} photo(s) from ${artistName || "an artist"}`);
+    // Into Posts with the logo on, waiting for the studio's OK (autopost.ts).
+    // Not awaited: the artist is standing there with a phone and the logo
+    // and caption take a few seconds a photo. The five-minute sweep catches
+    // anything this misses.
+    if (saved.length) {
+      autoPostUploads(saved).catch((error) =>
+        console.error("[AutoPost] Run failed:", (error as Error).message)
+      );
+    }
     return res.json({ saved: saved.length, rejected });
   } catch (error) {
     console.error("[Uploads] Save failed:", (error as Error).message);
@@ -188,6 +206,29 @@ app.get<{ id: string }>("/api/uploads/:id", requireStudioOrSignedLink, async (re
     return res.end(upload.bytes);
   } catch (error) {
     console.error("[Uploads] Serve failed:", (error as Error).message);
+    return res.sendStatus(500);
+  }
+});
+
+/**
+ * The post template on the studio's latest photo, for choosing the logo's
+ * corner and size by eye in the Gallery. Studio-only; reads the look from the
+ * query so the picture follows the buttons before anything is saved.
+ */
+app.get("/api/post-look/preview", requireStudio, async (req, res) => {
+  try {
+    const q = req.query as Record<string, string | undefined>;
+    const look = {
+      corner: (LOGO_CORNERS as readonly string[]).includes(q.corner ?? "") ? q.corner : DEFAULT_LOOK.corner,
+      size: (LOGO_SIZES as readonly string[]).includes(q.size ?? "") ? q.size : DEFAULT_LOOK.size,
+      retouch: (RETOUCHES as readonly string[]).includes(q.retouch ?? "") ? q.retouch : DEFAULT_LOOK.retouch,
+    } as PostLook;
+    const { bytes } = await previewLook(look);
+    res.setHeader("Content-Type", "image/jpeg");
+    res.setHeader("Cache-Control", "no-store");
+    return res.end(bytes);
+  } catch (error) {
+    console.error("[AutoPost] Preview failed:", (error as Error).message);
     return res.sendStatus(500);
   }
 });

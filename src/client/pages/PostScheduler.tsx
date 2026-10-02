@@ -20,6 +20,7 @@ import PostPreview from "@/components/PostPreview";
 import PostImagePicker from "@/components/PostImagePicker";
 import PostCalendar from "@/components/PostCalendar";
 import BulkScheduler from "@/components/BulkScheduler";
+import ReviewPosts from "@/components/ReviewPosts";
 
 // Palette only. A blue "scheduled" pill and a red "failed" one were the two
 // colours on the Posts page that weren't the studio's.
@@ -28,6 +29,7 @@ const STATUS_STYLES: Record<string, string> = {
   scheduled: "border-sepia/50 bg-sepia/15 text-sepia",
   draft: "border-border bg-beige/30 text-muted-foreground",
   failed: "border-destructive/50 bg-destructive/10 text-destructive",
+  review: "border-sepia/50 bg-transparent text-sepia",
 };
 
 export default function PostScheduler() {
@@ -37,9 +39,11 @@ export default function PostScheduler() {
   const [scheduledAt, setScheduledAt] = useState("");
   const [imageUrl, setImageUrl] = useState("");
 
-  const { data: posts, refetch } = trpc.posts.getScheduled.useQuery(undefined, {
+  const { data: allPosts, refetch } = trpc.posts.getScheduled.useQuery(undefined, {
     refetchInterval: 30000,
   });
+  const waiting = (allPosts ?? []).filter((post) => post.status === "review");
+  const posts = (allPosts ?? []).filter((post) => post.status !== "review");
 
   const createPost = trpc.posts.create.useMutation({
     onSuccess: () => {
@@ -188,9 +192,13 @@ export default function PostScheduler() {
         </div>
       </div>
 
+      {/* The artists' uploads, made into posts and waiting on a yes. First on
+          the page, because until someone looks at them nothing happens. */}
+      <ReviewPosts posts={waiting} onChange={() => refetch()} />
+
       <Card className="border-border">
         <CardContent className="pt-6">
-          <PostCalendar posts={posts ?? []} onPickDate={(date) => compose({ date })} />
+          <PostCalendar posts={allPosts ?? []} onPickDate={(date) => compose({ date })} />
           <p className="mt-3 text-xs text-muted-foreground">
             Tap a day to schedule something for it.
           </p>

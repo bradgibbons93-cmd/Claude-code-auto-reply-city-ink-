@@ -1,5 +1,6 @@
 import { and, gte, lte, ne } from "drizzle-orm";
 import { studioIdentity } from "./studios.js";
+import { studioDateParts, studioTime } from "./calendar.js";
 import { getDb } from "./db.js";
 import { scheduledPosts } from "../drizzle/schema.js";
 import { generateCaption } from "./agent.js";
@@ -56,7 +57,7 @@ export interface PlannedPost {
 
 /** Fallbacks, in order, so a photo can never end up with an empty caption.
  *  Signed off with the studio's own name and town, never one written in. */
-function fallbackCaptions(sign: string) {
+export function fallbackCaptions(sign: string) {
   return [
     `Fresh out of the studio. ${sign}.`,
     "New work off the table today.",
@@ -77,21 +78,40 @@ export function parseTimeOfDay(value: string | undefined): { hours: number; minu
   return { hours, minutes };
 }
 
-function atTime(day: Date, time: { hours: number; minutes: number }): Date {
-  const at = new Date(day);
-  at.setHours(time.hours, time.minutes, 0, 0);
-  return at;
+/*
+ * Days are counted on the STUDIO's wall clock, never the server's.
+ *
+ * Railway runs on UTC and nothing sets TZ, so `setHours(11)` meant 11am in
+ * London — 9pm in Geelong — and a photo picked for "Saturday" at 8am Geelong
+ * time was filed under Friday, because that is still Friday in UTC. Every
+ * bulk run had been planned that way. A day here is a civil date on the
+ * studio's clock (see calendar.ts), and the time of day is placed on that
+ * same clock, so 11:00 means 11:00 where the studio is.
+ */
+type CivilDay = { year: number; month: number; day: number };
+
+function civilOf(at: Date): CivilDay {
+  const { year, month, day } = studioDateParts(at);
+  return { year, month, day };
 }
 
-function addDays(day: Date, count: number): Date {
-  const next = new Date(day);
-  next.setDate(next.getDate() + count);
-  return next;
+function atTime(day: CivilDay, time: { hours: number; minutes: number }): Date {
+  return studioTime(day.year, day.month, day.day, time.hours, time.minutes);
 }
 
-/** Midnight-to-midnight key, so two times on the same day collide. */
-function dayKey(at: Date): string {
-  return `${at.getFullYear()}-${at.getMonth() + 1}-${at.getDate()}`;
+function addDays(day: CivilDay, count: number): CivilDay {
+  // Date.UTC does the month and year rollover; nothing here is an instant.
+  const next = new Date(Date.UTC(day.year, day.month, day.day + count));
+  return { year: next.getUTCFullYear(), month: next.getUTCMonth(), day: next.getUTCDate() };
+}
+
+function civilKey(day: CivilDay): string {
+  return `${day.year}-${day.month + 1}-${day.day}`;
+}
+
+/** The studio-clock date an instant falls on, so two posts on the same day collide. */
+export function dayKey(at: Date): string {
+  return civilKey(civilOf(at));
 }
 
 /**
@@ -122,8 +142,7 @@ export function planDates(
   const now = options.now ?? new Date();
   const taken = options.takenDays ?? new Set<string>();
 
-  let day = new Date(options.startDate);
-  day.setHours(0, 0, 0, 0);
+  let day = civilOf(options.startDate);
 
   // Never schedule into the past. A slot that has already gone rolls forward.
   while (atTime(day, time).getTime() <= now.getTime()) day = addDays(day, 1);
@@ -136,12 +155,12 @@ export function planDates(
 
   while (dates.length < count && steps < limit) {
     steps += 1;
-    if (taken.has(dayKey(day))) {
+    if (taken.has(civilKey(day))) {
       day = addDays(day, 1);
       continue;
     }
     dates.push(atTime(day, time));
-    taken.add(dayKey(day));
+    taken.add(civilKey(day));
     day = addDays(day, spacing);
   }
 
@@ -149,7 +168,7 @@ export function planDates(
 }
 
 /** The days that already carry a post, so the run can step over them. */
-async function daysAlreadyBooked(from: Date, to: Date): Promise<Set<string>> {
+export async function daysAlreadyBooked(from: Date, to: Date): Promise<Set<string>> {
   const db = await getDb();
   const rows = await db
     .select({ scheduledAt: scheduledPosts.scheduledAt })
@@ -220,8 +239,9 @@ export async function bulkSchedule(
 
   let taken: Set<string> | undefined;
   if (options.avoidClashes !== false) {
-    const from = new Date(options.startDate);
-    from.setHours(0, 0, 0, 0);
+    // A day either side of the studio-clock date: the window is in instants,
+    // and the start of the studio's day is not the start of the server's.
+    const from = new Date(options.startDate.getTime() - 86_400_000);
     // Far enough ahead to cover the whole run even if every day is busy.
     const to = new Date(from);
     to.setDate(to.getDate() + items.length * spacing + 90);

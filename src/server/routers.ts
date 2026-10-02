@@ -22,7 +22,6 @@ import {
   getScheduledPosts,
   createScheduledPost,
   updatePostStatus,
-  deletePost,
   getFacebookConfig,
   setFacebookConfig,
   getTimelyConfig,
@@ -79,6 +78,18 @@ import {
 } from "./uploads.js";
 import { testLlm, llmProvider, llmModel, llmBaseUrl, getLastLlmError } from "./llm.js";
 import { bulkSchedule, describeUploads, BulkRejected } from "./bulk.js";
+import {
+  approveReviewPost,
+  AutoPostRejected,
+  countWaiting,
+  getAutoPostSettings,
+  LOGO_CORNERS,
+  LOGO_SIZES,
+  RETOUCHES,
+  removePost,
+  saveAutoPostSettings,
+  studioLogo,
+} from "./autopost.js";
 import {
   getVapidKeys,
   saveSubscription,
@@ -174,6 +185,45 @@ export const appRouter = t.router({
    * do it without the app's JavaScript; everything here is the studio side —
    * looking through them, marking what's been used, clearing what hasn't.
    */
+  /**
+   * Artist uploads → posts: the switch, the posting time, and the look of
+   * the logo template (autopost.ts).
+   */
+  autopost: t.router({
+    get: studioProcedure.query(async () => {
+      const settings = await getAutoPostSettings();
+      const logo = await studioLogo().catch(() => undefined);
+      return {
+        enabled: settings.enabled,
+        time: settings.time,
+        look: settings.look,
+        hasLogo: !!logo,
+        waiting: await countWaiting().catch(() => 0),
+      };
+    }),
+    save: studioProcedure
+      .input(
+        z.object({
+          enabled: z.boolean().optional(),
+          time: z
+            .string()
+            .regex(/^([01]?\d|2[0-3]):[0-5]\d$/)
+            .optional(),
+          look: z
+            .object({
+              corner: z.enum(LOGO_CORNERS).optional(),
+              size: z.enum(LOGO_SIZES).optional(),
+              retouch: z.enum(RETOUCHES).optional(),
+            })
+            .optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const saved = await saveAutoPostSettings(input);
+        return { enabled: saved.enabled, time: saved.time, look: saved.look };
+      }),
+  }),
+
   uploads: t.router({
     list: studioProcedure
       .input(z.object({ unusedOnly: z.boolean().default(false) }).default({ unusedOnly: false }))
@@ -302,9 +352,38 @@ export const appRouter = t.router({
         })
       )
       .mutation(({ input }) => updatePostStatus(input.id, input.status)),
+    // Gives an artist's photo back to the gallery as unused if the post
+    // never went out (autopost.ts).
     remove: studioProcedure
       .input(z.object({ id: z.number() }))
-      .mutation(({ input }) => deletePost(input.id)),
+      .mutation(({ input }) => removePost(input.id)),
+
+    /**
+     * The studio's OK on a post the auto-post made from an artist's upload,
+     * with whatever they changed. Until this runs the post is "review" and
+     * the publisher will not touch it.
+     */
+    approve: studioProcedure
+      .input(
+        z.object({
+          id: z.number(),
+          content: z.string().max(4000).optional(),
+          scheduledAt: z.coerce.date().optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        try {
+          return await approveReviewPost(input.id, {
+            content: input.content,
+            scheduledAt: input.scheduledAt,
+          });
+        } catch (error) {
+          if (error instanceof AutoPostRejected) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+          }
+          throw error;
+        }
+      }),
     generateCaption: studioProcedure
       .input(z.object({ prompt: z.string().min(1) }))
       .mutation(async ({ input }) => ({ caption: await generateCaption(input.prompt) })),
@@ -475,6 +554,7 @@ export const appRouter = t.router({
           onBooking: z.boolean().optional(),
           onDraft: z.boolean().optional(),
           onProblem: z.boolean().optional(),
+          onPost: z.boolean().optional(),
           quietFrom: z.string().regex(/^\d{1,2}:\d{2}$/).optional(),
           quietTo: z.string().regex(/^\d{1,2}:\d{2}$/).optional(),
           throttleMinutes: z.number().int().min(0).max(180).optional(),

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import PhotoViewer from "@/components/PhotoViewer";
+import AutoPostCard from "@/components/AutoPostCard";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -88,6 +89,9 @@ export default function StudioGallery() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Each new upload becomes a post waiting for the studio's OK. */}
+      <AutoPostCard />
 
       <Card className="border-border">
         <CardHeader className="flex flex-row items-start justify-between gap-4">

@@ -1410,7 +1410,7 @@ export async function getDuePosts() {
 
 export async function updatePostStatus(
   id: number,
-  status: "draft" | "scheduled" | "published" | "failed",
+  status: "draft" | "scheduled" | "published" | "failed" | "review",
   extra?: { facebookPostId?: string; lastError?: string }
 ) {
   const db = await getDb();
