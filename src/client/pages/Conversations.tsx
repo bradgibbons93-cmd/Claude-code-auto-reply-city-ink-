@@ -462,18 +462,20 @@ function PendingReplyCard({
             <Send className="mr-2 h-3.5 w-3.5" />
             {approve.isPending ? "Sending…" : "Approve & send"}
           </Button>
-          {draft.llmFailed && (
-            <Button
-              variant="outline"
-              onClick={() => redraft.mutate({ id: draft.id })}
-              disabled={busy}
-            >
-              <RefreshCw
-                className={cn("mr-2 h-3.5 w-3.5", redraft.isPending && "animate-spin")}
-              />
-              {redraft.isPending ? "Asking the AI…" : "Try the AI again"}
-            </Button>
-          )}
+          {/* On every draft, not only a failed one: a card written before a
+              fix (Shae's "December is a bit further out…", written before
+              the calendar looked six months ahead) is otherwise stuck with
+              its old words. */}
+          <Button
+            variant="outline"
+            onClick={() => redraft.mutate({ id: draft.id })}
+            disabled={busy}
+          >
+            <RefreshCw
+              className={cn("mr-2 h-3.5 w-3.5", redraft.isPending && "animate-spin")}
+            />
+            {redraft.isPending ? "Asking the AI…" : draft.llmFailed ? "Try the AI again" : "Rewrite with AI"}
+          </Button>
           <Button variant="outline" onClick={() => reject.mutate({ id: draft.id })} disabled={busy}>
             <Trash2 className="mr-2 h-3.5 w-3.5" />
             Discard
