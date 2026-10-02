@@ -1200,8 +1200,26 @@ same as all our other posts, that would be amazing."* All of it is
   off by default and the upload page is anonymous and silent, so nothing
   else would ever say a post is waiting.
 - **Facebook posting still needs `pages_manage_posts` from Meta.** Until
-  then an approved post will fail at its time like any other; Save photo and
-  Copy caption are on the card for posting by hand (Instagram too).
+  then an approved post will fail at its time like any other; Save square,
+  Save story and Copy caption are on the card for posting by hand.
+- **Two pictures per post, in fixed frames** (Brad, same day: *"make it into
+  a square version and also a 1080 x 1920 for insta stories"*). The 1080
+  square is the post (`image_url`); the 1080x1920 story is saved beside it
+  (`story_url`) to be posted by hand — the app can't publish a story. A photo
+  close to the frame's shape (3:4 for the square, about 9:16 for a story)
+  FILLS it, cropped by sharp's attention strategy, which keeps the busy
+  detailed part — the tattoo. Anything else is shown WHOLE over a blurred,
+  darkened copy of itself, because cropping a 3:4 photo to 9:16 cuts away
+  half the piece. A story's logo sits 230px clear of Instagram's top bar and
+  reply box. `housekeeping.ts` reads `story_url` too: nothing else points at
+  a story, so without it the 2am clear-out would delete every one.
+- **The logo on posts can differ from the app's logo.** Brad's "City Ink
+  official logo white" PNG is right on a photo and invisible on the app's
+  light themes, where logos sit on `bg-card`. So Gallery → "Logo on posts"
+  takes its own upload (brand asset kind `postlogo`, kept at 1600px — the
+  app logo is shrunk to 640), stored as `auto_post.logoAssetId`, with "Use
+  the studio logo instead" to go back. Ownership is checked on save, as for
+  every brand asset. The cleaned-up file is in Drive → City Ink.
 
 **Bulk-scheduled posts were landing at 9pm.** `planDates` used
 `setHours()`, which is the server's clock, and Railway is UTC with no `TZ`
@@ -1211,7 +1229,7 @@ the studio's clock (`studioTime` / `studioDateParts` from calendar.ts), and
 `dayKey()` is the studio's calendar date. `autopost.mjs` pins 11am Geelong
 to 01:00 UTC, across the daylight-saving change.
 
-`tests/autopost.mjs` (63 checks) drives it end to end against the real
+`tests/autopost.mjs` (80 checks) drives it end to end against the real
 server. Trap found writing it: sharp's `stats()` reads the WHOLE image
 whatever `extract()` says, so measuring a patch in one pipeline averaged in
 the logo and looked like a colour shift. Cut the patch to a buffer first.
@@ -1652,6 +1670,12 @@ in the run.
 wrong reason: the reference scan didn't recognise the shape, so it read
 "nothing points at this" and deleted the lot. A test whose fixtures don't look
 like production is testing the fixtures.
+
+**`calendardates.mjs` failed twice in a row once (2 October, right after a
+full run): the stand-in calendar was never fetched at all ("0 reads"), so
+every named-date check failed together. Every run since — alone and in five
+full runs — has passed. Not explained yet; if it recurs, log whether
+`getTimelyConfig()` returned the row and whether node-ical's fetch went out.
 
 **`batche2e.mjs` and `sendfail.mjs` are intermittently flaky in a full run**
 and pass reliably alone. Not yet chased down; the shared test database and

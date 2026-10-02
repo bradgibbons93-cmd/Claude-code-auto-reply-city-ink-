@@ -312,6 +312,7 @@ const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "artist_uploads", column: "auto_post_at", ddl: "TIMESTAMP NULL" },
   { table: "artist_uploads", column: "auto_post_error", ddl: "VARCHAR(255) NULL" },
   { table: "scheduled_posts", column: "upload_id", ddl: "VARCHAR(64) NULL" },
+  { table: "scheduled_posts", column: "story_url", ddl: "VARCHAR(1024) NULL" },
   // Accounts, on the template's users table.
   { table: "users", column: "password_hash", ddl: "VARCHAR(255)" },
   { table: "users", column: "avatar_asset_id", ddl: "VARCHAR(64)" },

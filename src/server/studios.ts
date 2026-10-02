@@ -334,6 +334,9 @@ const PROFILES = {
   logo: { maxDimension: 640, quality: 90 },
   avatar: { maxDimension: 480, quality: 85 },
   cover: { maxDimension: 2000, quality: 82 },
+  // The logo drawn on post photos (autopost.ts). Kept far bigger than the app
+  // logo: it is printed across up to half a 1080px photo.
+  postlogo: { maxDimension: 1600, quality: 92 },
 } as const;
 export type BrandKind = keyof typeof PROFILES;
 

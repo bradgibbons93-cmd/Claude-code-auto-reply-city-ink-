@@ -116,11 +116,16 @@ async function referencedIds(): Promise<Set<string>> {
     .where(isNotNull(messengerConversations.bookingPhotoUrls));
   for (const row of bookings) collect(JSON.stringify(row.urls));
 
+  // Both pictures a post carries: the feed square and the 1080x1920 story
+  // (autopost.ts). The story is never published by the app, so nothing else
+  // points at it — miss it here and it is gone by 2am.
   const posts = await db
-    .select({ url: scheduledPosts.imageUrl })
-    .from(scheduledPosts)
-    .where(isNotNull(scheduledPosts.imageUrl));
-  for (const row of posts) collect(row.url);
+    .select({ url: scheduledPosts.imageUrl, story: scheduledPosts.storyUrl })
+    .from(scheduledPosts);
+  for (const row of posts) {
+    collect(row.url);
+    collect(row.story);
+  }
 
   return found;
 }

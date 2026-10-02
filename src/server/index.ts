@@ -84,7 +84,7 @@ app.post("/api/brand", express.json({ limit: "16mb" }), async (req, res) => {
     const { user } = await userFromRequest(req, res);
     if (!user) return res.status(401).json({ error: "Log in first." });
     const { kind, dataUrl } = (req.body ?? {}) as { kind?: string; dataUrl?: string };
-    if (kind !== "logo" && kind !== "cover" && kind !== "avatar") {
+    if (kind !== "logo" && kind !== "cover" && kind !== "avatar" && kind !== "postlogo") {
       return res.status(400).json({ error: "Unknown image type." });
     }
     const match = /^data:([^;,]+);base64,(.+)$/s.exec(String(dataUrl ?? ""));
@@ -223,7 +223,7 @@ app.get("/api/post-look/preview", requireStudio, async (req, res) => {
       size: (LOGO_SIZES as readonly string[]).includes(q.size ?? "") ? q.size : DEFAULT_LOOK.size,
       retouch: (RETOUCHES as readonly string[]).includes(q.retouch ?? "") ? q.retouch : DEFAULT_LOOK.retouch,
     } as PostLook;
-    const { bytes } = await previewLook(look);
+    const { bytes } = await previewLook(look, q.format === "story" ? "story" : "square");
     res.setHeader("Content-Type", "image/jpeg");
     res.setHeader("Cache-Control", "no-store");
     return res.end(bytes);

@@ -66,6 +66,14 @@ export interface AutoPostSettings {
    * turning it on would turn the whole back catalogue into posts.
    */
   since: number;
+  /**
+   * The logo drawn on posts, when it isn't the studio's app logo. Brad,
+   * 2 October: "reupload the logo ... it has a transparent background ...
+   * this will be city ink official logo white png". A white logo is right on
+   * a photo and invisible on the app's light themes, so the two are kept
+   * apart: this one is only ever drawn on posts.
+   */
+  logoAssetId: string | null;
 }
 
 export const DEFAULT_LOOK: PostLook = { corner: "bottom-right", size: "medium", retouch: "light" };
@@ -91,6 +99,8 @@ function normalise(raw: LooseSettings): AutoPostSettings {
       retouch: pick(RETOUCHES, look.retouch, DEFAULT_LOOK.retouch),
     },
     since: Number(raw.since) || 0,
+    logoAssetId:
+      typeof raw.logoAssetId === "string" && /^[0-9a-f]{40}$/.test(raw.logoAssetId) ? raw.logoAssetId : null,
   };
 }
 
@@ -115,6 +125,7 @@ export async function saveAutoPostSettings(input: {
   enabled?: boolean;
   time?: string;
   look?: Partial<PostLook>;
+  logoAssetId?: string | null;
 }): Promise<AutoPostSettings> {
   const current = await getAutoPostSettings();
   const next = normalise({
@@ -134,6 +145,26 @@ export async function studioLogo(): Promise<Buffer | undefined> {
   if (!studio?.logoAssetId) return undefined;
   const asset = await readBrandAsset(studio.logoAssetId);
   return asset?.bytes?.length ? Buffer.from(asset.bytes) : undefined;
+}
+
+/**
+ * The logo that goes on posts: the one uploaded for posts if there is one,
+ * otherwise the studio's own. `url` is for showing it in the Gallery card.
+ */
+export async function logoForPosts(
+  settings?: AutoPostSettings
+): Promise<{ bytes?: Buffer; url: string | null; custom: boolean }> {
+  const s = settings ?? (await getAutoPostSettings());
+  if (s.logoAssetId) {
+    const asset = await readBrandAsset(s.logoAssetId).catch(() => undefined);
+    if (asset?.bytes?.length) {
+      return { bytes: Buffer.from(asset.bytes), url: `/api/brand/${s.logoAssetId}`, custom: true };
+    }
+  }
+  const id = await getDataStudioId();
+  const studio = id ? await getStudio(id) : undefined;
+  const bytes = await studioLogo().catch(() => undefined);
+  return { bytes, url: bytes && studio?.logoAssetId ? `/api/brand/${studio.logoAssetId}` : null, custom: false };
 }
 
 /* ------------------------------------------------------------------ */
@@ -158,30 +189,52 @@ const TOUCH: Record<Retouch, null | { brightness: number; saturation: number; co
   punchy: { brightness: 1.04, saturation: 1.18, contrast: 1.12, sharpen: 0.9 },
 };
 
-function placeLogo(corner: LogoCorner, W: number, H: number, w: number, h: number, margin: number) {
+/**
+ * Brad, 2 October: "make it into a square version and also a 1080 x 1920 for
+ * insta stories". The square is the post; the story is made alongside it to
+ * be saved and posted by hand — Runnit can't publish a story.
+ */
+export const POST_FORMATS = {
+  square: { width: 1080, height: 1080 },
+  story: { width: 1080, height: 1920 },
+} as const;
+export type PostFormat = keyof typeof POST_FORMATS;
+
+function placeLogo(corner: LogoCorner, W: number, H: number, w: number, h: number, mx: number, my: number) {
   const left = corner.endsWith("left")
-    ? margin
+    ? mx
     : corner === "bottom-centre"
       ? Math.round((W - w) / 2)
-      : W - w - margin;
-  const top = corner.startsWith("top") ? margin : H - h - margin;
+      : W - w - mx;
+  const top = corner.startsWith("top") ? my : H - h - my;
   return { left, top };
 }
 
 /**
- * The "tattoo posts" template: the photo upright, touched up, and the
- * studio's logo in the corner with a soft shadow under it so it reads on a
- * pale arm as well as a black glove. Always a JPEG, never larger than 2048px.
+ * The "tattoo posts" template, in a fixed frame: 1080 square for the feed,
+ * 1080x1920 for a story. The photo is upright and touched up, and the logo
+ * sits in the chosen corner with a soft shadow under it so it reads on a pale
+ * arm as well as a black glove.
  *
- * Two stages on purpose. sharp composites AFTER its colour operations
- * regardless of the order they're written in, and the photo is held as raw
- * pixels between the stages so it is only JPEG-encoded once.
+ * How the photo fills the frame matters more than anything else here,
+ * because it is somebody's tattoo and cropping into it ruins the post:
+ *   - When the photo is already close to the frame's shape (a phone's 3:4 for
+ *     the square, roughly 9:16 for a story) it FILLS the frame, cropped by
+ *     sharp's attention strategy, which keeps the busiest, most detailed part
+ *     — the tattoo — and drops the plain edges.
+ *   - Otherwise the WHOLE photo is shown, centred over a blurred, darkened
+ *     copy of itself. A 3:4 photo in a story is the usual case: cropping it to
+ *     9:16 would cut away almost half the width.
+ *
+ * Stories keep the logo clear of Instagram's own furniture — the profile
+ * bar along the top and the reply box along the bottom — about 230px each.
  */
 export async function brandPhoto(
   photo: Buffer,
   look: PostLook,
-  logo?: Buffer
-): Promise<{ bytes: Buffer; logoApplied: boolean; width: number; height: number }> {
+  logo?: Buffer,
+  format: PostFormat = "square"
+): Promise<{ bytes: Buffer; logoApplied: boolean; width: number; height: number; filled: boolean }> {
   const meta = await sharp(photo).metadata();
   let base = sharp(photo)
     .rotate()
@@ -194,11 +247,49 @@ export async function brandPhoto(
       .linear(touch.contrast, 128 * (1 - touch.contrast))
       .sharpen({ sigma: touch.sharpen });
   }
-  const { data, info } = await base.removeAlpha().raw().toBuffer({ resolveWithObject: true });
-  const W = info.width;
-  const H = info.height;
-  const short = Math.min(W, H);
+  const src = await base.removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const raw = { raw: { width: src.info.width, height: src.info.height, channels: src.info.channels } };
 
+  const { width: W, height: H } = POST_FORMATS[format];
+  const aspect = src.info.width / src.info.height;
+  const filled =
+    format === "square" ? aspect >= 0.75 && aspect <= 1.34 : Math.abs(aspect - W / H) / (W / H) <= 0.12;
+
+  let frame: Buffer;
+  if (filled) {
+    frame = await sharp(src.data, raw)
+      .resize({ width: W, height: H, fit: "cover", position: sharp.strategy.attention })
+      .removeAlpha()
+      .raw()
+      .toBuffer();
+  } else {
+    // The backdrop is made small and blown up: a blur that size at 1080x1920
+    // is slow, and the result is the same soft wash.
+    const small = await sharp(src.data, raw)
+      .resize({ width: Math.round(W / 12), height: Math.round(H / 12), fit: "cover" })
+      .blur(2.5)
+      .modulate({ brightness: 0.5, saturation: 0.9 })
+      .png()
+      .toBuffer();
+    const backdrop = await sharp(small).resize({ width: W, height: H, fit: "fill" }).removeAlpha().raw().toBuffer();
+    const whole = await sharp(src.data, raw)
+      .resize({ width: W, height: H, fit: "inside" })
+      .png()
+      .toBuffer({ resolveWithObject: true });
+    frame = await sharp(backdrop, { raw: { width: W, height: H, channels: 3 } })
+      .composite([
+        {
+          input: whole.data,
+          left: Math.round((W - whole.info.width) / 2),
+          top: Math.round((H - whole.info.height) / 2),
+        },
+      ])
+      .removeAlpha()
+      .raw()
+      .toBuffer();
+  }
+
+  const short = Math.min(W, H);
   const layers: OverlayOptions[] = [];
   let logoApplied = false;
   if (logo?.length) {
@@ -217,8 +308,9 @@ export async function brandPhoto(
       const lh = fitted.info.height;
       const pad = Math.max(3, Math.round(Math.min(lw, lh) * 0.18));
       const drop = Math.max(1, Math.round(lh * 0.04));
-      const margin = Math.max(Math.round(short * 0.045), pad + drop + 2);
-      const { left, top } = placeLogo(look.corner, W, H, lw, lh, margin);
+      const mx = Math.max(Math.round(short * 0.045), pad + drop + 2);
+      const my = format === "story" ? Math.max(mx, Math.round(H * 0.12)) : mx;
+      const { left, top } = placeLogo(look.corner, W, H, lw, lh, mx, my);
 
       // The shadow is the logo's own shape in black, softened — not a box.
       const alpha = await sharp(fitted.data).extractChannel(3).linear(0.6, 0).png().toBuffer();
@@ -243,11 +335,11 @@ export async function brandPhoto(
     }
   }
 
-  const bytes = await sharp(data, { raw: { width: W, height: H, channels: info.channels } })
+  const bytes = await sharp(frame, { raw: { width: W, height: H, channels: 3 } })
     .composite(layers)
     .jpeg({ quality: 88, mozjpeg: true })
     .toBuffer();
-  return { bytes, logoApplied, width: W, height: H };
+  return { bytes, logoApplied, width: W, height: H, filled };
 }
 
 /* ------------------------------------------------------------------ */
@@ -376,16 +468,23 @@ async function makePost(id: string, settings: AutoPostSettings, logo: Buffer | u
   if (!upload?.bytes?.length) throw new Error("the photo isn't there any more");
   const photo = Buffer.from(upload.bytes);
 
-  // 1. The template. A post without the logo beats no post at all.
+  // 1. The template: the square for the post, the story to save. A post
+  //    without the logo beats no post at all.
   let imageUrl = `/api/uploads/${id}`;
+  let storyUrl: string | null = null;
   let logoApplied = false;
   try {
-    const branded = await brandPhoto(photo, settings.look, logo);
-    const saved = await saveImageBytes("image/jpeg", branded.bytes, "post");
-    imageUrl = saved.url;
-    logoApplied = branded.logoApplied;
+    const square = await brandPhoto(photo, settings.look, logo, "square");
+    imageUrl = (await saveImageBytes("image/jpeg", square.bytes, "post")).url;
+    logoApplied = square.logoApplied;
   } catch (error) {
     console.warn(`[AutoPost] Couldn't brand ${id}, posting it as it came in: ${(error as Error).message}`);
+  }
+  try {
+    const story = await brandPhoto(photo, settings.look, logo, "story");
+    storyUrl = (await saveImageBytes("image/jpeg", story.bytes, "post")).url;
+  } catch (error) {
+    console.warn(`[AutoPost] Couldn't make the story for ${id}: ${(error as Error).message}`);
   }
 
   // 2. The words.
@@ -407,6 +506,7 @@ async function makePost(id: string, settings: AutoPostSettings, logo: Buffer | u
     status: "review",
     aiGenerated,
     uploadId: id,
+    storyUrl,
   });
   await markUploadUsed(id, true).catch(() => undefined);
   await settle(id, "done");
@@ -441,7 +541,7 @@ async function processBatch(ids: string[]): Promise<AutoPostRun> {
     result.skipped = ids.length;
     return result;
   }
-  const logo = await studioLogo().catch(() => undefined);
+  const logo = (await logoForPosts(settings).catch(() => undefined))?.bytes;
 
   const artists = new Set<string>();
   const problems: string[] = [];
@@ -586,7 +686,10 @@ export async function countWaiting(): Promise<number> {
  * The template on the studio's latest photo, for the preview in the Gallery —
  * so the corner and size can be chosen by looking, not by guessing.
  */
-export async function previewLook(look: PostLook): Promise<{ bytes: Buffer; sample: boolean }> {
+export async function previewLook(
+  look: PostLook,
+  format: PostFormat = "square"
+): Promise<{ bytes: Buffer; sample: boolean }> {
   const db = await getDb();
   const [latest] = await db
     .select({ bytes: artistUploads.bytes })
@@ -602,8 +705,8 @@ export async function previewLook(look: PostLook): Promise<{ bytes: Buffer; samp
       .jpeg()
       .toBuffer();
   }
-  const logo = await studioLogo().catch(() => undefined);
-  const { bytes } = await brandPhoto(photo, look, logo);
-  const small = await sharp(bytes).resize({ width: 900, height: 900, fit: "inside" }).jpeg({ quality: 82 }).toBuffer();
+  const logo = (await logoForPosts().catch(() => undefined))?.bytes;
+  const { bytes } = await brandPhoto(photo, look, logo, format);
+  const small = await sharp(bytes).resize({ width: 720, height: 720, fit: "inside" }).jpeg({ quality: 82 }).toBuffer();
   return { bytes: small, sample };
 }

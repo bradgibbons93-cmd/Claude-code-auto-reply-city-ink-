@@ -99,6 +99,9 @@ async function pixel(bytes, x, y) {
   return { r: data[i], g: data[i + 1], b: data[i + 2], width: info.width, height: info.height };
 }
 const isRed = (p) => p.r > 170 && p.g < 90 && p.b < 90;
+// The centre of a medium logo in the bottom right of the 1080 square:
+// 0.42 x 1080 = 454 wide, 114 tall, 49px in from each edge.
+const SQ_LOGO = { x: 1080 - 49 - 227, y: 1080 - 49 - 57 };
 /**
  * The average colour of a patch — one pixel of a JPEG is too noisy to compare.
  * Cut out FIRST: sharp's stats() reads the whole image whatever extract()
@@ -272,12 +275,25 @@ try {
   check("the post's picture is a new image, not the raw upload", /^\/api\/attachments\/[0-9a-f]{40}$/.test(first.image_url ?? ""), first.image_url);
   const pic = await brad.raw("GET", first.image_url);
   check("it's a JPEG the studio can open", pic.status === 200 && pic.type === "image/jpeg", `${pic.status} ${pic.type}`);
-  // Bottom right, medium: 0.42 of the short side wide → 504x126, 54px in.
-  const onLogo = await pixel(pic.bytes, 1200 - 54 - 252, 1600 - 54 - 63);
+  // Bottom right, medium: 0.42 of 1080 wide → 454x114, 49px in.
+  const onLogo = await pixel(pic.bytes, SQ_LOGO.x, SQ_LOGO.y);
   const farCorner = await pixel(pic.bytes, 80, 80);
   check("the studio's logo is drawn in the bottom right", isRed(onLogo), JSON.stringify(onLogo));
   check("and nowhere near the top left", !isRed(farCorner), JSON.stringify(farCorner));
-  check("the photo keeps its size", onLogo.width === 1200 && onLogo.height === 1600, `${onLogo.width}x${onLogo.height}`);
+  check("the post is a 1080 square", onLogo.width === 1080 && onLogo.height === 1080, `${onLogo.width}x${onLogo.height}`);
+
+  /* the story */
+  check("each post comes with a story", /^\/api\/attachments\/[0-9a-f]{40}$/.test(first.story_url ?? "") && first.story_url !== first.image_url, first.story_url);
+  const storyPic = await brad.raw("GET", first.story_url);
+  const storyLogo = await pixel(storyPic.bytes, SQ_LOGO.x, 1920 - 230 - 57);
+  check("the story is 1080 x 1920", storyLogo.width === 1080 && storyLogo.height === 1920, `${storyLogo.width}x${storyLogo.height}`);
+  check("with the logo clear of Instagram's reply bar", isRed(storyLogo) && !isRed(await pixel(storyPic.bytes, SQ_LOGO.x, SQ_LOGO.y + 840)), JSON.stringify(storyLogo));
+  const band = await patch(storyPic.bytes, 480, 60);
+  const middle = await patch(storyPic.bytes, 480, 900);
+  const lum = (p) => p.r + p.g + p.b;
+  check("a 3:4 photo is shown whole, over a darker soft backdrop", lum(band) < lum(middle) * 0.8,
+    `band ${JSON.stringify(band)} vs photo ${JSON.stringify(middle)}`);
+  check("a stranger can't open the story either", (await browser().raw("GET", first.story_url)).status === 401);
   const original = await patch(photoA, 200, 200);
   const touched = await patch(pic.bytes, 200, 200);
   check("the colour was touched up (a little more saturated)", satOf(touched) > satOf(original) + 1,
@@ -392,7 +408,7 @@ try {
   const plain = await waitFor(async () => (await reviewPosts()).find((p) => !known.has(p.id)));
   const plainPic = plain ? await brad.raw("GET", plain.image_url) : undefined;
   check("a studio with no logo still gets the post, touched up", !!plain && plainPic?.status === 200);
-  check("with nothing drawn in the corner", plainPic ? !isRed(await pixel(plainPic.bytes, 1200 - 54 - 252, 1600 - 54 - 63)) : false);
+  check("with nothing drawn in the corner", plainPic ? !isRed(await pixel(plainPic.bytes, SQ_LOGO.x, SQ_LOGO.y)) : false);
 
   /* ---------- the switch ---------- */
   const off = await brad.mutate("autopost.save", { enabled: false });
@@ -405,6 +421,40 @@ try {
   await autopost.sweepAutoPosts();
   check("switching it back on doesn't sweep what came in while it was off", (await reviewPosts()).length === beforeOff, String((await reviewPosts()).length));
 
+  /* ---------- a logo just for posts ---------- */
+  // Brad's white "official" logo: right on a photo, invisible on a light app
+  // theme, so it is kept apart from the studio's app logo.
+  const blue = await sharp({ create: { width: 400, height: 100, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite([{ input: await sharp({ create: { width: 400, height: 100, channels: 3, background: { r: 20, g: 40, b: 230 } } }).png().toBuffer(), left: 0, top: 0 }])
+    .png()
+    .toBuffer();
+  const isBlue = (p) => p.b > 170 && p.r < 90 && p.g < 110;
+  const upPost = await brad.raw("POST", "/api/brand", { kind: "postlogo", dataUrl: dataUrl(blue, "image/png") });
+  check("a logo for posts uploads", upPost.status === 200 && /^[0-9a-f]{40}$/.test(upPost.json?.id ?? ""), JSON.stringify(upPost.json));
+  const setLogo = await brad.mutate("autopost.save", { logoAssetId: upPost.json?.id });
+  const withLogo = await brad.query("autopost.get");
+  check("and is chosen for posts", setLogo.status === 200 && withLogo.data?.customLogo === true && withLogo.data?.logoUrl === `/api/brand/${upPost.json?.id}`, JSON.stringify(withLogo.data));
+  const studioAfter = (await brad.query("account.me")).data?.studios?.find((x) => x.id === studioId);
+  check("without touching the studio's own logo in the app", studioAfter?.logoUrl !== `/api/brand/${upPost.json?.id}`, JSON.stringify(studioAfter?.logoUrl));
+  const before2 = new Set((await reviewPosts()).map((p) => p.id));
+  await artist.raw("POST", "/api/uploads", { artistName: "Mim", photos: [{ contentType: "image/jpeg", dataUrl: dataUrl(await photo(11)) }] });
+  const withPostLogo = await waitFor(async () => (await reviewPosts()).find((p) => !before2.has(p.id)));
+  const postPic = withPostLogo ? await brad.raw("GET", withPostLogo.image_url) : undefined;
+  check("the next post wears the post logo", postPic ? isBlue(await pixel(postPic.bytes, SQ_LOGO.x, SQ_LOGO.y)) : false);
+  const stranger = browser();
+  await stranger.mutate("account.signup", { name: "Someone", email: "someone@example.com", password: "another pass" });
+  const theirs = await stranger.raw("POST", "/api/brand", { kind: "postlogo", dataUrl: dataUrl(blue, "image/png") });
+  const stolen = await brad.mutate("autopost.save", { logoAssetId: theirs.json?.id });
+  check("someone else's image can't be made the post logo", stolen.status === 403, JSON.stringify(stolen));
+  await brad.mutate("autopost.save", { logoAssetId: null });
+  check("and it can go back to the studio logo", (await brad.query("autopost.get")).data?.customLogo === false);
+
+  /* ---------- the nightly clear-out keeps the story ---------- */
+  const hk = await import(`${ROOT}/dist/server/housekeeping.js`);
+  await hk.pruneStoredImages({ now: new Date(Date.now() + 60 * 86_400_000), orphanGraceDays: 0 });
+  check("the 2am clear-out never takes a post's story", (await brad.raw("GET", first.story_url)).status === 200);
+  check("or its square", (await brad.raw("GET", first.image_url)).status === 200);
+
   /* ---------- the look ---------- */
   const look = await brad.mutate("autopost.save", { look: { corner: "top-left", size: "large", retouch: "off" }, time: "18:30" });
   check("the look and the time save", look.data?.look?.corner === "top-left" && look.data?.time === "18:30", JSON.stringify(look.data));
@@ -416,7 +466,7 @@ try {
 
   /* ---------- the template on its own ---------- */
   const offLook = await autopost.brandPhoto(photoA, { corner: "top-left", size: "small", retouch: "off" }, logo);
-  const tl = await pixel(offLook.bytes, Math.round(1200 * 0.045) + 20, Math.round(1200 * 0.045) + 10);
+  const tl = await pixel(offLook.bytes, 49 + 20, 49 + 10);
   check("top left puts it top left", isRed(tl), JSON.stringify(tl));
   const untouched = await patch(offLook.bytes, 500, 800);
   const raw = await patch(photoA, 500, 800);
@@ -424,7 +474,16 @@ try {
     Math.abs(untouched.r - raw.r) < 1.5 && Math.abs(untouched.g - raw.g) < 1.5 && Math.abs(untouched.b - raw.b) < 1.5,
     `${JSON.stringify(raw)} → ${JSON.stringify(untouched)}`);
   const centre = await autopost.brandPhoto(photoA, { corner: "bottom-centre", size: "medium", retouch: "light" }, logo);
-  check("bottom middle is centred", isRed(await pixel(centre.bytes, 600, 1600 - 54 - 63)));
+  check("bottom middle is centred", isRed(await pixel(centre.bytes, 540, SQ_LOGO.y)));
+  check("a phone's 3:4 photo fills the square (cropped, not shrunk)", centre.filled === true);
+  const wide = await sharp({ create: { width: 1600, height: 900, channels: 3, background: { r: 120, g: 110, b: 100 } } }).jpeg().toBuffer();
+  const wideSquare = await autopost.brandPhoto(wide, { corner: "bottom-right", size: "medium", retouch: "off" }, logo, "square");
+  check("a wide 16:9 photo is shown whole in the square instead", wideSquare.filled === false && wideSquare.width === 1080 && wideSquare.height === 1080);
+  const tall = await sharp({ create: { width: 900, height: 1600, channels: 3, background: { r: 120, g: 110, b: 100 } } }).jpeg().toBuffer();
+  check("a photo already 9:16 fills the story", (await autopost.brandPhoto(tall, { corner: "bottom-right", size: "medium", retouch: "off" }, logo, "story")).filled === true);
+  const storyPreview = await brad.raw("GET", "/api/post-look/preview?format=story&corner=bottom-right&size=medium&retouch=light");
+  const storyMeta = storyPreview.bytes ? await sharp(storyPreview.bytes).metadata() : {};
+  check("the preview draws the story too", storyPreview.status === 200 && Math.abs(storyMeta.height / storyMeta.width - 1920 / 1080) < 0.02, JSON.stringify(storyMeta.width) + "x" + storyMeta.height);
   const broken = await autopost.brandPhoto(photoA, { corner: "bottom-right", size: "medium", retouch: "light" }, Buffer.from("not a png"));
   check("a logo that won't open costs the logo, not the post", broken.logoApplied === false && broken.bytes.length > 1000);
 

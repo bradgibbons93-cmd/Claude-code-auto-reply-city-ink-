@@ -329,6 +329,9 @@ export const scheduledPosts = mysqlTable("scheduled_posts", {
   // The artist upload this post was made from, so removing it can hand the
   // photo back to the gallery as unused.
   uploadId: varchar("upload_id", { length: 64 }),
+  // The 1080x1920 Instagram story made alongside the square post image. The
+  // app can't publish stories; it's there to be saved and posted by hand.
+  storyUrl: varchar("story_url", { length: 1024 }),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

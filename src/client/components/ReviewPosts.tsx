@@ -14,6 +14,7 @@ type Post = {
   id: number;
   content: string;
   imageUrl: string | null;
+  storyUrl?: string | null;
   scheduledAt: string | Date;
 };
 
@@ -23,7 +24,7 @@ type Post = {
  * publisher will not touch them until Approve is pressed — so this card is
  * the only door they go out through.
  *
- * Save photo and Copy caption are here because Facebook posting is still
+ * Save square, Save story and Copy caption are here because Facebook posting is still
  * waiting on Meta's review, and Instagram posting isn't something Runnit can
  * do at all yet: the branded photo and its caption are useful today, by hand.
  */
@@ -74,17 +75,29 @@ export default function ReviewPosts({ posts, onChange }: { posts: Post[]; onChan
             <div
               key={post.id}
               data-testid="review-post"
-              className="grid gap-4 rounded-2xl border border-border p-3 sm:grid-cols-[minmax(0,220px)_1fr]"
+              className="grid gap-4 rounded-2xl border border-border p-3 sm:grid-cols-[minmax(0,300px)_1fr]"
             >
               {post.imageUrl ? (
-                <button
-                  type="button"
-                  onClick={() => setOpen(post.imageUrl)}
-                  className="overflow-hidden rounded-xl bg-elevated"
-                  aria-label="Open the photo"
-                >
-                  <img src={post.imageUrl} alt="The photo with the studio's logo on" className="w-full object-cover" />
-                </button>
+                <div className="grid grid-cols-[1fr_0.42fr] items-start gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setOpen(post.imageUrl)}
+                    className="overflow-hidden rounded-xl bg-elevated"
+                    aria-label="Open the square post"
+                  >
+                    <img src={post.imageUrl} alt="The square post with the logo on" className="aspect-square w-full object-cover" />
+                  </button>
+                  {post.storyUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setOpen(post.storyUrl ?? null)}
+                      className="overflow-hidden rounded-xl bg-elevated"
+                      aria-label="Open the story"
+                    >
+                      <img src={post.storyUrl} alt="The Instagram story version" className="aspect-[9/16] w-full object-cover" />
+                    </button>
+                  )}
+                </div>
               ) : (
                 <div className="grid min-h-32 place-items-center rounded-xl bg-elevated text-sm text-muted-foreground">
                   No photo
@@ -144,11 +157,21 @@ export default function ReviewPosts({ posts, onChange }: { posts: Post[]; onChan
                   {post.imageUrl && (
                     <a
                       href={post.imageUrl}
-                      download={`post-${post.id}.jpg`}
+                      download={`post-${post.id}-square.jpg`}
                       className="inline-flex h-10 items-center justify-center rounded-xl border border-border px-4 text-sm font-medium text-charcoal transition-all hover:border-sepia hover:bg-beige/20"
                     >
                       <Download className="mr-2 h-4 w-4" />
-                      Save photo
+                      Save square
+                    </a>
+                  )}
+                  {post.storyUrl && (
+                    <a
+                      href={post.storyUrl}
+                      download={`post-${post.id}-story.jpg`}
+                      className="inline-flex h-10 items-center justify-center rounded-xl border border-border px-4 text-sm font-medium text-charcoal transition-all hover:border-sepia hover:bg-beige/20"
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      Save story
                     </a>
                   )}
                   <Button

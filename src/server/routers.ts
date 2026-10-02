@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { t, studioProcedure } from "./trpc.js";
 import { accountRouter, onboardingRouter, studiosRouter } from "./accountRouter.js";
-import { studioIdentity } from "./studios.js";
+import { readBrandAsset, studioIdentity } from "./studios.js";
 import { z } from "zod";
 import {
   getCheckWith,
@@ -88,7 +88,7 @@ import {
   RETOUCHES,
   removePost,
   saveAutoPostSettings,
-  studioLogo,
+  logoForPosts,
 } from "./autopost.js";
 import {
   getVapidKeys,
@@ -192,12 +192,14 @@ export const appRouter = t.router({
   autopost: t.router({
     get: studioProcedure.query(async () => {
       const settings = await getAutoPostSettings();
-      const logo = await studioLogo().catch(() => undefined);
+      const logo = await logoForPosts(settings).catch(() => undefined);
       return {
         enabled: settings.enabled,
         time: settings.time,
         look: settings.look,
-        hasLogo: !!logo,
+        hasLogo: !!logo?.bytes,
+        logoUrl: logo?.url ?? null,
+        customLogo: !!logo?.custom,
         waiting: await countWaiting().catch(() => 0),
       };
     }),
@@ -216,11 +218,20 @@ export const appRouter = t.router({
               retouch: z.enum(RETOUCHES).optional(),
             })
             .optional(),
+          // A logo uploaded for posts (kind "postlogo"), or null to go back to
+          // the studio's own logo.
+          logoAssetId: z.string().regex(/^[0-9a-f]{40}$/).nullable().optional(),
         })
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
+        if (input.logoAssetId) {
+          const asset = await readBrandAsset(input.logoAssetId);
+          if (!asset || asset.userId !== ctx.viewer.user.id) {
+            throw new TRPCError({ code: "FORBIDDEN", message: "That image isn't one of yours." });
+          }
+        }
         const saved = await saveAutoPostSettings(input);
-        return { enabled: saved.enabled, time: saved.time, look: saved.look };
+        return { enabled: saved.enabled, time: saved.time, look: saved.look, logoAssetId: saved.logoAssetId };
       }),
   }),
 
