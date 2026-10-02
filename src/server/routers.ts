@@ -86,7 +86,10 @@ import {
   LOGO_CORNERS,
   LOGO_SIZES,
   RETOUCHES,
+  SHADOWS,
   removePost,
+  reframePost,
+  redrawWaitingPostsSoon,
   saveAutoPostSettings,
   logoForPosts,
 } from "./autopost.js";
@@ -216,6 +219,7 @@ export const appRouter = t.router({
               corner: z.enum(LOGO_CORNERS).optional(),
               size: z.enum(LOGO_SIZES).optional(),
               retouch: z.enum(RETOUCHES).optional(),
+              shadow: z.enum(SHADOWS).optional(),
             })
             .optional(),
           // A logo uploaded for posts (kind "postlogo"), or null to go back to
@@ -231,6 +235,9 @@ export const appRouter = t.router({
           }
         }
         const saved = await saveAutoPostSettings(input);
+        // Posts already waiting are redrawn in the new look, so Posts never
+        // shows the old one after it was changed here.
+        if (input.look || input.logoAssetId !== undefined) redrawWaitingPostsSoon();
         return { enabled: saved.enabled, time: saved.time, look: saved.look, logoAssetId: saved.logoAssetId };
       }),
   }),
@@ -388,6 +395,30 @@ export const appRouter = t.router({
             content: input.content,
             scheduledAt: input.scheduledAt,
           });
+        } catch (error) {
+          if (error instanceof AutoPostRejected) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+          }
+          throw error;
+        }
+      }),
+    /**
+     * Move the photo inside a waiting post's square and/or story (Brad: "I
+     * want to be able to drag to recenter the picture"). x and y are CSS
+     * object-position as 0-1; null puts that one back to automatic. Both
+     * pictures are redrawn from the original upload.
+     */
+    reframe: studioProcedure
+      .input(
+        z.object({
+          id: z.number(),
+          square: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).nullable().optional(),
+          story: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).nullable().optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        try {
+          return await reframePost(input.id, { square: input.square, story: input.story });
         } catch (error) {
           if (error instanceof AutoPostRejected) {
             throw new TRPCError({ code: "BAD_REQUEST", message: error.message });

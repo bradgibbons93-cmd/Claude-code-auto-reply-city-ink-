@@ -1221,6 +1221,48 @@ same as all our other posts, that would be amazing."* All of it is
   the studio logo instead" to go back. Ownership is checked on save, as for
   every brand asset. The cleaned-up file was sent to Brad in the chat to
   upload there himself (the app has no way to set it on his behalf).
+- **The logo's shadow was solid black, whatever the code said.** Brad, same
+  day: *"the shadow on the logo is way to dark"*. The code faded the logo's
+  alpha to 60% with `extractChannel(3).linear(0.6, 0)` in ONE pipeline —
+  but sharp runs `linear()` before `extractChannel()` whatever order they
+  are written in, and `linear()` leaves alpha alone, so the fade never
+  happened (255 in, 255 out; `autopost.mjs` measured the old one darkening
+  the skin under the logo by 34%). Cut the channel to a buffer, THEN fade
+  it. Same family as the `stats()` trap below: **sharp's pipeline has a
+  fixed order of its own; anything order-sensitive goes in two pipelines.**
+  There's a None / Soft / Strong choice now (`look.shadow`, default Soft),
+  in the Gallery card.
+- **Drag to move the photo** (Brad: *"I want to be able to drag to
+  recenter the picture"*). Posts → a waiting post → Move photo: square and
+  story tabs, the ORIGINAL upload in the frame, moved with CSS
+  `object-position`, and the logo laid over it from
+  `/api/post-look/overlay` so the tattoo can be kept clear of it.
+  `brandPhoto(…, position)` uses the same rule as CSS — 0–1 per axis, the
+  share of the spare room before the photo — so where it's dropped is
+  where it lands in the JPEG. Filled, it chooses the crop; shown whole, it
+  slides the photo over the blur. `posts.reframe` redraws BOTH pictures from
+  the upload, never from the branded JPEG (that would crop a crop and paint
+  a second logo). Only `review` posts can move: approved is approved.
+  `scheduled_posts.framing` records each format's spot, whether it fills,
+  and whether it was placed by hand; sharp's own pick comes back from its
+  `cropOffsetLeft/Top`, so the drag starts where the photo really is.
+- **Waiting posts are redrawn when the look changes.** Change the shadow in
+  the Gallery, go to Posts, still see the dark one: the obvious conclusion
+  is that the change didn't work. `scheduled_posts.look_key` hashes the look,
+  the logo and `RENDER_VERSION`; a `review` post with a different key is
+  redrawn (4s after a save, in the five-minute sweep, and at boot), keeping
+  any hand-placed spot. Bump `RENDER_VERSION` when the drawing changes —
+  that is how the posts already waiting got the soft shadow. Every redraw
+  write is conditional on the row being as it was read (`framing <=>`,
+  `look_key <=>`, still `review`), so a drag or an approve mid-redraw wins.
+- **On a phone the story frame runs under the bottom menu.** A drag started
+  there lands on the menu and scrolls the page, and Save hides behind it.
+  The editor scrolls itself into the clear space (scroll margins for the
+  header and menu) on open and on every tab change, and the frame is sized
+  (52vh) so tabs, frame and Save all fit. `touch-none` on the frame is what
+  stops a finger drag scrolling the page. `tests/reframebrowser.mjs` (28
+  checks) drags with a mouse and with a real CDP touch on a 390px phone,
+  then reads the JPEGs back to prove the photo moved the way it was dragged.
 
 **Bulk-scheduled posts were landing at 9pm.** `planDates` used
 `setHours()`, which is the server's clock, and Railway is UTC with no `TZ`
@@ -1230,7 +1272,7 @@ the studio's clock (`studioTime` / `studioDateParts` from calendar.ts), and
 `dayKey()` is the studio's calendar date. `autopost.mjs` pins 11am Geelong
 to 01:00 UTC, across the daylight-saving change.
 
-`tests/autopost.mjs` (80 checks) drives it end to end against the real
+`tests/autopost.mjs` (106 checks) drives it end to end against the real
 server. Trap found writing it: sharp's `stats()` reads the WHOLE image
 whatever `extract()` says, so measuring a patch in one pipeline averaged in
 the logo and looked like a colour shift. Cut the patch to a buffer first.

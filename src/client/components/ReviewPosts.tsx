@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { format } from "date-fns";
-import { Check, Copy, Download, Trash2 } from "lucide-react";
+import { Check, Copy, Download, Move, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,12 +9,15 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import PhotoViewer from "@/components/PhotoViewer";
+import ReframeEditor, { parseFraming } from "@/components/ReframeEditor";
 
 type Post = {
   id: number;
   content: string;
   imageUrl: string | null;
   storyUrl?: string | null;
+  uploadId?: string | null;
+  framing?: string | null;
   scheduledAt: string | Date;
 };
 
@@ -31,6 +34,8 @@ type Post = {
 export default function ReviewPosts({ posts, onChange }: { posts: Post[]; onChange: () => void }) {
   const [edits, setEdits] = useState<Record<number, { content?: string; when?: string }>>({});
   const [open, setOpen] = useState<string | null>(null);
+  // The post whose photo is being moved, if any. One at a time.
+  const [moving, setMoving] = useState<number | null>(null);
 
   const approve = trpc.posts.approve.useMutation({
     onSuccess: (data) => {
@@ -77,25 +82,49 @@ export default function ReviewPosts({ posts, onChange }: { posts: Post[]; onChan
               data-testid="review-post"
               className="grid gap-4 rounded-2xl border border-border p-3 sm:grid-cols-[minmax(0,300px)_1fr]"
             >
-              {post.imageUrl ? (
-                <div className="grid grid-cols-[1fr_0.42fr] items-start gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setOpen(post.imageUrl)}
-                    className="overflow-hidden rounded-xl bg-elevated"
-                    aria-label="Open the square post"
-                  >
-                    <img src={post.imageUrl} alt="The square post with the logo on" className="aspect-square w-full object-cover" />
-                  </button>
-                  {post.storyUrl && (
+              {moving === post.id && post.uploadId ? (
+                <ReframeEditor
+                  postId={post.id}
+                  uploadId={post.uploadId}
+                  framing={parseFraming(post.framing)}
+                  onCancel={() => setMoving(null)}
+                  onDone={() => {
+                    setMoving(null);
+                    onChange();
+                  }}
+                />
+              ) : post.imageUrl ? (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-[1fr_0.42fr] items-start gap-2">
                     <button
                       type="button"
-                      onClick={() => setOpen(post.storyUrl ?? null)}
+                      onClick={() => setOpen(post.imageUrl)}
                       className="overflow-hidden rounded-xl bg-elevated"
-                      aria-label="Open the story"
+                      aria-label="Open the square post"
                     >
-                      <img src={post.storyUrl} alt="The Instagram story version" className="aspect-[9/16] w-full object-cover" />
+                      <img src={post.imageUrl} alt="The square post with the logo on" className="aspect-square w-full object-cover" />
                     </button>
+                    {post.storyUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setOpen(post.storyUrl ?? null)}
+                        className="overflow-hidden rounded-xl bg-elevated"
+                        aria-label="Open the story"
+                      >
+                        <img src={post.storyUrl} alt="The Instagram story version" className="aspect-[9/16] w-full object-cover" />
+                      </button>
+                    )}
+                  </div>
+                  {post.uploadId && (
+                    <Button
+                      variant="outline"
+                      className="min-h-[44px] w-full"
+                      disabled={busy}
+                      onClick={() => setMoving(post.id)}
+                    >
+                      <Move className="mr-2 h-4 w-4" />
+                      Move photo
+                    </Button>
                   )}
                 </div>
               ) : (

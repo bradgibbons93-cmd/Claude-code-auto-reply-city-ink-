@@ -128,6 +128,9 @@ for (const table of [
 // that way, so the boot has to fix it the way it will in production.
 await sql.query("ALTER TABLE scheduled_posts MODIFY COLUMN status ENUM('draft','scheduled','published','failed') NOT NULL DEFAULT 'scheduled'").catch(() => {});
 await sql.query("ALTER TABLE scheduled_posts DROP COLUMN upload_id").catch(() => {});
+for (const c of ["story_url", "framing", "look_key"]) {
+  await sql.query(`ALTER TABLE scheduled_posts DROP COLUMN ${c}`).catch(() => {});
+}
 for (const c of ["auto_post_state", "auto_post_at", "auto_post_error"]) {
   await sql.query(`ALTER TABLE artist_uploads DROP COLUMN ${c}`).catch(() => {});
 }
@@ -244,7 +247,8 @@ try {
   const settings = await brad.query("autopost.get");
   check("on by default, at 11am, bottom right, light touch-up",
     settings.data?.enabled === true && settings.data?.time === "11:00" &&
-      settings.data?.look?.corner === "bottom-right" && settings.data?.look?.size === "medium" && settings.data?.look?.retouch === "light",
+      settings.data?.look?.corner === "bottom-right" && settings.data?.look?.size === "medium" && settings.data?.look?.retouch === "light" &&
+      settings.data?.look?.shadow === "soft",
     JSON.stringify(settings));
   check("and it knows the studio has a logo", settings.data?.hasLogo === true, JSON.stringify(settings.data));
   check("a stranger can't read the settings", (await browser().query("autopost.get")).status === 401);
@@ -299,6 +303,14 @@ try {
   check("the colour was touched up (a little more saturated)", satOf(touched) > satOf(original) + 1,
     `${JSON.stringify(original)} → ${JSON.stringify(touched)}`);
   check("a stranger can't open the branded photo", (await browser().raw("GET", first.image_url)).status === 401);
+
+  /* where the photo sits, recorded for the drag */
+  const framed = JSON.parse(first.framing ?? "{}");
+  check("each post records where its photo sits, square and story",
+    framed.square?.fill === true && framed.square?.set === false && typeof framed.square?.y === "number" &&
+      framed.story?.fill === false && framed.story?.set === false && framed.story?.y === 0.5,
+    first.framing);
+  check("and which look it was drawn in", /^[0-9a-f]{16}$/.test(first.look_key ?? ""), first.look_key);
 
   /* the caption */
   check("the caption is the one the model wrote", first.content === "Fine line hearts, fresh off the table. Tattooed by Mim." && first.ai_generated === 1, first.content);
@@ -498,6 +510,128 @@ try {
   const taken = new Set(["2026-10-3"]);
   const [d3] = planDates(1, { startDate: sat, timeOfDay: "11:00", now: sat, takenDays: taken });
   check("a booked day is stepped over on the studio's calendar", d3?.toISOString() === "2026-10-04T00:00:00.000Z", d3?.toISOString());
+
+  /* ---------- the shadow (Brad: "the shadow on the logo is way to dark") ---------- */
+  // A plain pale photo, so the only thing darkening it is the shadow. Measured
+  // just under the logo's bottom edge, against a patch nowhere near it. The
+  // old shadow darkened this strip by 34%: it said 60% black, but sharp ran
+  // the fade before cutting out the alpha, so it was solid black, blurred.
+  const pale = await sharp({ create: { width: 1200, height: 1600, channels: 3, background: { r: 214, g: 196, b: 182 } } }).jpeg({ quality: 95 }).toBuffer();
+  const lum3 = (p) => p.r + p.g + p.b;
+  const shade = async (shadow) => {
+    const out = await autopost.brandPhoto(pale, { corner: "bottom-right", size: "medium", retouch: "off", shadow }, logo, "square");
+    return 1 - lum3(await patch(out.bytes, 700, 1034, 12)) / lum3(await patch(out.bytes, 100, 100, 60));
+  };
+  const [soft, strong, none] = [await shade("soft"), await shade("strong"), await shade("off")];
+  check("the soft shadow (the default) barely darkens the skin round the logo", soft > 0.01 && soft < 0.1, soft.toFixed(3));
+  check("strong is darker than soft, and still well short of the old one", strong > soft + 0.02 && strong < 0.25, `${strong.toFixed(3)} vs ${soft.toFixed(3)}`);
+  check("and none is none", Math.abs(none) < 0.01, none.toFixed(3));
+  const noShadowSave = await brad.mutate("autopost.save", { look: { shadow: "off" } });
+  check("the shadow choice saves", noShadowSave.data?.look?.shadow === "off", JSON.stringify(noShadowSave.data));
+  const badShadow = await brad.mutate("autopost.save", { look: { shadow: "pitch black" } });
+  check("a shadow that isn't one of the three is refused", badShadow.status === 400);
+
+  /* ---------- drag to move the photo (Brad: "drag to recenter the picture") ---------- */
+  // The red logo back on the studio, in the bottom right, for the overlay.
+  const reLogo = await brad.raw("POST", "/api/brand", { kind: "logo", dataUrl: dataUrl(logo, "image/png") });
+  await brad.mutate("studios.setImage", { id: studioId, which: "logo", assetId: reLogo.json?.id });
+  await brad.mutate("autopost.save", { look: { corner: "bottom-right", size: "medium", retouch: "off", shadow: "soft" } });
+
+  // A photo with a green band across the top and a magenta one across the
+  // bottom, so which part of it landed in the frame can be read back.
+  const banded = (() => {
+    const w = 1200, h = 1600;
+    const px = Buffer.alloc(w * h * 3);
+    for (let y = 0; y < h; y++) {
+      const [r, g, b] = y < 300 ? [30, 200, 40] : y >= h - 300 ? [210, 30, 200] : [150, 140, 130];
+      for (let x = 0; x < w; x++) { const i = (y * w + x) * 3; px[i] = r; px[i + 1] = g; px[i + 2] = b; }
+    }
+    return sharp(px, { raw: { width: w, height: h, channels: 3 } }).jpeg({ quality: 92 }).toBuffer();
+  })();
+  const isGreen = (p) => p.g > 150 && p.r < 110 && p.b < 110;
+  const isMagenta = (p) => p.r > 150 && p.b > 140 && p.g < 110;
+  const known2 = new Set((await reviewPosts()).map((p) => p.id));
+  await artist.raw("POST", "/api/uploads", { artistName: "Mim", photos: [{ contentType: "image/jpeg", dataUrl: dataUrl(await banded) }] });
+  const bandPost = await waitFor(async () => (await reviewPosts()).find((p) => !known2.has(p.id)));
+  check("a banded photo makes a post to move", !!bandPost?.upload_id);
+
+  const toTop = await brad.mutate("posts.reframe", { id: bandPost.id, square: { x: 0.5, y: 0 } });
+  const [[atTop]] = await sql.query("SELECT * FROM scheduled_posts WHERE id = ?", [bandPost.id]);
+  const topPic = (await brad.raw("GET", atTop.image_url)).bytes;
+  check("dragging the square to the top shows the top of the photo",
+    toTop.status === 200 && isGreen(await pixel(topPic, 540, 100)) && !isMagenta(await pixel(topPic, 200, 1040)),
+    JSON.stringify(toTop.error ?? await pixel(topPic, 540, 100)));
+  const topFraming = JSON.parse(atTop.framing);
+  check("and it's remembered as placed by hand", topFraming.square?.set === true && topFraming.square?.y === 0 && topFraming.story?.set === false, atTop.framing);
+  check("the new picture is a new image", atTop.image_url !== bandPost.image_url, `${bandPost.image_url} → ${atTop.image_url}`);
+  check("with the logo still in the corner, drawn once", isRed(await pixel(topPic, SQ_LOGO.x, SQ_LOGO.y)));
+
+  await brad.mutate("posts.reframe", { id: bandPost.id, square: { x: 0.5, y: 1 } });
+  const [[atBottom]] = await sql.query("SELECT * FROM scheduled_posts WHERE id = ?", [bandPost.id]);
+  const bottomPic = (await brad.raw("GET", atBottom.image_url)).bytes;
+  check("and to the bottom shows the bottom",
+    isMagenta(await pixel(bottomPic, 200, 1040)) && !isGreen(await pixel(bottomPic, 540, 100)),
+    JSON.stringify(await pixel(bottomPic, 200, 1040)));
+
+  // The story shows a 3:4 photo whole, so moving it slides it over the blur.
+  await brad.mutate("posts.reframe", { id: bandPost.id, story: { x: 0.5, y: 0 } });
+  const [[storyTop]] = await sql.query("SELECT * FROM scheduled_posts WHERE id = ?", [bandPost.id]);
+  const storyTopPic = (await brad.raw("GET", storyTop.story_url)).bytes;
+  check("the story can be moved too: up to the top edge",
+    isGreen(await pixel(storyTopPic, 540, 60)) && !isMagenta(await pixel(storyTopPic, 540, 1860)),
+    JSON.stringify(await pixel(storyTopPic, 540, 60)));
+  check("without undoing the square's spot", JSON.parse(storyTop.framing).square?.y === 1, storyTop.framing);
+
+  const reset = await brad.mutate("posts.reframe", { id: bandPost.id, square: null });
+  const [[afterReset]] = await sql.query("SELECT framing FROM scheduled_posts WHERE id = ?", [bandPost.id]);
+  check("Back to automatic hands the square back to sharp", reset.status === 200 && JSON.parse(afterReset.framing).square?.set === false &&
+    JSON.parse(afterReset.framing).story?.set === true, afterReset.framing);
+  await brad.mutate("posts.reframe", { id: bandPost.id, square: { x: 0.5, y: 0 } });
+
+  check("a stranger can't move anyone's photo", (await browser().mutate("posts.reframe", { id: bandPost.id, square: { x: 0, y: 0 } })).status === 401);
+  const approvedMove = await brad.mutate("posts.reframe", { id: first.id, square: { x: 0, y: 0 } });
+  check("an approved post's photo is set", approvedMove.status === 400 && /already approved/.test(approvedMove.error ?? ""), JSON.stringify(approvedMove));
+  const offFrame = await brad.mutate("posts.reframe", { id: bandPost.id, square: { x: 2, y: -1 } });
+  check("a spot outside the frame is refused", offFrame.status === 400);
+
+  /* the logo overlay laid over the drag */
+  const overlay = await brad.raw("GET", "/api/post-look/overlay?format=story");
+  const overlayMeta = overlay.bytes ? await sharp(overlay.bytes).metadata() : {};
+  const ovLogo = overlay.bytes ? await sharp(overlay.bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true }) : undefined;
+  const alphaAt = (x, y) => ovLogo.data[(y * ovLogo.info.width + x) * 4 + 3];
+  check("the drag gets the logo on its own, see-through, where the post has it",
+    overlay.status === 200 && overlayMeta.width === 540 && overlayMeta.height === 960 && overlayMeta.hasAlpha &&
+      alphaAt(Math.round(SQ_LOGO.x / 2), Math.round((1920 - 230 - 57) / 2)) > 200 && alphaAt(270, 300) === 0,
+    `${overlay.status} ${overlayMeta.width}x${overlayMeta.height}`);
+  check("and only the studio gets it", (await browser().raw("GET", "/api/post-look/overlay")).status === 401);
+
+  /* ---------- changing the look redraws what's waiting ---------- */
+  const [[beforeLook]] = await sql.query("SELECT * FROM scheduled_posts WHERE id = ?", [bandPost.id]);
+  await brad.mutate("autopost.save", { look: { corner: "top-left" } });
+  const redrawn = await waitFor(async () => {
+    const [[row]] = await sql.query("SELECT * FROM scheduled_posts WHERE id = ?", [bandPost.id]);
+    return row.look_key !== beforeLook.look_key ? row : null;
+  }, 30000);
+  const redrawnPic = redrawn ? (await brad.raw("GET", redrawn.image_url)).bytes : undefined;
+  check("a waiting post is redrawn in the new look by itself",
+    !!redrawn && redrawn.image_url !== beforeLook.image_url && isRed(await pixel(redrawnPic, 49 + 100, 49 + 40)),
+    redrawn ? JSON.stringify(await pixel(redrawnPic, 49 + 100, 49 + 40)) : "never redrawn");
+  check("keeping the spot it was dragged to",
+    !!redrawn && JSON.parse(redrawn.framing).square?.set === true && isMagenta(await pixel(redrawnPic, 200, 1040)) === false &&
+      isGreen(await pixel(redrawnPic, 700, 200)),
+    redrawn?.framing);
+  const [[stillApproved]] = await sql.query("SELECT image_url, look_key FROM scheduled_posts WHERE id = ?", [first.id]);
+  check("an approved post is never redrawn", stillApproved.image_url === first.image_url);
+
+  // Posts made before this shipped have no framing and no look key. They are
+  // redrawn once, which is how the posts already waiting got the soft shadow.
+  await sql.query("UPDATE scheduled_posts SET framing = NULL, look_key = NULL WHERE id = ?", [bandPost.id]);
+  await autopost.redrawWaitingPosts();
+  const [[migrated]] = await sql.query("SELECT framing, look_key FROM scheduled_posts WHERE id = ?", [bandPost.id]);
+  check("a post from before framing existed is redrawn and given one",
+    !!migrated.look_key && JSON.parse(migrated.framing ?? "{}").square?.fill === true, JSON.stringify(migrated));
+  const [[againKey]] = await sql.query("SELECT look_key, image_url FROM scheduled_posts WHERE id = ?", [bandPost.id]);
+  check("and redrawing again with nothing changed does nothing", (await autopost.redrawWaitingPosts()) === 0 && againKey.look_key === migrated.look_key);
 } catch (error) {
   failures++;
   console.error("FAIL  the suite threw:", error);

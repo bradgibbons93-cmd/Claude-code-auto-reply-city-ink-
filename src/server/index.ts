@@ -13,10 +13,12 @@ import { readAttachment, saveImageBytes, UnsupportedImage } from "./attachments.
 import {
   autoPostUploads,
   previewLook,
+  logoOverlay,
   DEFAULT_LOOK,
   LOGO_CORNERS,
   LOGO_SIZES,
   RETOUCHES,
+  SHADOWS,
   type PostLook,
 } from "./autopost.js";
 import { saveArtistUpload, readArtistUpload, UploadRejected } from "./uploads.js";
@@ -222,6 +224,7 @@ app.get("/api/post-look/preview", requireStudio, async (req, res) => {
       corner: (LOGO_CORNERS as readonly string[]).includes(q.corner ?? "") ? q.corner : DEFAULT_LOOK.corner,
       size: (LOGO_SIZES as readonly string[]).includes(q.size ?? "") ? q.size : DEFAULT_LOOK.size,
       retouch: (RETOUCHES as readonly string[]).includes(q.retouch ?? "") ? q.retouch : DEFAULT_LOOK.retouch,
+      shadow: (SHADOWS as readonly string[]).includes(q.shadow ?? "") ? q.shadow : DEFAULT_LOOK.shadow,
     } as PostLook;
     const { bytes } = await previewLook(look, q.format === "story" ? "story" : "square");
     res.setHeader("Content-Type", "image/jpeg");
@@ -229,6 +232,23 @@ app.get("/api/post-look/preview", requireStudio, async (req, res) => {
     return res.end(bytes);
   } catch (error) {
     console.error("[AutoPost] Preview failed:", (error as Error).message);
+    return res.sendStatus(500);
+  }
+});
+
+/**
+ * The logo alone, where the saved look puts it, on a see-through frame. The
+ * Posts page lays it over the photo while it's being dragged, so the studio
+ * can see the logo won't land on the tattoo before saving.
+ */
+app.get("/api/post-look/overlay", requireStudio, async (req, res) => {
+  try {
+    const bytes = await logoOverlay(req.query.format === "story" ? "story" : "square");
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "no-store");
+    return res.end(bytes);
+  } catch (error) {
+    console.error("[AutoPost] Overlay failed:", (error as Error).message);
     return res.sendStatus(500);
   }
 });

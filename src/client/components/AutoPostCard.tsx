@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input";
 type Corner = "bottom-right" | "bottom-left" | "bottom-centre" | "top-right" | "top-left";
 type Size = "small" | "medium" | "large";
 type Retouch = "off" | "light" | "punchy";
-type Look = { corner: Corner; size: Size; retouch: Retouch };
+type Shadow = "off" | "soft" | "strong";
+type Look = { corner: Corner; size: Size; retouch: Retouch; shadow: Shadow };
 
 const CORNERS: Array<[Corner, string]> = [
   ["bottom-right", "Bottom right"],
@@ -27,6 +28,11 @@ const RETOUCHES: Array<[Retouch, string]> = [
   ["off", "None"],
   ["light", "Light"],
   ["punchy", "Punchy"],
+];
+const SHADOWS: Array<[Shadow, string]> = [
+  ["off", "None"],
+  ["soft", "Soft"],
+  ["strong", "Strong"],
 ];
 
 function Choice<T extends string>({
@@ -131,7 +137,7 @@ export default function AutoPostCard() {
   // The logo's address is part of the key, so a new logo redraws the previews.
   const previewFor = (format: "square" | "story") =>
     look
-      ? `/api/post-look/preview?format=${format}&corner=${look.corner}&size=${look.size}&retouch=${look.retouch}&logo=${encodeURIComponent(data?.logoUrl ?? "")}`
+      ? `/api/post-look/preview?format=${format}&corner=${look.corner}&size=${look.size}&retouch=${look.retouch}&shadow=${look.shadow ?? "soft"}&logo=${encodeURIComponent(data?.logoUrl ?? "")}`
       : undefined;
   const square = previewFor("square");
   const story = previewFor("story");
@@ -226,10 +232,15 @@ export default function AutoPostCard() {
               </div>
               <figcaption className="mt-1 text-xs text-muted-foreground">Story · 1080 × 1920</figcaption>
             </figure>
+            <p className="col-span-2 text-xs text-muted-foreground">
+              Posts waiting for your OK are redrawn in whatever you pick here. To move the photo
+              in one, open it in Posts and tap Move photo.
+            </p>
           </div>
           <div className="space-y-4">
             <Choice label="Logo spot" options={CORNERS} value={look?.corner} onPick={(corner) => choose({ corner })} />
             <Choice label="Logo size" options={SIZES} value={look?.size} onPick={(size) => choose({ size })} />
+            <Choice label="Logo shadow" options={SHADOWS} value={look?.shadow} onPick={(shadow) => choose({ shadow })} />
             <Choice label="Colour touch-up" options={RETOUCHES} value={look?.retouch} onPick={(retouch) => choose({ retouch })} />
             <div>
               <label htmlFor="autopost-time" className="text-xs uppercase tracking-[0.16em] text-muted-foreground">

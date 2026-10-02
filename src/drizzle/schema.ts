@@ -332,6 +332,13 @@ export const scheduledPosts = mysqlTable("scheduled_posts", {
   // The 1080x1920 Instagram story made alongside the square post image. The
   // app can't publish stories; it's there to be saved and posted by hand.
   storyUrl: varchar("story_url", { length: 1024 }),
+  // Where the photo sits in each picture (autopost.ts PostFraming, as JSON):
+  // where sharp put it, or where the studio dragged it. Kept so a redraw
+  // keeps a hand-placed position and the drag starts from the real one.
+  framing: varchar("framing", { length: 255 }),
+  // Which look the pictures were drawn in. A waiting post whose key isn't
+  // the current one is redrawn by itself (autopost.ts redrawWaitingPosts).
+  lookKey: varchar("look_key", { length: 32 }),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

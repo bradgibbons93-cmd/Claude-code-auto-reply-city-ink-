@@ -1,5 +1,5 @@
 import cron from "node-cron";
-import { sweepAutoPosts } from "./autopost.js";
+import { sweepAutoPosts, redrawWaitingPosts, redrawWaitingPostsSoon } from "./autopost.js";
 import { studioIdentity } from "./studios.js";
 import { getDuePosts, updatePostStatus } from "./db.js";
 import { publishPagePost, importExistingConversations, sweepOlderInstagramThreads } from "./facebook.js";
@@ -36,7 +36,14 @@ export function startScheduler() {
     } catch (error) {
       console.error("[AutoPost] Sweep failed:", (error as Error).message);
     }
+    // And any post still waiting that was drawn in an older look.
+    await redrawWaitingPosts().catch((error) =>
+      console.error("[AutoPost] Redraw failed:", (error as Error).message)
+    );
   });
+  // Once at boot too, so a change to the drawing itself (a softer shadow)
+  // reaches the posts already waiting without five minutes' delay.
+  redrawWaitingPostsSoon(20_000);
 
   // A subscription can lapse mid-life, not just across a restart — an outage
   // long enough for Facebook to give up doesn't need a redeploy to happen.
