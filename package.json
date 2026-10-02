@@ -12,7 +12,7 @@
     "start": "node dist/server/index.js",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "build:demo:allink": "VITE_DEMO_BRAND=allink DEMO_OUT=dist-demo-allink vite build --config vite.demo.config.ts"
+    "build:demo:allink": "VITE_DEMO_BRAND=allink DEMO_OUT=dist-demo-allink DEMO_TITLE=\"All Ink Front Desk\" vite build --config vite.demo.config.ts"
   },
   "dependencies": {
     "@fontsource/inter": "^5.3.0",

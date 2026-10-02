@@ -1458,6 +1458,17 @@ Posts, More) in `App.tsx`; the desktop sidebar is unchanged.
   moved to "now" when the page opens. `vite.demo.config.ts` makes the
   site-root picture paths relative and turns log-out into "start over".
   Re-run the fixtures script after changing what a screen asks the server for.
+- **A test drive dressed as another studio, for a pitch** (`src/client/demo/brands.ts`,
+  `npm run build:demo:allink` → `dist-demo-allink/`). Brad, 2 October: *"Make a
+  version test demo pitch for all ink tattoo Wollongong"*. The brand is laid over
+  the recorded fixtures: name, logo, theme + accent, the owner's name, drafts and
+  past replies in their voice, and their own PUBLISHED policies only (website,
+  Timely booking page) — anything they don't publish (deposit amount, prices,
+  other artists) is left out, not guessed. Customers stay pretend: never a real
+  studio's real customers in anybody's pitch. "Send a test DM" in the demo bar
+  drops a scripted enquiry in, and its draft appears a couple of seconds later —
+  the whole product in ten seconds. `DEMO_TITLE` sets the page's own `<title>`,
+  which is what names a published artifact.
 - `tests/home.mjs` drives it on a phone-sized browser: swipe → Undo offered →
   nothing sent for five seconds → exactly one send with the draft's words;
   Undo → nothing sent; left swipe → the thread; a personal message → opens the

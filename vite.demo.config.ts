@@ -45,9 +45,20 @@ function demoImages(): Plugin {
 /** `DEMO_OUT` lets a studio's own test drive build beside the plain one. */
 const OUT = process.env.DEMO_OUT || "dist-demo";
 
+/** A studio's test drive is named for them: the page's own title is its name. */
+function demoTitle(): Plugin {
+  return {
+    name: "runnit-demo-title",
+    transformIndexHtml(html) {
+      const title = process.env.DEMO_TITLE;
+      return title ? html.replace(/<title>[^<]*<\/title>/, `<title>${title.replace(/</g, "&lt;")}</title>`) : html;
+    },
+  };
+}
+
 export default defineConfig({
   base: "./",
-  plugins: [demoPaths(), react(), demoImages()],
+  plugins: [demoPaths(), react(), demoImages(), demoTitle()],
   resolve: { alias: { "@": path.resolve(__dirname, "./src/client") } },
   build: {
     outDir: OUT,

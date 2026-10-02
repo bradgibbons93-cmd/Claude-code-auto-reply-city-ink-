@@ -53,7 +53,7 @@ const GENERIC_INCOMING: Incoming[] = [
 const BRANDS: Record<string, Brand> = {
   allink: {
     label: "All Ink Tattoo · test drive · pretend customers · nothing is sent",
-    title: "All Ink Tattoo · front desk",
+    title: "All Ink Front Desk",
     apply(data) {
       const q = data.queries;
       const me = q["account.me"];
