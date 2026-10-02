@@ -233,8 +233,9 @@ export default function AutoPostCard() {
               <figcaption className="mt-1 text-xs text-muted-foreground">Story · 1080 × 1920</figcaption>
             </figure>
             <p className="col-span-2 text-xs text-muted-foreground">
-              Posts waiting for your OK are redrawn in whatever you pick here. To move the photo
-              in one, open it in Posts and tap Move photo.
+              These are the starting look for every post. Posts waiting for your OK are redrawn
+              when you change them. To crop, zoom or recolour one photo, tap Edit photo &amp; logo on
+              it in Posts.
             </p>
           </div>
           <div className="space-y-4">

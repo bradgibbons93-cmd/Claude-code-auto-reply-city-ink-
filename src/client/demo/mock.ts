@@ -2,6 +2,7 @@ import { observable } from "@trpc/server/observable";
 import { TRPCClientError, type TRPCLink } from "@trpc/client";
 import type { AppRouter } from "../../server/routers";
 import captured from "./fixtures.json";
+import { applyBrand, incomingScript } from "./brands";
 
 /**
  * The test drive's pretend server.
@@ -39,6 +40,7 @@ function fresh() {
   const data = shift(JSON.parse(JSON.stringify(captured)), delta);
   // The capture pointed the AI at nowhere on purpose; don't show that address.
   data.queries["llm.status"].baseUrl = null;
+  applyBrand(data);
   return data as { queries: Record<string, Json>; messages: Record<string, { messages: Json[]; total: number }> };
 }
 
@@ -130,6 +132,50 @@ function query(path: string, input: Json): Json {
       // empty answer rather than a crash.
       return null;
   }
+}
+
+/* ---------- a DM arriving, for showing it off ---------- */
+
+let scriptAt = 0;
+/**
+ * "Send a test DM": a scripted customer message lands in the inbox, and a
+ * moment later the drafted reply appears, waiting for the OK — the whole
+ * product in ten seconds. Returns the sender, and `draft()` to call when the
+ * pause for "the AI is writing" is over.
+ */
+export function simulateIncoming() {
+  const script = incomingScript();
+  const item = script[scriptAt++ % script.length];
+  const q = db.queries;
+  const id = `demo_live_${nextId++}`;
+  const messageId = `${id}_1`;
+  const at = new Date().toISOString();
+  (q["conversations.list"] as Json[]).unshift({
+    id: nextId++, conversationId: id, senderName: item.name, senderEmail: null, avatarUrl: null, platform: item.platform,
+    botPausedUntil: null, botPauseReason: null, lastCustomerMessageAt: at, lastMessageAt: at, createdAt: at,
+    bookingName: null, bookingPhone: null, bookingDates: null, bookingPhotoUrls: null, bookingNotifiedAt: null,
+    lastNotifiedAt: null, lastSenderType: "customer", lastPreview: item.text, lastPhotoCount: 0,
+  });
+  db.messages[id] = {
+    messages: [
+      { id: nextId++, conversationId: id, messageId, senderType: "customer", content: item.text, attachmentUrls: null, autoReplyGenerated: false, autoReplyContent: null, createdAt: at },
+    ],
+    total: 1,
+  };
+  q.dashboard.todayMessages = (q.dashboard.todayMessages ?? 0) + 1;
+  return {
+    name: item.name,
+    platform: item.platform,
+    text: item.text,
+    draft() {
+      (q["pendingReplies.list"] as Json[]).unshift({
+        id: nextId++, conversationId: id, customerMessageId: messageId, draftText: item.draft, status: "pending",
+        isSensitive: false, llmFailed: false, alternatives: item.alternatives, sendError: null,
+        createdAt: new Date().toISOString(), resolvedAt: null, photoUrls: [],
+      });
+      q.dashboard.draftsWaiting = (q.dashboard.draftsWaiting ?? 0) + 1;
+    },
+  };
 }
 
 /* ---------- mutations ---------- */

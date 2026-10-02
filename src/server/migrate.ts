@@ -315,6 +315,7 @@ const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "scheduled_posts", column: "story_url", ddl: "VARCHAR(1024) NULL" },
   { table: "scheduled_posts", column: "framing", ddl: "VARCHAR(255) NULL" },
   { table: "scheduled_posts", column: "look_key", ddl: "VARCHAR(32) NULL" },
+  { table: "scheduled_posts", column: "photo_style", ddl: "VARCHAR(512) NULL" },
   // Accounts, on the template's users table.
   { table: "users", column: "password_hash", ddl: "VARCHAR(255)" },
   { table: "users", column: "avatar_asset_id", ddl: "VARCHAR(64)" },

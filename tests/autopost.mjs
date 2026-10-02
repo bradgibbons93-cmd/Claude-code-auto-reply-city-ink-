@@ -128,7 +128,7 @@ for (const table of [
 // that way, so the boot has to fix it the way it will in production.
 await sql.query("ALTER TABLE scheduled_posts MODIFY COLUMN status ENUM('draft','scheduled','published','failed') NOT NULL DEFAULT 'scheduled'").catch(() => {});
 await sql.query("ALTER TABLE scheduled_posts DROP COLUMN upload_id").catch(() => {});
-for (const c of ["story_url", "framing", "look_key"]) {
+for (const c of ["story_url", "framing", "look_key", "photo_style"]) {
   await sql.query(`ALTER TABLE scheduled_posts DROP COLUMN ${c}`).catch(() => {});
 }
 for (const c of ["auto_post_state", "auto_post_at", "auto_post_error"]) {
@@ -426,7 +426,9 @@ try {
   const off = await brad.mutate("autopost.save", { enabled: false });
   check("it can be switched off", off.status === 200 && off.data?.enabled === false, JSON.stringify(off));
   const beforeOff = (await reviewPosts()).length;
+  const uploadsBeforeOff = new Set((await sql.query("SELECT id FROM artist_uploads"))[0].map((r) => r.id));
   const whileOff = await artist.raw("POST", "/api/uploads", { artistName: "Mim", photos: [{ contentType: "image/jpeg", dataUrl: dataUrl(await photo(8)) }] });
+  const sentWhileOff = (await sql.query("SELECT id FROM artist_uploads"))[0].map((r) => r.id).find((id) => !uploadsBeforeOff.has(id));
   await sleep(1500);
   check("off means an upload is just an upload", whileOff.json?.saved === 1 && (await reviewPosts()).length === beforeOff);
   await brad.mutate("autopost.save", { enabled: true });
@@ -550,9 +552,12 @@ try {
   })();
   const isGreen = (p) => p.g > 150 && p.r < 110 && p.b < 110;
   const isMagenta = (p) => p.r > 150 && p.b > 140 && p.g < 110;
-  const known2 = new Set((await reviewPosts()).map((p) => p.id));
+  // Found by the upload it came from, not as "whichever post is new": in a
+  // full run another post can land in between and get picked up instead.
+  const uploadsBefore = new Set((await sql.query("SELECT id FROM artist_uploads"))[0].map((r) => r.id));
   await artist.raw("POST", "/api/uploads", { artistName: "Mim", photos: [{ contentType: "image/jpeg", dataUrl: dataUrl(await banded) }] });
-  const bandPost = await waitFor(async () => (await reviewPosts()).find((p) => !known2.has(p.id)));
+  const bandUpload = (await sql.query("SELECT id FROM artist_uploads"))[0].map((r) => r.id).find((id) => !uploadsBefore.has(id));
+  const bandPost = await waitFor(async () => (await reviewPosts()).find((p) => p.upload_id === bandUpload));
   check("a banded photo makes a post to move", !!bandPost?.upload_id);
 
   const toTop = await brad.mutate("posts.reframe", { id: bandPost.id, square: { x: 0.5, y: 0 } });
@@ -632,6 +637,113 @@ try {
     !!migrated.look_key && JSON.parse(migrated.framing ?? "{}").square?.fill === true, JSON.stringify(migrated));
   const [[againKey]] = await sql.query("SELECT look_key, image_url FROM scheduled_posts WHERE id = ?", [bandPost.id]);
   check("and redrawing again with nothing changed does nothing", (await autopost.redrawWaitingPosts()) === 0 && againKey.look_key === migrated.look_key);
+
+  /* ---------- the photo editor (Brad: "adjust the saturation contrast and brightness and
+     adjust the position and be able to crop and zoom") ---------- */
+  await brad.mutate("autopost.save", { look: { corner: "bottom-right", size: "medium", retouch: "off", shadow: "soft" } });
+  const forEditor = await brad.query("autopost.get");
+  check("the editor is given the studio's touch-up as slider values",
+    forEditor.data?.adjust?.brightness === 1 && forEditor.data?.adjust?.contrast === 1 && forEditor.data?.adjust?.saturation === 1,
+    JSON.stringify(forEditor.data?.adjust));
+  const lightPreset = (await import(`${ROOT}/dist/server/autopost.js`)).presetAdjust("light");
+  check("and Light is the same numbers the server uses", lightPreset.brightness === 1.02 && lightPreset.saturation === 1.08 && lightPreset.contrast === 1.06, JSON.stringify(lightPreset));
+  const bandRow = async () => (await sql.query("SELECT * FROM scheduled_posts WHERE id = ?", [bandPost.id]))[0][0];
+  const squareOf = async () => (await brad.raw("GET", (await bandRow()).image_url)).bytes;
+  const storyOf = async () => (await brad.raw("GET", (await bandRow()).story_url)).bytes;
+
+  // Zoom 1 is the whole photo: both bands in the square, the blur either side.
+  const whole = await brad.mutate("posts.reframe", { id: bandPost.id, square: { x: 0.5, y: 0.5, zoom: 1 } });
+  let ed = await squareOf();
+  check("zoom 1 shows the whole photo: the top band and the bottom band",
+    whole.status === 200 && isGreen(await pixel(ed, 540, 60)) && isMagenta(await pixel(ed, 540, 1040)),
+    JSON.stringify([await pixel(ed, 540, 60), await pixel(ed, 540, 1040)]));
+  check("with the soft backdrop either side", lum3(await patch(ed, 10, 500, 60)) < lum3(await patch(ed, 500, 500, 60)) * 0.8);
+
+  // Twice the size it takes to fill, from the top: the green band now runs
+  // twice as far down the frame (540px instead of 270).
+  await brad.mutate("posts.reframe", { id: bandPost.id, square: { x: 0.5, y: 0, zoom: 8 / 3 } });
+  ed = await squareOf();
+  check("zooming in crops closer", isGreen(await pixel(ed, 540, 400)) && !isGreen(await pixel(ed, 540, 700)),
+    JSON.stringify([await pixel(ed, 540, 400), await pixel(ed, 540, 700)]));
+  const zoomed = JSON.parse((await bandRow()).framing);
+  check("and the zoom is remembered with the spot", Math.abs(zoomed.square?.zoom - 8 / 3) < 0.001 && zoomed.square?.set === true, JSON.stringify(zoomed));
+  const greyBefore = await patch(ed, 150, 800, 60);
+  // Brightened 40%, the green band reads (137, 255, 121): still plainly green,
+  // just not by isGreen's thresholds, which were set for the untouched photo.
+  const greenish = (p) => p.g > p.r + 80 && p.g > p.b + 80;
+
+  // The post's own colour and logo.
+  const styled = await brad.mutate("posts.reframe", {
+    id: bandPost.id,
+    style: { adjust: { brightness: 1.4, contrast: 1, saturation: 1 }, logo: { on: true, corner: "top-left", size: "medium", shadow: "off" } },
+  });
+  ed = await squareOf();
+  check("brightness from the editor brightens the photo", styled.status === 200 && lum3(await patch(ed, 150, 800, 60)) > lum3(greyBefore) * 1.2,
+    `${lum3(greyBefore).toFixed(0)} → ${lum3(await patch(ed, 150, 800, 60)).toFixed(0)}`);
+  check("its own logo spot, top left, instead of the studio's bottom right",
+    isRed(await pixel(ed, 49 + 100, 49 + 40)) && !isRed(await pixel(ed, SQ_LOGO.x, SQ_LOGO.y)));
+  check("on the story too", isRed(await pixel(await storyOf(), 49 + 100, 230 + 40)));
+  check("and the zoom wasn't lost by changing the colour", greenish(await pixel(ed, 540, 400)) && !greenish(await pixel(ed, 540, 700)));
+  check("the post keeps its own style", JSON.parse((await bandRow()).photo_style ?? "{}").logo?.corner === "top-left");
+
+  const keyBefore = (await bandRow()).look_key;
+  await brad.mutate("autopost.save", { look: { size: "small" } });
+  const afterStudioChange = await waitFor(async () => {
+    const r = await bandRow();
+    return r.look_key !== keyBefore ? r : null;
+  }, 30000);
+  const redrawnStyled = afterStudioChange ? (await brad.raw("GET", afterStudioChange.image_url)).bytes : undefined;
+  check("a redraw for the studio's look keeps the post's own logo, colour and zoom",
+    !!redrawnStyled && isRed(await pixel(redrawnStyled, 49 + 100, 49 + 40)) && greenish(await pixel(redrawnStyled, 540, 400)) &&
+      lum3(await patch(redrawnStyled, 150, 800, 60)) > lum3(greyBefore) * 1.2);
+
+  await brad.mutate("posts.reframe", { id: bandPost.id, style: { logo: { on: false, corner: "top-left", size: "medium", shadow: "off" } } });
+  ed = await squareOf();
+  check("the logo can be switched off for one photo", !isRed(await pixel(ed, 49 + 100, 49 + 40)) && !isRed(await pixel(ed, SQ_LOGO.x, SQ_LOGO.y)));
+  const restored = await brad.mutate("posts.reframe", { id: bandPost.id, square: null, story: null, style: null });
+  const restoredRow = await bandRow();
+  check("Back to automatic drops the post's own style and spots", restored.status === 200 && restoredRow.photo_style === null &&
+    JSON.parse(restoredRow.framing).square?.set === false);
+
+  /* ---------- the editor on a post made by hand ---------- */
+  const fromGallery = `/api/uploads/${bandPost.upload_id}`;
+  const studioLogo = { on: true, corner: "bottom-right", size: "medium", shadow: "soft" };
+  const plainColour = { brightness: 1, contrast: 1, saturation: 1 };
+  const portrait = await brad.mutate("posts.editPhoto", {
+    source: fromGallery, format: "portrait", spot: { x: 0.5, y: 0, zoom: 1.0667 }, style: { adjust: plainColour, logo: studioLogo },
+  });
+  const portraitPic = portrait.data?.url ? (await brad.raw("GET", portrait.data.url)).bytes : undefined;
+  const portraitMeta = portraitPic ? await sharp(portraitPic).metadata() : {};
+  check("a gallery photo can be edited for a post: a new picture", /^\/api\/attachments\/[0-9a-f]{40}$/.test(portrait.data?.url ?? ""), JSON.stringify(portrait));
+  check("in the portrait shape, 1080 x 1350", portraitMeta.width === 1080 && portraitMeta.height === 1350, `${portraitMeta.width}x${portraitMeta.height}`);
+  check("cropped where it was put, with the logo on",
+    !!portraitPic && isGreen(await pixel(portraitPic, 540, 100)) && isRed(await pixel(portraitPic, SQ_LOGO.x, 1350 - 49 - 57)));
+  const phone = await brad.raw("POST", "/api/post-image", { contentType: "image/jpeg", dataUrl: dataUrl(await banded) });
+  const fromPhone = await brad.mutate("posts.editPhoto", {
+    source: phone.json?.url, format: "square", spot: { x: 0.5, y: 1 }, style: { adjust: plainColour, logo: { ...studioLogo, on: false } },
+  });
+  const phonePic = fromPhone.data?.url ? (await brad.raw("GET", fromPhone.data.url)).bytes : undefined;
+  check("so can a photo uploaded from the phone, logo off",
+    !!phonePic && isMagenta(await pixel(phonePic, 200, 1040)) && !isRed(await pixel(phonePic, SQ_LOGO.x, SQ_LOGO.y)), JSON.stringify(fromPhone.error ?? ""));
+  const editAgain = await brad.mutate("posts.editPhoto", { source: portrait.data?.url, format: "square", spot: { x: 0.5, y: 0.5 }, style: {} });
+  check("an edit can itself be the starting point if it's ours", editAgain.status === 200);
+  const link = await brad.mutate("posts.editPhoto", { source: "https://example.com/tattoo.jpg", format: "square", spot: { x: 0.5, y: 0.5 }, style: {} });
+  check("a link to another site is refused in words, not fetched", link.status === 400 && /link to another site/.test(link.error ?? ""), JSON.stringify(link));
+  check("a stranger can't use it", (await browser().mutate("posts.editPhoto", { source: fromGallery, format: "square", spot: { x: 0.5, y: 0.5 }, style: {} })).status === 401);
+  const scheduled = await brad.mutate("posts.create", { content: "Fresh from Mim.", scheduledAt: new Date(Date.now() + 5 * 86_400_000).toISOString(), imageUrl: portrait.data?.url });
+  check("and the edited picture can go on a scheduled post", scheduled.status === 200, JSON.stringify(scheduled));
+  const portraitOverlay = await brad.raw("GET", "/api/post-look/overlay?format=portrait&logo=on&corner=top-right&size=small&shadow=off");
+  const poMeta = portraitOverlay.bytes ? await sharp(portraitOverlay.bytes).metadata() : {};
+  check("the editor's logo guide follows its own choices", portraitOverlay.status === 200 && poMeta.width === 540 && poMeta.height === 675);
+
+  // Asked at the very end, on purpose. The full run found it: the photo sent
+  // while it was off waited in the queue behind a redraw, it was switched back
+  // on in the meantime, and when its turn came it was made into a post — long
+  // after "off means an upload is just an upload" had passed. By now every
+  // redraw and every queued batch in this suite has run.
+  const [lateRows] = await sql.query("SELECT id FROM scheduled_posts WHERE upload_id = ?", [sentWhileOff]);
+  check("a photo sent while it was off never becomes a post later, even once it's back on",
+    !!sentWhileOff && lateRows.length === 0, `${lateRows.length} post(s) for ${sentWhileOff}`);
 } catch (error) {
   failures++;
   console.error("FAIL  the suite threw:", error);

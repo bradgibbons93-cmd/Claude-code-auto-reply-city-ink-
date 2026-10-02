@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { format } from "date-fns";
-import { Check, Copy, Download, Move, Trash2 } from "lucide-react";
+import { Check, Copy, Download, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import PhotoViewer from "@/components/PhotoViewer";
-import ReframeEditor, { parseFraming } from "@/components/ReframeEditor";
+import PhotoEditor, { type EditorStart, type PhotoEdit } from "@/components/PhotoEditor";
 
 type Post = {
   id: number;
@@ -18,6 +18,7 @@ type Post = {
   storyUrl?: string | null;
   uploadId?: string | null;
   framing?: string | null;
+  photoStyle?: string | null;
   scheduledAt: string | Date;
 };
 
@@ -31,11 +32,65 @@ type Post = {
  * waiting on Meta's review, and Instagram posting isn't something Runnit can
  * do at all yet: the branded photo and its caption are useful today, by hand.
  */
+/** Where the editor starts for a waiting post: its stored framing and style. */
+function startFor(post: Post): EditorStart {
+  const start: EditorStart = { spots: {} };
+  try {
+    const framing = JSON.parse(post.framing ?? "{}") as Record<string, { x?: number; y?: number; zoom?: number; fill?: boolean }>;
+    for (const f of ["square", "story"] as const) {
+      const s = framing[f];
+      if (s && typeof s.x === "number" && typeof s.y === "number") {
+        start.spots![f] = { x: s.x, y: s.y, zoom: typeof s.zoom === "number" ? s.zoom : undefined, fill: s.fill !== false };
+      }
+    }
+  } catch {
+    // no framing yet: the editor works it out
+  }
+  try {
+    const style = JSON.parse(post.photoStyle ?? "null") as Pick<EditorStart, "adjust" | "logo"> | null;
+    if (style?.adjust) start.adjust = style.adjust;
+    if (style?.logo) start.logo = style.logo;
+  } catch {
+    // the studio's look
+  }
+  return start;
+}
+
 export default function ReviewPosts({ posts, onChange }: { posts: Post[]; onChange: () => void }) {
   const [edits, setEdits] = useState<Record<number, { content?: string; when?: string }>>({});
   const [open, setOpen] = useState<string | null>(null);
-  // The post whose photo is being moved, if any. One at a time.
+  // The post whose photo is open in the editor, if any. One at a time.
   const [moving, setMoving] = useState<number | null>(null);
+
+  const reframe = trpc.posts.reframe.useMutation();
+  const saveEdit = async (id: number, edit: PhotoEdit) => {
+    try {
+      await reframe.mutateAsync({
+        id,
+        // Only the pictures that were moved or zoomed; the other stays automatic.
+        square: edit.touched.square ? edit.spots.square : undefined,
+        story: edit.touched.story ? edit.spots.story : undefined,
+        style: edit.styleTouched ? { adjust: edit.adjust, logo: edit.logo } : undefined,
+      });
+      toast.success("Photo updated.");
+      setMoving(null);
+      onChange();
+    } catch (error) {
+      toast.error((error as Error).message || "Couldn't update the photo.");
+      throw error;
+    }
+  };
+  const automatic = async (id: number) => {
+    try {
+      await reframe.mutateAsync({ id, square: null, story: null, style: null });
+      toast.success("Back to the automatic crop and the studio's look.");
+      setMoving(null);
+      onChange();
+    } catch (error) {
+      toast.error((error as Error).message || "Couldn't do that.");
+      throw error;
+    }
+  };
 
   const approve = trpc.posts.approve.useMutation({
     onSuccess: (data) => {
@@ -82,18 +137,20 @@ export default function ReviewPosts({ posts, onChange }: { posts: Post[]; onChan
               data-testid="review-post"
               className="grid gap-4 rounded-2xl border border-border p-3 sm:grid-cols-[minmax(0,300px)_1fr]"
             >
-              {moving === post.id && post.uploadId ? (
-                <ReframeEditor
-                  postId={post.id}
-                  uploadId={post.uploadId}
-                  framing={parseFraming(post.framing)}
+              {moving === post.id && post.uploadId && (
+                <PhotoEditor
+                  title="Edit photo & logo"
+                  source={`/api/uploads/${post.uploadId}`}
+                  formats={["square", "story"]}
+                  mode="each"
+                  start={startFor(post)}
+                  saveLabel="Save"
                   onCancel={() => setMoving(null)}
-                  onDone={() => {
-                    setMoving(null);
-                    onChange();
-                  }}
+                  onSave={(edit) => saveEdit(post.id, edit)}
+                  onAutomatic={() => automatic(post.id)}
                 />
-              ) : post.imageUrl ? (
+              )}
+              {post.imageUrl ? (
                 <div className="space-y-2">
                   <div className="grid grid-cols-[1fr_0.42fr] items-start gap-2">
                     <button
@@ -122,8 +179,8 @@ export default function ReviewPosts({ posts, onChange }: { posts: Post[]; onChan
                       disabled={busy}
                       onClick={() => setMoving(post.id)}
                     >
-                      <Move className="mr-2 h-4 w-4" />
-                      Move photo
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      Edit photo & logo
                     </Button>
                   )}
                 </div>

@@ -1232,20 +1232,49 @@ same as all our other posts, that would be amazing."* All of it is
   fixed order of its own; anything order-sensitive goes in two pipelines.**
   There's a None / Soft / Strong choice now (`look.shadow`, default Soft),
   in the Gallery card.
-- **Drag to move the photo** (Brad: *"I want to be able to drag to
-  recenter the picture"*). Posts → a waiting post → Move photo: square and
-  story tabs, the ORIGINAL upload in the frame, moved with CSS
-  `object-position`, and the logo laid over it from
-  `/api/post-look/overlay` so the tattoo can be kept clear of it.
-  `brandPhoto(…, position)` uses the same rule as CSS — 0–1 per axis, the
-  share of the spare room before the photo — so where it's dropped is
-  where it lands in the JPEG. Filled, it chooses the crop; shown whole, it
-  slides the photo over the blur. `posts.reframe` redraws BOTH pictures from
-  the upload, never from the branded JPEG (that would crop a crop and paint
-  a second logo). Only `review` posts can move: approved is approved.
-  `scheduled_posts.framing` records each format's spot, whether it fills,
-  and whether it was placed by hand; sharp's own pick comes back from its
-  `cropOffsetLeft/Top`, so the drag starts where the photo really is.
+- **The photo editor** (`components/PhotoEditor.tsx`). Brad, 2 October,
+  first *"I want to be able to drag to recenter the picture"*, then, on the
+  photo in Schedule a post: *"a little pop up tab or text either under or on
+  the photo as a button ... edit or add logo and post then it will come up on
+  that picture and can adjust the saturation contrast and brightness and
+  adjust the position and be able to crop and zoom"*. One editor, two doors:
+  **Edit & add logo** under the photo on a post made by hand
+  (`PostImagePicker`, Square or Portrait 4:5 → `posts.editPhoto`), and
+  **Edit photo & logo** on a waiting post (`ReviewPosts`, Square and Story →
+  `posts.reframe`). Drag to move, pinch or the Zoom slider to crop in,
+  Brightness / Contrast / Saturation, and the logo on/off, spot, size and
+  shadow for that photo only.
+  - **What's on screen is what gets drawn.** The ORIGINAL photo is laid out
+    with the server's own numbers: size as a multiple of "the whole photo
+    just fits" (`zoom`, 1 = whole photo over the blur, `coverZoom` = fills)
+    and position as CSS object-position (0–1, the share of the spare room
+    before the photo). `brandPhoto(…, position, adjust)` cuts out only the
+    visible part before scaling, so zooming in on a 2048px photo never
+    builds a picture several times the frame. Colour is a CSS filter in the
+    order the server applies it. The logo guide is the server's own drawing
+    (`/api/post-look/overlay`, which takes the editor's choices).
+  - **Always from the original, never from an edit** — that would crop a
+    crop and paint a logo over the logo. The picker keeps the original's
+    address and the last settings, so Edit again opens where it was left. A
+    link to another site can't be edited (the server doesn't fetch
+    strangers' URLs) and says so.
+  - **A waiting post keeps its own choices.** `scheduled_posts.framing`
+    (spot + zoom per picture, and whether placed by hand) and `photo_style`
+    (adjust + logo choice). Redraws for a studio look change keep both; only
+    pictures actually moved are sent, so an untouched one stays automatic.
+    Back to automatic sends nulls for all three. Only `review` posts can be
+    edited: approved is approved. Sharp's own crop comes back from its
+    `cropOffsetLeft/Top`, so the editor starts where the photo really is.
+  - **A full-screen sheet in a portal**, like `PhotoViewer` and for the same
+    reason (`fixed` inside a transformed card lands under the header and the
+    bottom menu — the New post box is one), with the same four ways out. The
+    photo is pinned at the top and only the controls scroll: the first
+    version scrolled the photo away exactly when the logo options were in
+    use. `touch-none` on the frame stops a finger drag scrolling the sheet.
+  - `tests/photoeditor.mjs` drives both doors on a 390px phone (mouse drag,
+    a real CDP touch drag, a two-finger pinch) and reads the server's JPEGs
+    back; `autopost.mjs` checks zoom, colour, the per-photo logo and that
+    redraws keep them.
 - **Waiting posts are redrawn when the look changes.** Change the shadow in
   the Gallery, go to Posts, still see the dark one: the obvious conclusion
   is that the change didn't work. `scheduled_posts.look_key` hashes the look,
@@ -1255,14 +1284,11 @@ same as all our other posts, that would be amazing."* All of it is
   that is how the posts already waiting got the soft shadow. Every redraw
   write is conditional on the row being as it was read (`framing <=>`,
   `look_key <=>`, still `review`), so a drag or an approve mid-redraw wins.
-- **On a phone the story frame runs under the bottom menu.** A drag started
-  there lands on the menu and scrolls the page, and Save hides behind it.
-  The editor scrolls itself into the clear space (scroll margins for the
-  header and menu) on open and on every tab change, and the frame is sized
-  (52vh) so tabs, frame and Save all fit. `touch-none` on the frame is what
-  stops a finger drag scrolling the page. `tests/reframebrowser.mjs` (28
-  checks) drags with a mouse and with a real CDP touch on a 390px phone,
-  then reads the JPEGs back to prove the photo moved the way it was dragged.
+- **On or off is decided when the photo ARRIVES.** It used to be read only
+  when the photo's turn in the queue came round, so a photo sent while the
+  feature was off, waiting behind a redraw, became a post anyway once it was
+  switched back on. The full test run caught it (the "off" check had passed
+  seconds earlier); `autopost.mjs` asks again at the very end of the suite.
 
 **Bulk-scheduled posts were landing at 9pm.** `planDates` used
 `setHours()`, which is the server's clock, and Railway is UTC with no `TZ`
@@ -1272,7 +1298,7 @@ the studio's clock (`studioTime` / `studioDateParts` from calendar.ts), and
 `dayKey()` is the studio's calendar date. `autopost.mjs` pins 11am Geelong
 to 01:00 UTC, across the daylight-saving change.
 
-`tests/autopost.mjs` (106 checks) drives it end to end against the real
+`tests/autopost.mjs` (130 checks) drives it end to end against the real
 server. Trap found writing it: sharp's `stats()` reads the WHOLE image
 whatever `extract()` says, so measuring a patch in one pipeline averaged in
 the logo and looked like a colour shift. Cut the patch to a buffer first.

@@ -339,6 +339,9 @@ export const scheduledPosts = mysqlTable("scheduled_posts", {
   // Which look the pictures were drawn in. A waiting post whose key isn't
   // the current one is redrawn by itself (autopost.ts redrawWaitingPosts).
   lookKey: varchar("look_key", { length: 32 }),
+  // The post's own brightness/contrast/saturation and logo choice from the
+  // photo editor (autopost.ts PhotoStyle, as JSON). Null: the studio's look.
+  photoStyle: varchar("photo_style", { length: 512 }),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

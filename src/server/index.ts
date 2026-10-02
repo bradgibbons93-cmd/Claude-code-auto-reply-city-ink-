@@ -19,6 +19,7 @@ import {
   LOGO_SIZES,
   RETOUCHES,
   SHADOWS,
+  type LogoChoice,
   type PostLook,
 } from "./autopost.js";
 import { saveArtistUpload, readArtistUpload, UploadRejected } from "./uploads.js";
@@ -243,7 +244,19 @@ app.get("/api/post-look/preview", requireStudio, async (req, res) => {
  */
 app.get("/api/post-look/overlay", requireStudio, async (req, res) => {
   try {
-    const bytes = await logoOverlay(req.query.format === "story" ? "story" : "square");
+    const q = req.query as Record<string, string | undefined>;
+    const format = q.format === "story" || q.format === "portrait" ? q.format : "square";
+    // The editor's own logo choice, when it sends one; else the studio's look.
+    const choice =
+      q.corner || q.size || q.shadow || q.logo
+        ? {
+            on: q.logo !== "off",
+            corner: ((LOGO_CORNERS as readonly string[]).includes(q.corner ?? "") ? q.corner : DEFAULT_LOOK.corner) as LogoChoice["corner"],
+            size: ((LOGO_SIZES as readonly string[]).includes(q.size ?? "") ? q.size : DEFAULT_LOOK.size) as LogoChoice["size"],
+            shadow: ((SHADOWS as readonly string[]).includes(q.shadow ?? "") ? q.shadow : DEFAULT_LOOK.shadow) as LogoChoice["shadow"],
+          }
+        : undefined;
+    const bytes = await logoOverlay(format, choice);
     res.setHeader("Content-Type", "image/png");
     res.setHeader("Cache-Control", "no-store");
     return res.end(bytes);

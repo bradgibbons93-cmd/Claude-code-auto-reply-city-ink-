@@ -35,19 +35,22 @@ function demoImages(): Plugin {
     name: "runnit-demo-images",
     closeBundle() {
       const from = path.resolve(__dirname, "src/client/demo/images");
-      const to = path.resolve(__dirname, "dist-demo/demo");
+      const to = path.resolve(__dirname, OUT, "demo");
       fs.mkdirSync(to, { recursive: true });
       for (const file of fs.readdirSync(from)) fs.copyFileSync(path.join(from, file), path.join(to, file));
     },
   };
 }
 
+/** `DEMO_OUT` lets a studio's own test drive build beside the plain one. */
+const OUT = process.env.DEMO_OUT || "dist-demo";
+
 export default defineConfig({
   base: "./",
   plugins: [demoPaths(), react(), demoImages()],
   resolve: { alias: { "@": path.resolve(__dirname, "./src/client") } },
   build: {
-    outDir: "dist-demo",
+    outDir: OUT,
     emptyOutDir: true,
     rollupOptions: { input: path.resolve(__dirname, "demo.html") },
   },

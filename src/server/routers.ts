@@ -87,6 +87,10 @@ import {
   LOGO_SIZES,
   RETOUCHES,
   SHADOWS,
+  FORMATS,
+  ADJUST_RANGE,
+  presetAdjust,
+  editPhotoForPost,
   removePost,
   reframePost,
   redrawWaitingPostsSoon,
@@ -113,6 +117,31 @@ import {
  * studio gallery. Picking from the gallery was offered in the UI and then
  * refused here, so the pick simply failed to save.
  */
+/** Where a photo sits in its frame and how big (autopost.ts FramePosition). */
+const spotInput = z.object({
+  x: z.number().min(0).max(1),
+  y: z.number().min(0).max(1),
+  zoom: z.number().min(1).max(20).optional(),
+});
+/** A photo's own colour and logo from the editor (autopost.ts PhotoStyle). */
+const styleInput = z.object({
+  adjust: z
+    .object({
+      brightness: z.number().min(ADJUST_RANGE.brightness[0]).max(ADJUST_RANGE.brightness[1]),
+      contrast: z.number().min(ADJUST_RANGE.contrast[0]).max(ADJUST_RANGE.contrast[1]),
+      saturation: z.number().min(ADJUST_RANGE.saturation[0]).max(ADJUST_RANGE.saturation[1]),
+    })
+    .optional(),
+  logo: z
+    .object({
+      on: z.boolean(),
+      corner: z.enum(LOGO_CORNERS),
+      size: z.enum(LOGO_SIZES),
+      shadow: z.enum(SHADOWS),
+    })
+    .optional(),
+});
+
 function isPostImage(value: string): boolean {
   return (
     /^https?:\/\//.test(value) ||
@@ -200,6 +229,8 @@ export const appRouter = t.router({
         enabled: settings.enabled,
         time: settings.time,
         look: settings.look,
+        // The colour touch-up preset as the photo editor's slider values.
+        adjust: presetAdjust(settings.look.retouch),
         hasLogo: !!logo?.bytes,
         logoUrl: logo?.url ?? null,
         customLogo: !!logo?.custom,
@@ -412,13 +443,41 @@ export const appRouter = t.router({
       .input(
         z.object({
           id: z.number(),
-          square: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).nullable().optional(),
-          story: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).nullable().optional(),
+          square: spotInput.nullable().optional(),
+          story: spotInput.nullable().optional(),
+          // The post's own colour and logo; null goes back to the studio's look.
+          style: styleInput.nullable().optional(),
         })
       )
       .mutation(async ({ input }) => {
         try {
-          return await reframePost(input.id, { square: input.square, story: input.story });
+          return await reframePost(input.id, { square: input.square, story: input.story }, input.style);
+        } catch (error) {
+          if (error instanceof AutoPostRejected) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+          }
+          throw error;
+        }
+      }),
+    /**
+     * The photo editor on the Schedule a post form (Brad: a button on the
+     * photo to "edit or add logo", with "saturation contrast and brightness",
+     * position, crop and zoom). Draws the ORIGINAL photo — `source` is always
+     * the gallery upload or phone upload, never an earlier edit — and returns
+     * the finished picture's address for the post.
+     */
+    editPhoto: studioProcedure
+      .input(
+        z.object({
+          source: z.string().max(200),
+          format: z.enum(FORMATS as [string, ...string[]]),
+          spot: spotInput,
+          style: styleInput,
+        })
+      )
+      .mutation(async ({ input }) => {
+        try {
+          return await editPhotoForPost(input.source, input.format as (typeof FORMATS)[number], input.spot, input.style);
         } catch (error) {
           if (error instanceof AutoPostRejected) {
             throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
