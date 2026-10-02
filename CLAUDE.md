@@ -1219,7 +1219,8 @@ same as all our other posts, that would be amazing."* All of it is
   takes its own upload (brand asset kind `postlogo`, kept at 1600px — the
   app logo is shrunk to 640), stored as `auto_post.logoAssetId`, with "Use
   the studio logo instead" to go back. Ownership is checked on save, as for
-  every brand asset. The cleaned-up file is in Drive → City Ink.
+  every brand asset. The cleaned-up file was sent to Brad in the chat to
+  upload there himself (the app has no way to set it on his behalf).
 
 **Bulk-scheduled posts were landing at 9pm.** `planDates` used
 `setHours()`, which is the server's clock, and Railway is UTC with no `TZ`
