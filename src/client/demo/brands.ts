@@ -28,6 +28,8 @@ type Brand = {
   label: string;
   /** Page title. */
   title: string;
+  /** The studio's own clock, for "today at the studio". Geelong's if left out. */
+  timeZone?: string;
   apply: (data: Json) => void;
   incoming: Incoming[];
 };
@@ -183,6 +185,148 @@ const BRANDS: Record<string, Brand> = {
       },
     ],
   },
+  /*
+   * Canggu Ink Club, Bali. Everything below is from cangguinkclub.com (home
+   * page, FAQ, booking policies) and their public listing. No owner or
+   * artist is named on their own site, so none is named here: with 30-odd
+   * artists, "one of our fine line artists" is how they'd say it anyway.
+   */
+  cic: {
+    label: "Canggu Ink Club · test drive · nothing is sent",
+    title: "Canggu Ink Club Front Desk",
+    timeZone: "Asia/Makassar",
+    apply(data) {
+      const q = data.queries;
+      const me = q["account.me"];
+      me.user.name = "Team";
+      me.user.email = "team@example.com";
+      Object.assign(me.studios[0], {
+        name: "Canggu Ink Club",
+        location: "Canggu, Bali",
+        address: "Jl. Pantai Batu Bolong No.69c, Canggu, Kuta Utara, Badung, Bali 80351",
+        phone: "+62 877 778 02000",
+        email: null,
+        instagram: "@cangguinkclub",
+        website: "cangguinkclub.com",
+        tagline: "You need a quality tattoo in Bali. Not a 'Bali-quality' tattoo.",
+        logoUrl: "demo/cic-icon.png",
+        // Their brand is black and white, full stop. White as the accent
+        // gives white buttons with black type, like their logo.
+        theme: "ink",
+        mode: "dark",
+        accent: "#F2F2F2",
+      });
+      q["config.facebook"].pageName = "Canggu Ink Club Tattoo Bali";
+      q["config.timely"].bookingPageUrl = "https://cangguinkclub.com";
+
+      const drafts: Record<string, { draftText: string; alternatives?: Incoming["alternatives"] }> = {
+        demo_mia: {
+          draftText:
+            "Hey Mia! Love a little fine line rose 🌹 If it's up to about 5×5cm on the wrist it's 1M IDR, bigger than that we price it off the design. How big are you thinking? We've got 10+ fine line artists so we can usually fit you in this week.",
+          alternatives: [{ label: "Short and sweet", text: "Hey Mia! Up to 5×5cm it's 1M IDR. How big are you thinking? 🌹" }],
+        },
+        demo_josh: {
+          draftText:
+            "No stress Josh. We can do Saturday 10am or Sunday 1:30pm, which suits? As long as it's 48 hours before your booking, your deposit moves across with you 🙌",
+        },
+        demo_priya: { draftText: "Thanks for letting us know, Priya. Someone from the team will be in touch about Friday 🖤" },
+        demo_zac: {
+          draftText:
+            "Hell yes we can 🙌 Send us a clear photo of it in daylight and we'll match you with the right artist for the cover-up and get you a price.",
+        },
+      };
+      for (const d of q["pendingReplies.list"] as Json[]) {
+        const next = drafts[d.conversationId];
+        if (next) Object.assign(d, next);
+      }
+
+      const replies: Record<string, string[]> = {
+        demo_josh: ["Hey Josh, yep, Thursday 10am. See you then!"],
+        demo_noah: [
+          "Love it. We've got a blackwork artist free Friday at 12, want me to lock it in? It's a 25% deposit to hold the spot.",
+          "Done, Friday 12pm. We'll send a reminder the day before.",
+        ],
+        demo_ella: [
+          "Eat a good meal, drink plenty of water and get a decent sleep. Skip the sun and the big night before, we can't tattoo sunburnt or hungover skin 😅 See you at 10!",
+          "No worries 🖤",
+        ],
+        demo_chloe: [
+          "Totally normal at this stage, it's healing. Keep it clean with a thin layer of balm, and no swimming or surfing for two weeks. If it needs a touch-up once it's healed, that's on us. Send a pic if it gets hot or swollen.",
+        ],
+      };
+      for (const [id, texts] of Object.entries(replies)) {
+        const ours = (data.messages[id]?.messages ?? []).filter((m: Json) => m.senderType !== "customer");
+        ours.forEach((m: Json, i: number) => {
+          if (texts[i]) m.content = texts[i];
+        });
+        for (const c of q["conversations.list"] as Json[]) {
+          if (c.conversationId === id && c.lastSenderType !== "customer" && texts.length) c.lastPreview = texts[texts.length - 1];
+        }
+      }
+
+      const captions = [
+        "Sleeve progress, session three and it's coming together.",
+        "Two pieces, one very happy client. Done this week at Canggu Ink Club.",
+        "Healed and still this crisp. You need a quality tattoo in Bali, not a 'Bali-quality' tattoo. Walk-ins welcome, 10am to 8pm every day.",
+        "Fresh forearm wrap from last week. Batu Bolong, open daily.",
+      ];
+      (q["posts.getScheduled"] as Json[]).forEach((p: Json, i: number) => {
+        if (captions[i]) p.content = captions[i];
+      });
+
+      // Their own published answers (cangguinkclub.com FAQ and booking policies).
+      const at = q["knowledge.list"]?.[0]?.createdAt ?? new Date().toISOString();
+      q["knowledge.list"] = [
+        ["How much is a small tattoo?", "Our minimum is 1,000,000 IDR per person. Small pieces up to 5×5cm: 1M IDR for one, 1.25M for two, 1.5M for three. Bigger pieces are priced on the design, not by the hour."],
+        ["Do you take deposits?", "Yes, 25% of the booking (minimum Rp 500k). It's non-refundable, but it can be passed to a friend or family member for a future tattoo."],
+        ["Cancelling or rescheduling?", "We need 48 hours' notice. Inside 48 hours, or a no-show, we may keep the deposit and charge a 50% cancellation fee."],
+        ["Do you do walk-ins?", "We always do our best to fit walk-ins in. Booking ahead is the safest way to get your artist and time."],
+        ["When are you open?", "10am to 8pm, every day."],
+        ["Can I swim or surf after?", "No swimming, surfing or soaking for at least two weeks. The surface heals in about two weeks."],
+        ["Touch-ups?", "Every tattoo comes with a complimentary touch-up if it needs one."],
+        ["Numbing cream?", "Available on request. Best applied 60 to 90 minutes before your session."],
+        ["Is it safe?", "Hospital-grade hygiene, brand-new needles, sterilised equipment and high-quality vegan ink."],
+        ["Anything to avoid before?", "Don't come in drunk or sunburnt. Both hurt the result."],
+      ].map(([question, answer], i) => ({ id: i + 1, question, answer, isActive: true, createdAt: at }));
+    },
+    incoming: [
+      {
+        name: "Lukas Weber",
+        platform: "instagram",
+        text: "Hey! I fly home Sunday, any chance of a small fine line wave on my ankle before then? 🌊",
+        draft:
+          "Hey Lukas! Yes, we'll get you sorted before your flight 🙌 If it's up to about 5×5cm it's 1M IDR. We've got fine line artists free tomorrow at 11am or 3pm, which suits? Just keep it out of the ocean for two weeks after, so your last day is the perfect time 😉",
+        alternatives: [
+          { label: "Short and sweet", text: "Hey Lukas! Tomorrow 11am or 3pm? Up to 5×5cm it's 1M IDR 🌊" },
+          { label: "Walk in", text: "Hey Lukas! Just walk in any day 10am to 8pm on Batu Bolong and we'll fit you in before Sunday 🙌" },
+        ],
+      },
+      {
+        name: "Chloe Martin",
+        platform: "instagram",
+        text: "can I still surf after getting tattooed?? 🏄‍♀️",
+        draft:
+          "Honest answer: not for two weeks. No swimming, surfing or soaking while it heals. Heaps of people book their tattoo for the end of their trip for exactly that reason 😉 Want us to find you a spot near the end of your stay?",
+        alternatives: [{ label: "Short and sweet", text: "Not for two weeks sorry! Most people get inked at the end of their trip 😉" }],
+      },
+      {
+        name: "Ana Souza",
+        platform: "messenger",
+        text: "How much for a half sleeve? Japanese style",
+        draft:
+          "Hey Ana! Love a Japanese half sleeve. Bigger pieces are priced on the design rather than by the hour, so send through your ideas and a few references, plus which arm, and we'll get you a price and match you with one of our Japanese artists.",
+        alternatives: [{ label: "Come in", text: "Hey Ana! Pop into Batu Bolong any day 10 to 8 and we'll go through it with you and price it on the spot 🙌" }],
+      },
+      {
+        name: "Jake Ryan",
+        platform: "instagram",
+        text: "do you take walk ins today? me and 2 mates want matching tattoos 😂",
+        draft:
+          "Hell yes we do 🙌 Come down to Batu Bolong, we're open till 8pm. Small matching pieces up to 5×5cm are 1M IDR each. Just don't come in sunburnt or after a big night, it wrecks the result 😅",
+        alternatives: [{ label: "Short and sweet", text: "Yep! Open till 8 tonight, 1M IDR each for small ones 🙌" }],
+      },
+    ],
+  },
 };
 
 export const DEMO_BRAND = String(import.meta.env.VITE_DEMO_BRAND ?? "");
@@ -197,6 +341,10 @@ export function demoLabel() {
 
 export function demoTitle() {
   return BRANDS[DEMO_BRAND]?.title;
+}
+
+export function demoTimeZone() {
+  return BRANDS[DEMO_BRAND]?.timeZone ?? "Australia/Melbourne";
 }
 
 export function incomingScript(): Incoming[] {

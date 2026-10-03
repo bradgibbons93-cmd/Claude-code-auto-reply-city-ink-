@@ -2,7 +2,7 @@ import { observable } from "@trpc/server/observable";
 import { TRPCClientError, type TRPCLink } from "@trpc/client";
 import type { AppRouter } from "../../server/routers";
 import captured from "./fixtures.json";
-import { applyBrand, incomingScript } from "./brands";
+import { applyBrand, demoTimeZone, incomingScript } from "./brands";
 
 /**
  * The test drive's pretend server.
@@ -51,7 +51,7 @@ export function resetDemo() {
 
 /* ---------- the studio's calendar, drawn around the viewer's own day ---------- */
 
-const ZONE = "Australia/Melbourne";
+const ZONE = demoTimeZone();
 function studioMinutes(at = new Date()) {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: ZONE, hour12: false, hour: "2-digit", minute: "2-digit" }).formatToParts(at);
   const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);

@@ -1469,6 +1469,12 @@ Posts, More) in `App.tsx`; the desktop sidebar is unchanged.
   drops a scripted enquiry in, and its draft appears a couple of seconds later —
   the whole product in ten seconds. `DEMO_TITLE` sets the page's own `<title>`,
   which is what names a published artifact.
+  Brands so far: `allink` (All Ink, Wollongong) and `cic` (Canggu Ink Club,
+  Bali — `npm run build:demo:cic`, 3 October). A brand can set `timeZone`
+  (cic is `Asia/Makassar`) so the demo's clock and booking times read local.
+  The cic brand names no owner or artists (they don't publish one) and its
+  drafts give no price — only "from 1M IDR" and the small-size table from
+  their FAQ.
 - `tests/home.mjs` drives it on a phone-sized browser: swipe → Undo offered →
   nothing sent for five seconds → exactly one send with the draft's words;
   Undo → nothing sent; left swipe → the thread; a personal message → opens the
