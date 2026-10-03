@@ -1,9 +1,8 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Camera, Check, Loader2, X } from "lucide-react";
-import { StampBadge } from "@/components/Logo";
 
 /**
  * What the artists see when they scan the QR code on the wall.
@@ -23,6 +22,14 @@ interface Picked {
 }
 
 export default function Upload() {
+  // Whose wall this QR code is on. Public, like the page itself.
+  const [brand, setBrand] = useState<{ name: string | null; logoUrl: string | null } | null>(null);
+  useEffect(() => {
+    fetch("/api/studio-brand")
+      .then((r) => r.json())
+      .then(setBrand)
+      .catch(() => setBrand(null));
+  }, []);
   const [artistName, setArtistName] = useState(() => {
     try {
       return localStorage.getItem("cityink.artist") ?? "";
@@ -126,8 +133,15 @@ export default function Upload() {
   return (
     <div className="mx-auto min-h-screen max-w-md px-5 py-8">
       <div className="mb-6 flex flex-col items-center text-center">
-        <StampBadge className="h-16 w-16" />
-        <h1 className="mt-3 font-display text-2xl text-charcoal">Upload your tattoos</h1>
+        {brand?.logoUrl ? (
+          <img src={brand.logoUrl} alt="" className="h-16 w-16 object-contain" />
+        ) : (
+          <img src="/brand/runnit-emblem.png" alt="" className="h-14 w-14 object-contain" />
+        )}
+        {brand?.name && (
+          <p className="mt-3 text-[0.65rem] uppercase tracking-[0.28em] text-muted-foreground">{brand.name}</p>
+        )}
+        <h1 className="mt-2 font-display text-2xl text-charcoal">Upload your tattoos</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           End of the day, snap what you've done and send it through. It goes straight to the
           studio for posting.

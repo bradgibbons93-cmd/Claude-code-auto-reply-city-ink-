@@ -1,0 +1,712 @@
+{
+ "capturedAt": "2026-09-29T21:31:33.994Z",
+ "queries": {
+  "account.me": {
+   "user": {
+    "id": 1,
+    "name": "Brad Gibbons",
+    "email": "brad@example.com",
+    "avatarUrl": null,
+    "avatarAssetId": null,
+    "onboardingStep": "welcome",
+    "onboardingComplete": true
+   },
+   "expired": false,
+   "studios": [
+    {
+     "id": 1,
+     "name": "City Ink Tattoo",
+     "location": null,
+     "address": null,
+     "phone": null,
+     "email": null,
+     "instagram": null,
+     "website": null,
+     "tagline": null,
+     "logoUrl": null,
+     "logoAssetId": null,
+     "coverUrl": null,
+     "coverAssetId": null,
+     "theme": "ink",
+     "mode": null,
+     "accent": null,
+     "homeLayout": "new",
+     "role": "owner",
+     "connected": true
+    }
+   ],
+   "currentStudioId": 1,
+   "claimable": null,
+   "signupsOpen": false,
+   "supportEmail": null,
+   "inviteOnly": false
+  },
+  "dashboard": {
+   "todayMessages": 6,
+   "messagesDeltaPct": 500,
+   "newBookings": 0,
+   "draftsWaiting": 4,
+   "avgResponseMinutes": null,
+   "series": [
+    {
+     "day": "2026-09-26",
+     "count": 2
+    },
+    {
+     "day": "2026-09-27",
+     "count": 5
+    },
+    {
+     "day": "2026-09-28",
+     "count": 2
+    },
+    {
+     "day": "2026-09-29",
+     "count": 8
+    }
+   ]
+  },
+  "stats": {
+   "conversations": 8,
+   "messages": 17,
+   "botReplies": 6,
+   "pendingPosts": 3
+  },
+  "llm.status": {
+   "provider": "anthropic",
+   "model": "claude-sonnet-5",
+   "baseUrl": "http://127.0.0.1:1",
+   "keySet": true,
+   "lastError": null
+  },
+  "feed.list": [],
+  "feed.count": 0,
+  "uploads.countToday": 0,
+  "conversations.list": [
+   {
+    "id": 1,
+    "conversationId": "demo_mia",
+    "senderName": "Mia Rose",
+    "senderEmail": null,
+    "avatarUrl": null,
+    "platform": "instagram",
+    "botPausedUntil": null,
+    "botPauseReason": null,
+    "lastCustomerMessageAt": "2026-09-29T21:27:33.000Z",
+    "lastMessageAt": "2026-09-29T21:27:33.000Z",
+    "createdAt": "2026-09-29T21:27:33.000Z",
+    "bookingName": null,
+    "bookingPhone": null,
+    "bookingDates": null,
+    "bookingPhotoUrls": null,
+    "bookingNotifiedAt": null,
+    "lastNotifiedAt": null,
+    "lastSenderType": "customer",
+    "lastPreview": "hey! how much for a small fine line rose on my wrist?",
+    "lastPhotoCount": 0
+   },
+   {
+    "id": 2,
+    "conversationId": "demo_josh",
+    "senderName": "Josh Kay",
+    "senderEmail": null,
+    "avatarUrl": null,
+    "platform": "facebook",
+    "botPausedUntil": null,
+    "botPauseReason": null,
+    "lastCustomerMessageAt": "2026-09-29T21:19:33.000Z",
+    "lastMessageAt": "2026-09-29T21:19:33.000Z",
+    "createdAt": "2026-09-28T19:31:33.000Z",
+    "bookingName": null,
+    "bookingPhone": null,
+    "bookingDates": null,
+    "bookingPhotoUrls": null,
+    "bookingNotifiedAt": null,
+    "lastNotifiedAt": null,
+    "lastSenderType": "customer",
+    "lastPreview": "Can I move Thursday to the weekend? Work's come up",
+    "lastPhotoCount": 0
+   },
+   {
+    "id": 3,
+    "conversationId": "demo_priya",
+    "senderName": "Priya Sen",
+    "senderEmail": null,
+    "avatarUrl": null,
+    "platform": "instagram",
+    "botPausedUntil": null,
+    "botPauseReason": null,
+    "lastCustomerMessageAt": "2026-09-29T21:01:33.000Z",
+    "lastMessageAt": "2026-09-29T21:01:33.000Z",
+    "createdAt": "2026-09-29T21:01:33.000Z",
+    "bookingName": null,
+    "bookingPhone": null,
+    "bookingDates": null,
+    "bookingPhotoUrls": null,
+    "bookingNotifiedAt": null,
+    "lastNotifiedAt": null,
+    "lastSenderType": "customer",
+    "lastPreview": "I've had a really rough week and I need to cancel Friday, sorry",
+    "lastPhotoCount": 0
+   },
+   {
+    "id": 4,
+    "conversationId": "demo_zac",
+    "senderName": "Zac Tran",
+    "senderEmail": null,
+    "avatarUrl": null,
+    "platform": "instagram",
+    "botPausedUntil": null,
+    "botPauseReason": null,
+    "lastCustomerMessageAt": "2026-09-29T20:46:33.000Z",
+    "lastMessageAt": "2026-09-29T20:46:33.000Z",
+    "createdAt": "2026-09-29T20:46:33.000Z",
+    "bookingName": null,
+    "bookingPhone": null,
+    "bookingDates": null,
+    "bookingPhotoUrls": null,
+    "bookingNotifiedAt": null,
+    "lastNotifiedAt": null,
+    "lastSenderType": "customer",
+    "lastPreview": "Do you do cover-ups? I've got an old tribal piece on my shoulder",
+    "lastPhotoCount": 0
+   },
+   {
+    "id": 6,
+    "conversationId": "demo_ella",
+    "senderName": "Ella Brooks",
+    "senderEmail": null,
+    "avatarUrl": null,
+    "platform": "instagram",
+    "botPausedUntil": null,
+    "botPauseReason": null,
+    "lastCustomerMessageAt": "2026-09-29T02:36:33.000Z",
+    "lastMessageAt": "2026-09-29T02:39:33.000Z",
+    "createdAt": "2026-09-29T01:31:33.000Z",
+    "bookingName": null,
+    "bookingPhone": null,
+    "bookingDates": null,
+    "bookingPhotoUrls": null,
+    "bookingNotifiedAt": null,
+    "lastNotifiedAt": null,
+    "lastSenderType": "bot",
+    "lastPreview": "No worries 🖤",
+    "lastPhotoCount": 0
+   },
+   {
+    "id": 7,
+    "conversationId": "demo_noah",
+    "senderName": "Noah West",
+    "senderEmail": null,
+    "avatarUrl": null,
+    "platform": "facebook",
+    "botPausedUntil": null,
+    "botPauseReason": null,
+    "lastCustomerMessageAt": "2026-09-27T21:31:33.000Z",
+    "lastMessageAt": "2026-09-27T21:34:33.000Z",
+    "createdAt": "2026-09-27T19:31:33.000Z",
+    "bookingName": null,
+    "bookingPhone": null,
+    "bookingDates": null,
+    "bookingPhotoUrls": null,
+    "bookingNotifiedAt": null,
+    "lastNotifiedAt": null,
+    "lastSenderType": "bot",
+    "lastPreview": "Done — Friday 12pm with Tomo. We'll send a reminder the day before.",
+    "lastPhotoCount": 0
+   },
+   {
+    "id": 8,
+    "conversationId": "demo_chloe",
+    "senderName": "Chloe Hart",
+    "senderEmail": null,
+    "avatarUrl": null,
+    "platform": "instagram",
+    "botPausedUntil": null,
+    "botPauseReason": null,
+    "lastCustomerMessageAt": "2026-09-26T23:31:33.000Z",
+    "lastMessageAt": "2026-09-27T00:31:33.000Z",
+    "createdAt": "2026-09-26T23:31:33.000Z",
+    "bookingName": null,
+    "bookingPhone": null,
+    "bookingDates": null,
+    "bookingPhotoUrls": null,
+    "bookingNotifiedAt": null,
+    "lastNotifiedAt": null,
+    "lastSenderType": "bot",
+    "lastPreview": "Totally normal at this stage — it's healing. Keep it clean, a thin layer of balm, and try not to scratch. Send a pic if it gets hot or swollen.",
+    "lastPhotoCount": 0
+   },
+   {
+    "id": 5,
+    "conversationId": "demo_sam",
+    "senderName": "Sam Nguyen",
+    "senderEmail": null,
+    "avatarUrl": null,
+    "platform": "instagram",
+    "botPausedUntil": null,
+    "botPauseReason": null,
+    "lastCustomerMessageAt": "2026-09-26T21:31:33.000Z",
+    "lastMessageAt": "2026-09-26T21:31:33.000Z",
+    "createdAt": "2026-09-26T21:31:33.000Z",
+    "bookingName": null,
+    "bookingPhone": null,
+    "bookingDates": null,
+    "bookingPhotoUrls": null,
+    "bookingNotifiedAt": null,
+    "lastNotifiedAt": null,
+    "lastSenderType": "customer",
+    "lastPreview": "are you guys open sunday?",
+    "lastPhotoCount": 0
+   }
+  ],
+  "pendingReplies.list": [
+   {
+    "id": 1,
+    "conversationId": "demo_mia",
+    "customerMessageId": "demo_mia_1",
+    "draftText": "Hey Mia! Fine line is Rina's favourite. Send us a pic of your wrist and roughly how big you'd like it, and we'll get you a quote and her next free spots.",
+    "status": "pending",
+    "isSensitive": false,
+    "llmFailed": false,
+    "alternatives": [
+     {
+      "label": "Short and sweet",
+      "text": "Hey Mia! Send a pic of your wrist and the size you're after and we'll quote you 😊"
+     }
+    ],
+    "sendError": null,
+    "createdAt": "2026-09-29T21:28:33.000Z",
+    "resolvedAt": null,
+    "photoUrls": []
+   },
+   {
+    "id": 2,
+    "conversationId": "demo_josh",
+    "customerMessageId": "demo_josh_4",
+    "draftText": "No stress Josh. Kade has Saturday 10am or Sunday 1:30pm — which suits? Your deposit moves across with you.",
+    "status": "pending",
+    "isSensitive": false,
+    "llmFailed": false,
+    "alternatives": null,
+    "sendError": null,
+    "createdAt": "2026-09-29T21:20:33.000Z",
+    "resolvedAt": null,
+    "photoUrls": []
+   },
+   {
+    "id": 3,
+    "conversationId": "demo_priya",
+    "customerMessageId": "demo_priya_5",
+    "draftText": "Thanks for letting us know, Priya.",
+    "status": "pending",
+    "isSensitive": true,
+    "llmFailed": false,
+    "alternatives": null,
+    "sendError": null,
+    "createdAt": "2026-09-29T21:02:33.000Z",
+    "resolvedAt": null,
+    "photoUrls": []
+   },
+   {
+    "id": 4,
+    "conversationId": "demo_zac",
+    "customerMessageId": "demo_zac_6",
+    "draftText": "We do! Send a clear photo of it in daylight and we'll let you know what's possible and who'd be best for it.",
+    "status": "pending",
+    "isSensitive": false,
+    "llmFailed": false,
+    "alternatives": null,
+    "sendError": null,
+    "createdAt": "2026-09-29T20:47:33.000Z",
+    "resolvedAt": null,
+    "photoUrls": []
+   }
+  ],
+  "autoReply.getRules": [
+   {
+    "id": 1,
+    "triggerKeywords": [
+     "book",
+     "booking",
+     "appointment"
+    ],
+    "responseText": "You can book straight in here — pick the artist and a time that suits:",
+    "sendBookingLink": true,
+    "isActive": true,
+    "priority": 1,
+    "createdAt": "2026-09-29T21:31:33.000Z"
+   },
+   {
+    "id": 2,
+    "triggerKeywords": [
+     "hours",
+     "open"
+    ],
+    "responseText": "We're open Tuesday to Saturday, 10am to 6pm.",
+    "sendBookingLink": false,
+    "isActive": true,
+    "priority": 0,
+    "createdAt": "2026-09-29T21:31:33.000Z"
+   }
+  ],
+  "posts.getScheduled": [
+   {
+    "id": 3,
+    "content": "Sleeve progress with Tomo. Session three and it's coming together.",
+    "imageUrl": "demo/work-sleeve.jpg",
+    "scheduledAt": "2026-10-02T06:31:33.000Z",
+    "status": "scheduled",
+    "aiGenerated": false,
+    "facebookPostId": null,
+    "lastError": null,
+    "publishedAt": null,
+    "createdAt": "2026-09-29T21:31:33.000Z"
+   },
+   {
+    "id": 2,
+    "content": "Two pieces, one very happy client. Done this week at City Ink.",
+    "imageUrl": "demo/work-face.jpg",
+    "scheduledAt": "2026-10-01T06:31:33.000Z",
+    "status": "scheduled",
+    "aiGenerated": false,
+    "facebookPostId": null,
+    "lastError": null,
+    "publishedAt": null,
+    "createdAt": "2026-09-29T21:31:33.000Z"
+   },
+   {
+    "id": 1,
+    "content": "Healed and still this crisp. Fine line rose by Rina, six weeks on. She has spots from Monday — DM us to grab one.",
+    "imageUrl": "demo/work-rose.jpg",
+    "scheduledAt": "2026-09-30T06:31:33.000Z",
+    "status": "scheduled",
+    "aiGenerated": false,
+    "facebookPostId": null,
+    "lastError": null,
+    "publishedAt": null,
+    "createdAt": "2026-09-29T21:31:33.000Z"
+   },
+   {
+    "id": 4,
+    "content": "Fresh forearm wrap from last week.",
+    "imageUrl": "demo/work-arms.jpg",
+    "scheduledAt": "2026-09-28T15:31:33.000Z",
+    "status": "published",
+    "aiGenerated": false,
+    "facebookPostId": null,
+    "lastError": null,
+    "publishedAt": null,
+    "createdAt": "2026-09-29T21:31:33.000Z"
+   }
+  ],
+  "push.key": {
+   "publicKey": "BOpyymxhGTwymcpYbKNqHOjEgU9T_spdGCAWcp4LGvbjp2P7Q-nwZcKRw8LR3UdrlJzocE0tqVHSwpIDj11s3kQ"
+  },
+  "push.status": {
+   "devices": [],
+   "count": 0,
+   "settings": {
+    "onMessage": true,
+    "onBooking": true,
+    "onDraft": false,
+    "onProblem": true,
+    "quietFrom": "22:00",
+    "quietTo": "07:00",
+    "throttleMinutes": 10
+   }
+  },
+  "knowledge.list": [
+   {
+    "id": 1,
+    "question": "Do you take deposits?",
+    "answer": "Yes — a deposit holds every booking and comes off the final price.",
+    "isActive": true,
+    "createdAt": "2026-09-29T21:31:33.000Z"
+   },
+   {
+    "id": 2,
+    "question": "Do you do walk-ins?",
+    "answer": "On flash days, yes. Otherwise it's by appointment.",
+    "isActive": true,
+    "createdAt": "2026-09-29T21:31:33.000Z"
+   }
+  ],
+  "history.count": 0,
+  "history.edits": [],
+  "config.facebook": {
+   "pageId": "P1",
+   "pageName": "City Ink Tattoo",
+   "appId": "demo",
+   "webhookVerifyToken": "demo",
+   "isConfigured": true,
+   "hasToken": true,
+   "hasInstagramToken": false,
+   "hasInstagramAppSecret": false,
+   "hasOwner": false,
+   "lastProfileError": null,
+   "unnamedConversations": 0,
+   "token": null
+  },
+  "config.messengerDelivery": {
+   "subscribed": false,
+   "unknown": true,
+   "fields": [],
+   "missing": [],
+   "detail": "Couldn't check — Facebook wouldn't answer. This says nothing about whether the Page is subscribed.",
+   "lastDelivery": null,
+   "rejected": null
+  },
+  "config.timely": {
+   "id": 1,
+   "businessId": null,
+   "bookingPageUrl": "https://example.com/book",
+   "defaultServiceId": null,
+   "isConfigured": true,
+   "calendarIcsUrl": "https://calendar.example.com/demo.ics",
+   "updatedAt": "2026-09-29T21:31:33.000Z"
+  },
+  "config.reviewUrl": {
+   "url": ""
+  },
+  "uploads.list": [],
+  "search.sample": [
+   {
+    "conversationId": "demo_mia",
+    "senderName": "Mia Rose",
+    "platform": "instagram",
+    "lastMessageAt": "2026-09-29 21:27:33",
+    "snippet": "hey! how much for a small fine line rose on my wrist?"
+   }
+  ]
+ },
+ "messages": {
+  "demo_mia": {
+   "messages": [
+    {
+     "id": 1,
+     "conversationId": "demo_mia",
+     "messageId": "demo_mia_1",
+     "senderType": "customer",
+     "content": "hey! how much for a small fine line rose on my wrist?",
+     "attachmentUrls": null,
+     "autoReplyGenerated": false,
+     "autoReplyContent": null,
+     "createdAt": "2026-09-29T21:27:33.000Z"
+    }
+   ],
+   "total": 1
+  },
+  "demo_josh": {
+   "messages": [
+    {
+     "id": 2,
+     "conversationId": "demo_josh",
+     "messageId": "demo_josh_2",
+     "senderType": "customer",
+     "content": "Hi, I'm booked in Thursday for my sleeve",
+     "attachmentUrls": null,
+     "autoReplyGenerated": false,
+     "autoReplyContent": null,
+     "createdAt": "2026-09-28T19:31:33.000Z"
+    },
+    {
+     "id": 3,
+     "conversationId": "demo_josh",
+     "messageId": "demo_josh_3",
+     "senderType": "bot",
+     "content": "Hey Josh, yep — Thursday 10am with Kade. See you then!",
+     "attachmentUrls": null,
+     "autoReplyGenerated": false,
+     "autoReplyContent": null,
+     "createdAt": "2026-09-28T20:31:33.000Z"
+    },
+    {
+     "id": 4,
+     "conversationId": "demo_josh",
+     "messageId": "demo_josh_4",
+     "senderType": "customer",
+     "content": "Can I move Thursday to the weekend? Work's come up",
+     "attachmentUrls": null,
+     "autoReplyGenerated": false,
+     "autoReplyContent": null,
+     "createdAt": "2026-09-29T21:19:33.000Z"
+    }
+   ],
+   "total": 3
+  },
+  "demo_priya": {
+   "messages": [
+    {
+     "id": 5,
+     "conversationId": "demo_priya",
+     "messageId": "demo_priya_5",
+     "senderType": "customer",
+     "content": "I've had a really rough week and I need to cancel Friday, sorry",
+     "attachmentUrls": null,
+     "autoReplyGenerated": false,
+     "autoReplyContent": null,
+     "createdAt": "2026-09-29T21:01:33.000Z"
+    }
+   ],
+   "total": 1
+  },
+  "demo_zac": {
+   "messages": [
+    {
+     "id": 6,
+     "conversationId": "demo_zac",
+     "messageId": "demo_zac_6",
+     "senderType": "customer",
+     "content": "Do you do cover-ups? I've got an old tribal piece on my shoulder",
+     "attachmentUrls": null,
+     "autoReplyGenerated": false,
+     "autoReplyContent": null,
+     "createdAt": "2026-09-29T20:46:33.000Z"
+    }
+   ],
+   "total": 1
+  },
+  "demo_ella": {
+   "messages": [
+    {
+     "id": 8,
+     "conversationId": "demo_ella",
+     "messageId": "demo_ella_8",
+     "senderType": "customer",
+     "content": "What should I do before my appointment tomorrow?",
+     "attachmentUrls": null,
+     "autoReplyGenerated": false,
+     "autoReplyContent": null,
+     "createdAt": "2026-09-29T01:31:33.000Z"
+    },
+    {
+     "id": 9,
+     "conversationId": "demo_ella",
+     "messageId": "demo_ella_9",
+     "senderType": "bot",
+     "content": "Eat a good meal, drink plenty of water and get a decent sleep. Wear something that shows the spot easily. See you at 10!",
+     "attachmentUrls": null,
+     "autoReplyGenerated": false,
+     "autoReplyContent": null,
+     "createdAt": "2026-09-29T02:31:33.000Z"
+    },
+    {
+     "id": 10,
+     "conversationId": "demo_ella",
+     "messageId": "demo_ella_10",
+     "senderType": "customer",
+     "content": "Perfect thank you!!",
+     "attachmentUrls": null,
+     "autoReplyGenerated": false,
+     "autoReplyContent": null,
+     "createdAt": "2026-09-29T02:36:33.000Z"
+    },
+    {
+     "id": 11,
+     "conversationId": "demo_ella",
+     "messageId": "demo_ella_11",
+     "senderType": "bot",
+     "content": "No worries 🖤",
+     "attachmentUrls": null,
+     "autoReplyGenerated": false,
+     "autoReplyContent": null,
+     "createdAt": "2026-09-29T02:39:33.000Z"
+    }
+   ],
+   "total": 4
+  },
+  "demo_noah": {
+   "messages": [
+    {
+     "id": 12,
+     "conversationId": "demo_noah",
+     "messageId": "demo_noah_12",
+     "senderType": "customer",
+     "content": "Keen to get a blackwork dagger on my forearm, about 15cm",
+     "attachmentUrls": null,
+     "autoReplyGenerated": false,
+     "autoReplyContent": null,
+     "createdAt": "2026-09-27T19:31:33.000Z"
+    },
+    {
+     "id": 13,
+     "conversationId": "demo_noah",
+     "messageId": "demo_noah_13",
+     "senderType": "bot",
+     "content": "Love it. Tomo is our blackwork guy — he's free Friday at 12. Want me to lock it in? A deposit holds the spot.",
+     "attachmentUrls": null,
+     "autoReplyGenerated": false,
+     "autoReplyContent": null,
+     "createdAt": "2026-09-27T20:31:33.000Z"
+    },
+    {
+     "id": 14,
+     "conversationId": "demo_noah",
+     "messageId": "demo_noah_14",
+     "senderType": "customer",
+     "content": "Yes please!",
+     "attachmentUrls": null,
+     "autoReplyGenerated": false,
+     "autoReplyContent": null,
+     "createdAt": "2026-09-27T21:31:33.000Z"
+    },
+    {
+     "id": 15,
+     "conversationId": "demo_noah",
+     "messageId": "demo_noah_15",
+     "senderType": "bot",
+     "content": "Done — Friday 12pm with Tomo. We'll send a reminder the day before.",
+     "attachmentUrls": null,
+     "autoReplyGenerated": false,
+     "autoReplyContent": null,
+     "createdAt": "2026-09-27T21:34:33.000Z"
+    }
+   ],
+   "total": 4
+  },
+  "demo_chloe": {
+   "messages": [
+    {
+     "id": 16,
+     "conversationId": "demo_chloe",
+     "messageId": "demo_chloe_16",
+     "senderType": "customer",
+     "content": "My new piece is a bit shiny and itchy, is that normal?",
+     "attachmentUrls": null,
+     "autoReplyGenerated": false,
+     "autoReplyContent": null,
+     "createdAt": "2026-09-26T23:31:33.000Z"
+    },
+    {
+     "id": 17,
+     "conversationId": "demo_chloe",
+     "messageId": "demo_chloe_17",
+     "senderType": "bot",
+     "content": "Totally normal at this stage — it's healing. Keep it clean, a thin layer of balm, and try not to scratch. Send a pic if it gets hot or swollen.",
+     "attachmentUrls": null,
+     "autoReplyGenerated": false,
+     "autoReplyContent": null,
+     "createdAt": "2026-09-27T00:31:33.000Z"
+    }
+   ],
+   "total": 2
+  },
+  "demo_sam": {
+   "messages": [
+    {
+     "id": 7,
+     "conversationId": "demo_sam",
+     "messageId": "demo_sam_7",
+     "senderType": "customer",
+     "content": "are you guys open sunday?",
+     "attachmentUrls": null,
+     "autoReplyGenerated": false,
+     "autoReplyContent": null,
+     "createdAt": "2026-09-26T21:31:33.000Z"
+    }
+   ],
+   "total": 1
+  }
+ }
+}

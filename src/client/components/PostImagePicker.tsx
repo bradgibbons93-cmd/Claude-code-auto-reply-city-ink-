@@ -1,9 +1,13 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Camera, Images, Link2, Loader2, X } from "lucide-react";
+import { Camera, Images, Link2, Loader2, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
+import PhotoEditor, { type PhotoEdit } from "@/components/PhotoEditor";
+
+/** Photos this app holds the original of, which the editor can work from. */
+const editable = (url: string) => /^\/api\/(uploads|attachments)\/[0-9a-f]{40}$/.test(url);
 
 /**
  * Where a post's picture comes from.
@@ -31,6 +35,44 @@ export default function PostImagePicker({
   const [showGallery, setShowGallery] = useState(false);
   const [showUrl, setShowUrl] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  // The photo as it was picked, and the last edit of it. `value` is what the
+  // post will carry — the edited picture once there is one — but every edit
+  // starts again from the original, so editing twice never crops a crop.
+  const [original, setOriginal] = useState<string | null>(null);
+  const [edited, setEdited] = useState<{ url: string; edit: PhotoEdit } | null>(null);
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    if (!value) {
+      setOriginal(null);
+      setEdited(null);
+    } else if (value !== original && value !== edited?.url) {
+      // A new photo, from any of the three routes.
+      setOriginal(value);
+      setEdited(null);
+    }
+  }, [value, original, edited]);
+  const source = original ?? value;
+
+  const editPhoto = trpc.posts.editPhoto.useMutation();
+  const saveEdit = async (edit: PhotoEdit) => {
+    try {
+      const spot = edit.spots[edit.format];
+      const result = await editPhoto.mutateAsync({
+        source,
+        format: edit.format,
+        spot: spot ?? { x: 0.5, y: 0.5 },
+        style: { adjust: edit.adjust, logo: edit.logo },
+      });
+      setEdited({ url: result.url, edit });
+      onChange(result.url);
+      setEditing(false);
+      toast.success(edit.logo.on ? "Photo ready, logo on." : "Photo ready.");
+    } catch (error) {
+      toast.error((error as Error).message || "Couldn't finish that photo. Try again.");
+      throw error;
+    }
+  };
 
   const { data: gallery } = trpc.uploads.list.useQuery(
     { unusedOnly: false },
@@ -82,20 +124,51 @@ export default function PostImagePicker({
       />
 
       {value ? (
-        <div className="relative w-fit">
-          <img
-            src={value}
-            alt="The photo on this post"
-            className="max-h-44 rounded-lg border border-border object-cover"
-          />
-          <button
-            type="button"
-            onClick={() => onChange("")}
-            aria-label="Remove this photo"
-            className="absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full bg-charcoal text-white shadow"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
+        <div className="w-fit max-w-full space-y-2" data-testid="post-photo">
+          <div className="relative w-fit">
+            <img
+              src={value}
+              alt="The photo on this post"
+              className="max-h-44 rounded-lg border border-border object-cover"
+            />
+            <button
+              type="button"
+              onClick={() => onChange("")}
+              aria-label="Remove this photo"
+              className="absolute -right-2 -top-2 flex h-8 w-8 items-center justify-center rounded-full bg-charcoal text-white shadow"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          {/* Brad: "a little pop up tab or text either under or on the photo as
+              a button ... edit or add logo and post". */}
+          {editable(source) ? (
+            <Button
+              type="button"
+              variant={edited ? "outline" : "default"}
+              className="min-h-[44px] w-full"
+              onClick={() => setEditing(true)}
+            >
+              <Sparkles className="mr-2 h-4 w-4" />
+              {edited ? "Edit again" : "Edit & add logo"}
+            </Button>
+          ) : (
+            <p className="max-w-[16rem] text-xs text-muted-foreground">
+              A link from another site can't be edited here. Upload the photo to add the logo.
+            </p>
+          )}
+          {editing && (
+            <PhotoEditor
+              title="Get it ready to post"
+              source={source}
+              formats={["square", "portrait"]}
+              mode="pick"
+              start={edited?.edit}
+              saveLabel="Use this photo"
+              onCancel={() => setEditing(false)}
+              onSave={saveEdit}
+            />
+          )}
         </div>
       ) : (
         <div className="flex flex-wrap gap-2">

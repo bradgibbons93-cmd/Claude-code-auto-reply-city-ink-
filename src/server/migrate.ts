@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "./db.js";
+import { ensureStudios } from "./studios.js";
 
 /**
  * Creates the tables if they aren't there yet.
@@ -20,6 +21,55 @@ const STATEMENTS = [
     last_signed_in TIMESTAMP NULL,
     created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY users_open_id_unique (open_id)
+  )`,
+
+  // Accounts, studios and their branding.
+  `CREATE TABLE IF NOT EXISTS sessions (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id INT NOT NULL,
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL,
+    user_agent VARCHAR(255),
+    KEY sessions_user_idx (user_id)
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS studios (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    location VARCHAR(255),
+    address VARCHAR(255),
+    phone VARCHAR(64),
+    email VARCHAR(255),
+    instagram VARCHAR(255),
+    website VARCHAR(255),
+    tagline VARCHAR(255),
+    logo_asset_id VARCHAR(64),
+    cover_asset_id VARCHAR(64),
+    theme VARCHAR(32),
+    mode VARCHAR(8),
+    accent VARCHAR(16),
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS studio_members (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    studio_id INT NOT NULL,
+    user_id INT NOT NULL,
+    role VARCHAR(16) NOT NULL DEFAULT 'owner',
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY studio_member_idx (studio_id, user_id),
+    KEY studio_member_user_idx (user_id)
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS brand_assets (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id INT NOT NULL,
+    kind VARCHAR(16) NOT NULL,
+    content_type VARCHAR(128) NOT NULL,
+    bytes MEDIUMBLOB NOT NULL,
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP
   )`,
 
   `CREATE TABLE IF NOT EXISTS messenger_conversations (
@@ -67,7 +117,7 @@ const STATEMENTS = [
     content TEXT NOT NULL,
     image_url VARCHAR(1024),
     scheduled_at TIMESTAMP NOT NULL,
-    status ENUM('draft','scheduled','published','failed') NOT NULL DEFAULT 'scheduled',
+    status ENUM('draft','scheduled','published','failed','review') NOT NULL DEFAULT 'scheduled',
     ai_generated BOOLEAN DEFAULT FALSE,
     facebook_post_id VARCHAR(191),
     last_error TEXT,
@@ -156,6 +206,23 @@ const STATEMENTS = [
     KEY upload_created_idx (created_at)
   )`,
 
+  `CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id VARCHAR(64) PRIMARY KEY,
+    endpoint TEXT NOT NULL,
+    p256dh VARCHAR(255) NOT NULL,
+    auth VARCHAR(255) NOT NULL,
+    label VARCHAR(191),
+    last_sent_at TIMESTAMP NULL,
+    failures INT DEFAULT 0,
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS app_settings (
+    name VARCHAR(64) PRIMARY KEY,
+    value TEXT,
+    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  )`,
+
   `CREATE TABLE IF NOT EXISTS example_exchanges (
     id INT AUTO_INCREMENT PRIMARY KEY,
     customer_message TEXT NOT NULL,
@@ -174,6 +241,27 @@ const STATEMENTS = [
     sent_text TEXT NOT NULL,
     created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP
   )`,
+
+  `CREATE TABLE IF NOT EXISTS follow_ups (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    conversation_id VARCHAR(191) NOT NULL,
+    kind VARCHAR(32) NOT NULL,
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY follow_ups_conversation_kind (conversation_id, kind)
+  )`,
+
+  // One row per "we'll check with Mim" that went out, so she is emailed once
+  // per promise and Settings can show what was sent and what wasn't.
+  `CREATE TABLE IF NOT EXISTS check_alerts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    alert_key VARCHAR(64) NOT NULL,
+    conversation_id VARCHAR(191) NOT NULL,
+    message_text TEXT,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    detail TEXT,
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY check_alerts_key (alert_key)
+  )`,
 ];
 
 /**
@@ -184,24 +272,127 @@ const STATEMENTS = [
  * because MySQL's `ADD COLUMN IF NOT EXISTS` support is version-dependent.
  */
 const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
+  // The classic/new home screen switch (see studios.homeLayout in schema.ts).
+  { table: "studios", column: "home_layout", ddl: "VARCHAR(16) NULL" },
+  // How the Home's 3D illustrations are drawn (see studios.art in schema.ts).
+  { table: "studios", column: "art", ddl: "VARCHAR(16) NULL" },
   { table: "messenger_conversations", column: "booking_name", ddl: "VARCHAR(255)" },
   { table: "messenger_conversations", column: "booking_phone", ddl: "VARCHAR(64)" },
   { table: "messenger_conversations", column: "booking_dates", ddl: "VARCHAR(255)" },
   { table: "messenger_conversations", column: "booking_photo_urls", ddl: "JSON" },
   { table: "messenger_conversations", column: "booking_notified_at", ddl: "TIMESTAMP NULL" },
+  { table: "messenger_conversations", column: "last_notified_at", ddl: "TIMESTAMP NULL" },
+  { table: "messenger_conversations", column: "bot_pause_reason", ddl: "VARCHAR(16)" },
+  { table: "messenger_conversations", column: "avatar_url", ddl: "VARCHAR(1024)" },
   { table: "facebook_config", column: "owner_psid", ddl: "VARCHAR(191)" },
   { table: "timely_config", column: "calendar_ics_url", ddl: "VARCHAR(1024)" },
   { table: "pending_replies", column: "is_sensitive", ddl: "BOOLEAN DEFAULT FALSE" },
   { table: "messenger_messages", column: "attachment_urls", ddl: "JSON" },
   { table: "pending_replies", column: "alternatives", ddl: "JSON" },
   { table: "pending_replies", column: "llm_failed", ddl: "BOOLEAN DEFAULT FALSE" },
+  { table: "pending_replies", column: "send_error", ddl: "TEXT" },
   { table: "facebook_config", column: "instagram_access_token", ddl: "TEXT" },
+  // Kept in the database, not in memory. Held in a module variable it reset on
+  // every deploy, so the delivery panel said "nothing has ever arrived" minutes
+  // after a push — which reads as a dead webhook when nothing is wrong at all.
+  { table: "facebook_config", column: "instagram_token_host", ddl: "VARCHAR(16)" },
+  { table: "facebook_config", column: "instagram_app_secret", ddl: "VARCHAR(255)" },
+  { table: "facebook_config", column: "last_delivery_at", ddl: "TIMESTAMP NULL" },
+  { table: "facebook_config", column: "last_rejected_at", ddl: "TIMESTAMP NULL" },
+  { table: "facebook_config", column: "rejected_count", ddl: "INT DEFAULT 0" },
+  { table: "facebook_config", column: "last_rejection_detail", ddl: "VARCHAR(255)" },
+  { table: "facebook_config", column: "last_delivery_kind", ddl: "VARCHAR(64)" },
   {
     table: "messenger_conversations",
     column: "platform",
     ddl: "ENUM('facebook','instagram') DEFAULT 'facebook'",
   },
+  // The auto-post from the artists' upload link (autopost.ts).
+  { table: "artist_uploads", column: "auto_post_state", ddl: "VARCHAR(16) NULL" },
+  { table: "artist_uploads", column: "auto_post_at", ddl: "TIMESTAMP NULL" },
+  { table: "artist_uploads", column: "auto_post_error", ddl: "VARCHAR(255) NULL" },
+  { table: "scheduled_posts", column: "upload_id", ddl: "VARCHAR(64) NULL" },
+  { table: "scheduled_posts", column: "story_url", ddl: "VARCHAR(1024) NULL" },
+  { table: "scheduled_posts", column: "framing", ddl: "VARCHAR(255) NULL" },
+  { table: "scheduled_posts", column: "look_key", ddl: "VARCHAR(32) NULL" },
+  { table: "scheduled_posts", column: "photo_style", ddl: "VARCHAR(512) NULL" },
+  // Accounts, on the template's users table.
+  { table: "users", column: "password_hash", ddl: "VARCHAR(255)" },
+  { table: "users", column: "avatar_asset_id", ddl: "VARCHAR(64)" },
+  { table: "users", column: "current_studio_id", ddl: "INT" },
+  { table: "users", column: "onboarding_step", ddl: "VARCHAR(32)" },
+  { table: "users", column: "onboarding_completed_at", ddl: "TIMESTAMP NULL" },
 ];
+
+/*
+ * Indexes the app needs but the original CREATE TABLE never declared.
+ *
+ * Same shape as ensureColumns: checked against information_schema, added
+ * once, never dropped. `msg_conv_idx` covers the conversation_id alone,
+ * which was fine while "the newest message in a thread" was answered with
+ * GROUP_CONCAT. It is now a correlated ORDER BY created_at DESC, id DESC
+ * LIMIT 1 per thread, and without the sort columns in the index MySQL reads
+ * every message in the thread and sorts them, on a query that runs on every
+ * poll and every board load.
+ */
+const INDEXES: { table: string; name: string; ddl: string; unique?: boolean }[] = [
+  {
+    table: "messenger_messages",
+    name: "msg_conv_recent_idx",
+    ddl: "(conversation_id, created_at, id)",
+  },
+  // One account per email. Enforced here as well as in code, so two sign-ups
+  // racing each other can't both win.
+  { table: "users", name: "users_email_unique", ddl: "(email)", unique: true },
+];
+
+async function ensureIndexes(): Promise<void> {
+  const db = await getDb();
+  for (const { table, name, ddl, unique } of INDEXES) {
+    const [rows] = (await db.execute(
+      sql.raw(
+        `SELECT COUNT(*) AS cnt FROM information_schema.statistics
+         WHERE table_schema = DATABASE() AND table_name = '${table}' AND index_name = '${name}'`
+      )
+    )) as unknown as [Array<{ cnt: number }>];
+    if (Number(rows[0]?.cnt) === 0) {
+      await db.execute(sql.raw(`ALTER TABLE ${table} ADD ${unique ? "UNIQUE " : ""}INDEX ${name} ${ddl}`));
+      console.log(`[DB] Added index ${table}.${name}`);
+    }
+  }
+}
+
+/*
+ * ENUM values that were added after the table existed. ADD COLUMN can't do
+ * this, and CREATE TABLE IF NOT EXISTS never touches a table that is already
+ * there — so Railway's scheduled_posts would refuse 'review' for ever and
+ * every auto-post would fail on insert while every local test passed.
+ */
+const ENUMS: Array<{ table: string; column: string; value: string; ddl: string }> = [
+  {
+    table: "scheduled_posts",
+    column: "status",
+    value: "review",
+    ddl: "ENUM('draft','scheduled','published','failed','review') NOT NULL DEFAULT 'scheduled'",
+  },
+];
+
+async function ensureEnums(): Promise<void> {
+  const db = await getDb();
+  for (const { table, column, value, ddl } of ENUMS) {
+    const [rows] = (await db.execute(
+      sql.raw(
+        `SELECT COLUMN_TYPE AS type FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = '${table}' AND column_name = '${column}'`
+      )
+    )) as unknown as [Array<{ type: string }>];
+    const type = String(rows[0]?.type ?? "");
+    if (type && !type.includes(`'${value}'`)) {
+      await db.execute(sql.raw(`ALTER TABLE ${table} MODIFY COLUMN ${column} ${ddl}`));
+      console.log(`[DB] ${table}.${column} now takes '${value}'`);
+    }
+  }
+}
 
 async function ensureColumns(): Promise<void> {
   const db = await getDb();
@@ -216,6 +407,53 @@ async function ensureColumns(): Promise<void> {
       await db.execute(sql.raw(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`));
       console.log(`[DB] Added column ${table}.${column}`);
     }
+  }
+}
+
+/**
+ * Un-stick threads the handoff pause swallowed.
+ *
+ * Answering a customer by hand from Meta's own inbox muted the thread for
+ * twelve hours, and when the customer wrote back the app said nothing —
+ * no draft, no notification, and a dashboard reading "All caught up" over an
+ * inbox full of unread messages. That is fixed going forward, but the
+ * threads already sitting paused would stay silent until their timer ran
+ * out, and the messages inside them have no second webhook coming.
+ *
+ * So: any thread still paused automatically, where the customer has spoken
+ * since, is released. The next poll drafts for them. A pause the studio set
+ * by hand is left exactly where it is.
+ */
+async function liftStaleHandoffPauses(): Promise<void> {
+  const db = await getDb();
+  const [result] = (await db.execute(
+    sql.raw(`UPDATE messenger_conversations c
+                JOIN (
+                  SELECT m1.conversation_id, m1.sender_type
+                    FROM messenger_messages m1
+                    JOIN (
+                      SELECT s.conversation_id,
+                       (SELECT m2.id
+                          FROM messenger_messages m2
+                         WHERE m2.conversation_id = s.conversation_id
+                         ORDER BY m2.created_at DESC, m2.id DESC
+                         LIMIT 1) AS last_id
+                  FROM (SELECT DISTINCT conversation_id
+                          FROM messenger_messages) s
+                    ) t ON t.last_id = m1.id
+                ) last ON last.conversation_id = c.conversation_id
+                 SET c.bot_paused_until = NULL, c.bot_pause_reason = NULL
+               WHERE c.bot_paused_until IS NOT NULL
+                 AND c.bot_paused_until > NOW()
+                 AND last.sender_type = 'customer'
+                 AND (c.bot_pause_reason IS NULL OR c.bot_pause_reason <> 'manual')`)
+  )) as unknown as [{ affectedRows?: number }];
+
+  const freed = Number(result?.affectedRows ?? 0);
+  if (freed) {
+    console.log(
+      `[DB] Released ${freed} thread(s) that were muted by the handoff pause while the customer was waiting`
+    );
   }
 }
 
@@ -321,9 +559,14 @@ export async function ensureTables(): Promise<void> {
     await db.execute(sql.raw(statement));
   }
   await ensureColumns();
+  await ensureEnums();
+  await ensureIndexes();
+  await liftStaleHandoffPauses();
   await repairFailedDrafts();
   await clearPlaceholderNames();
   await repairConversationClocks();
   await dropDraftsAnsweringOurselves();
+  // The studio the existing inbox belongs to, as a record of its own.
+  await ensureStudios();
   console.log(`[DB] Schema ready (${STATEMENTS.length} tables checked)`);
 }

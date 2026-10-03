@@ -1,3 +1,5 @@
+import { useState } from "react";
+import PhotoViewer from "@/components/PhotoViewer";
 import { trpc } from "@/lib/trpc";
 import { Heart, MessageCircle, Instagram, Facebook, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,6 +20,8 @@ export default function LiveFeed({
   variant?: "rail" | "grid";
   limit?: number;
 }) {
+  // A post with no Instagram permalink still has to be closable.
+  const [photo, setPhoto] = useState<string | null>(null);
   const utils = trpc.useUtils();
   const { data: posts, isLoading } = trpc.feed.list.useQuery(undefined, {
     refetchInterval: 5 * 60 * 1000,
@@ -56,8 +60,20 @@ export default function LiveFeed({
     );
   }
 
+
   return (
     <div className="space-y-4">
+      {/* A post with no Instagram permalink opened the bare image in a tab
+          the home-screen app cannot get back from. */}
+      {photo && (
+        <PhotoViewer
+          urls={[photo]}
+          index={0}
+          onIndex={() => {}}
+          onClose={() => setPhoto(null)}
+          alt="Studio post"
+        />
+      )}
       <div
         className={
           variant === "grid"
@@ -71,18 +87,32 @@ export default function LiveFeed({
             className="overflow-hidden rounded-xl border border-border bg-surface"
           >
             {post.imagePath && (
-              <a
-                href={post.permalink ?? post.imagePath}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <img
-                  src={post.imagePath}
-                  alt={post.message?.slice(0, 120) || "Studio post"}
-                  className="aspect-square w-full object-cover"
-                  loading="lazy"
-                />
-              </a>
+              /* A permalink is a real trip to Instagram and keeps its link.
+                 Without one this used to open the bare image in a tab that
+                 the home-screen app has no way back from. */
+              post.permalink ? (
+                <a href={post.permalink} target="_blank" rel="noopener noreferrer">
+                  <img
+                    src={post.imagePath}
+                    alt={post.message?.slice(0, 120) || "Studio post"}
+                    className="aspect-square w-full object-cover"
+                    loading="lazy"
+                  />
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setPhoto(post.imagePath ?? null)}
+                  className="block w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <img
+                    src={post.imagePath}
+                    alt={post.message?.slice(0, 120) || "Studio post"}
+                    className="aspect-square w-full object-cover"
+                    loading="lazy"
+                  />
+                </button>
+              )
             )}
 
             <div className="space-y-2 p-3">

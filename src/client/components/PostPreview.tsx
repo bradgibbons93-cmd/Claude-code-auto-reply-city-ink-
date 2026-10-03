@@ -1,6 +1,7 @@
 import { format } from "date-fns";
 import { Globe, MoreHorizontal, ThumbsUp, MessageCircle, Share2 } from "lucide-react";
-import { StampBadge } from "@/components/Logo";
+import { useSession } from "@/lib/session";
+import { StudioMark } from "@/components/StudioSwitcher";
 
 /**
  * The post as Facebook will actually render it.
@@ -17,21 +18,22 @@ export default function PostPreview({
   content,
   imageUrl,
   scheduledAt,
-  pageName = "City Ink Tattoo",
+  pageName,
 }: {
   content: string;
   imageUrl?: string | null;
   scheduledAt?: string | Date | null;
   pageName?: string;
 }) {
+  const { studio } = useSession();
   const when = scheduledAt ? new Date(scheduledAt) : null;
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-elevated shadow-[var(--shadow-soft)]">
       <div className="flex items-center gap-2.5 p-3">
-        <StampBadge className="h-9 w-9 shrink-0 rounded-full" />
+        <StudioMark studio={studio} size={36} className="rounded-full" />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-charcoal">{pageName}</p>
+          <p className="truncate text-sm font-semibold text-charcoal">{pageName || studio?.name}</p>
           <p className="flex items-center gap-1 text-[0.7rem] text-muted-foreground">
             {when ? format(when, "d MMM 'at' h:mma").replace("AM", "am").replace("PM", "pm") : "Not scheduled"}
             <span aria-hidden="true">·</span>

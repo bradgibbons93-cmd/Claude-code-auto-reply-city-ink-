@@ -1,6 +1,7 @@
 import { Link } from "wouter";
 import { CalendarCheck } from "lucide-react";
-import { StampBadge } from "@/components/Logo";
+import { useSession } from "@/lib/session";
+import { StudioMark } from "@/components/StudioSwitcher";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,12 +15,15 @@ export default function Bookings() {
     refetchInterval: 60000,
   });
   const { data: timely } = trpc.config.timely.useQuery();
+  const { studio } = useSession();
 
   if (!timely?.calendarIcsUrl) {
     return (
       <Card>
         <CardContent className="py-12 text-center">
-          <StampBadge className="mx-auto mb-6 h-32 w-32 text-sepia opacity-80" />
+          <div className="mb-6 flex justify-center">
+            <StudioMark studio={studio} size={80} />
+          </div>
           <p className="text-charcoal">No calendar connected yet.</p>
           <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
             Bookings here are read straight from the Google Calendar that Timely syncs into. Add

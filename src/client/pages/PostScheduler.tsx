@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSession } from "@/lib/session";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,23 +19,31 @@ import { format } from "date-fns";
 import PostPreview from "@/components/PostPreview";
 import PostImagePicker from "@/components/PostImagePicker";
 import PostCalendar from "@/components/PostCalendar";
+import BulkScheduler from "@/components/BulkScheduler";
+import ReviewPosts from "@/components/ReviewPosts";
 
+// Palette only. A blue "scheduled" pill and a red "failed" one were the two
+// colours on the Posts page that weren't the studio's.
 const STATUS_STYLES: Record<string, string> = {
   published: "border-success/40 bg-success/10 text-success",
-  scheduled: "border-blue-500/50 bg-blue-500/20 text-blue-400",
-  draft: "border-sepia/45 bg-beige/30 text-charcoal",
-  failed: "border-red-500/50 bg-red-500/20 text-red-400",
+  scheduled: "border-sepia/50 bg-sepia/15 text-sepia",
+  draft: "border-border bg-beige/30 text-muted-foreground",
+  failed: "border-destructive/50 bg-destructive/10 text-destructive",
+  review: "border-sepia/50 bg-transparent text-sepia",
 };
 
 export default function PostScheduler() {
+  const { studio } = useSession();
   const [isOpen, setIsOpen] = useState(false);
   const [content, setContent] = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
   const [imageUrl, setImageUrl] = useState("");
 
-  const { data: posts, refetch } = trpc.posts.getScheduled.useQuery(undefined, {
+  const { data: allPosts, refetch } = trpc.posts.getScheduled.useQuery(undefined, {
     refetchInterval: 30000,
   });
+  const waiting = (allPosts ?? []).filter((post) => post.status === "review");
+  const posts = (allPosts ?? []).filter((post) => post.status !== "review");
 
   const createPost = trpc.posts.create.useMutation({
     onSuccess: () => {
@@ -103,10 +112,12 @@ export default function PostScheduler() {
             Posts
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Queued up for the City Ink Page. Published on the minute.
+            Queued up for {studio?.name ?? "your"} Page. Published on the minute.
           </p>
         </div>
 
+        <div className="flex flex-wrap items-center gap-2">
+        <BulkScheduler onScheduled={() => refetch()} />
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
           <DialogTrigger>
             <Button>
@@ -178,11 +189,16 @@ export default function PostScheduler() {
             </div>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
+
+      {/* The artists' uploads, made into posts and waiting on a yes. First on
+          the page, because until someone looks at them nothing happens. */}
+      <ReviewPosts posts={waiting} onChange={() => refetch()} />
 
       <Card className="border-border">
         <CardContent className="pt-6">
-          <PostCalendar posts={posts ?? []} onPickDate={(date) => compose({ date })} />
+          <PostCalendar posts={allPosts ?? []} onPickDate={(date) => compose({ date })} />
           <p className="mt-3 text-xs text-muted-foreground">
             Tap a day to schedule something for it.
           </p>
@@ -240,9 +256,7 @@ export default function PostScheduler() {
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge className={STATUS_STYLES[post.status]}>{post.status}</Badge>
                     {post.aiGenerated && (
-                      <Badge className="border-purple-500/50 bg-purple-500/20 text-purple-400">
-                        AI drafted
-                      </Badge>
+                      <Badge className="border-ink/45 bg-ink/10 text-ink">AI drafted</Badge>
                     )}
                   </div>
                   <Button
@@ -272,7 +286,10 @@ export default function PostScheduler() {
                 </p>
 
                 {post.status === "failed" && post.lastError && (
-                  <p className="mt-2 text-sm text-red-400">Facebook said: {post.lastError}</p>
+                  // Explained server-side now, so this is a sentence rather than a
+                  // Graph dump — "Facebook said:" in front of it read like the
+                  // app was quoting an error it hadn't understood.
+                  <p className="mt-2 text-sm text-destructive">{post.lastError}</p>
                 )}
               </CardContent>
             </Card>

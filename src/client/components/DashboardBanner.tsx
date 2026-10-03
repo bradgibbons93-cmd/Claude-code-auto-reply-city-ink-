@@ -1,6 +1,6 @@
 import { Link } from "wouter";
 import { ArrowRight, CalendarDays, MessageCircle, PenLine } from "lucide-react";
-import { StampBadge } from "@/components/Logo";
+import { firstName, useSession } from "@/lib/session";
 
 /**
  * The masthead the dashboard opens on.
@@ -10,9 +10,10 @@ import { StampBadge } from "@/components/Logo";
  * me? So the headline is the state of the queue, not the time of day, and the
  * button only appears when there's something to press it for.
  *
- * The slab stays dark in both themes — a hero that flips to paper in light
- * mode stops reading as a banner — and takes its accent from the theme, so it
- * carries the studio's gold on the light side and the violet on the dark.
+ * The slab stays dark in both modes — a hero that flips to paper in light
+ * mode stops reading as a banner — and takes its accent from the studio's
+ * theme. The name, the studio and the photo behind it all come from the
+ * account; nothing here is written in for one studio any more.
  */
 export default function DashboardBanner({
   greeting,
@@ -26,6 +27,9 @@ export default function DashboardBanner({
   nextBooking?: { title: string; label: string } | null;
 }) {
   const waiting = pendingCount > 0;
+  // Whose studio this is — never a name written into the code.
+  const { user, studio } = useSession();
+  const who = firstName(user?.name);
 
   return (
     <section
@@ -36,12 +40,36 @@ export default function DashboardBanner({
         color: "rgb(var(--c-banner-fg))",
       }}
     >
-      {/* The badge, oversized and nearly submerged — texture, not decoration.
-          aria-hidden because it repeats the wordmark already in the sidebar. */}
-      <StampBadge
-        aria-hidden="true"
-        className="pointer-events-none absolute -right-10 -top-12 h-64 w-64 opacity-[0.07] sm:-right-4 sm:h-72 sm:w-72"
-      />
+      {/* The studio's own banner photo, behind a fade so the words read. */}
+      {studio?.coverUrl && (
+        <>
+          <img
+            src={studio.coverUrl}
+            alt=""
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-60"
+          />
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background:
+                "linear-gradient(100deg, rgb(var(--c-banner-deep)) 0%, rgb(var(--c-banner-deep) / 0.82) 45%, rgb(var(--c-banner-deep) / 0.25) 100%)",
+            }}
+          />
+        </>
+      )}
+
+      {/* The studio's logo, oversized and nearly submerged — texture, not
+          decoration. aria-hidden because it repeats the sidebar. */}
+      {studio?.logoUrl && !studio.coverUrl && (
+        <img
+          src={studio.logoUrl}
+          alt=""
+          aria-hidden="true"
+          className="pointer-events-none absolute -right-8 -top-10 h-64 w-64 object-contain opacity-[0.08] sm:-right-2 sm:h-72 sm:w-72"
+        />
+      )}
 
       {/* A soft wash of the accent so the slab isn't flat black. */}
       <span
@@ -55,11 +83,12 @@ export default function DashboardBanner({
           className="text-[0.6rem] uppercase tracking-[0.42em]"
           style={{ color: "rgb(var(--c-banner-accent))" }}
         >
-          City Ink · Tattoo Geelong
+          {[studio?.name, studio?.location].filter(Boolean).join(" · ")}
         </p>
 
         <h1 className="mt-3 font-display text-3xl leading-tight tracking-[0.03em] sm:text-4xl">
-          {greeting}, Brad
+          {greeting}
+          {who ? `, ${who}` : ""}
         </h1>
 
         <p className="mt-2 max-w-lg text-sm opacity-70">
